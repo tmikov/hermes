@@ -2393,10 +2393,12 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // Create the Global object.
   Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
-  // The type must be set before either store: setWasmGlobalNumber coerces to
-  // it and is the one numeric writer of value_, so an i32 global never holds
-  // a fractional double however it was constructed, and setI64Value asserts
-  // on it.
+  // The type must be set before any of the three stores below:
+  // setWasmGlobalNumber coerces to it, and every write to an i32, f32 or f64
+  // global's slot goes through it, so such a global never holds an
+  // unnarrowed double however it was constructed; setI64Value asserts on it;
+  // and setValue requires the caller to have made the value canonical for it,
+  // which for a reference is the reference itself.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
   if (isRef) {
@@ -2494,11 +2496,10 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   // implemented rather than not allowed.
   //
   // It is here because the alternative is worse. A mutable reference-typed
-  // Global is constructible as of this commit, and the rest of this function
-  // coerces with toNumber_RJS -- which would turn an externref object into
-  // NaN and store that Number in a reference slot, tripping
-  // setWasmGlobalNumber's assertion: a Debug abort, and a silent no-op in a
-  // release build.
+  // Global is constructible now, and the rest of this function coerces with
+  // toNumber_RJS -- which would turn an externref object into NaN and store
+  // that Number in a reference slot, tripping setWasmGlobalNumber's
+  // assertion: a Debug abort, and a silent no-op in a release build.
   //
   // The per-type dispatch that replaces this (externref stored as it stands,
   // funcref validated as null or an Exported Function) is the setter's own
@@ -2573,9 +2574,9 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   if (hasSetter) {
     // ToNumber has run; the closure narrows to the declared Wasm type in IR
     // with AsInt32Inst for i32 and emitFround for f32 -- the instructions
-    // coerceImportedGlobalValue (WasmIRGen.cpp:7736) uses, NOT the module's
-    // own global.set, which narrows nothing and stores an already-typed
-    // value (WasmIRGen.cpp:7884). A live global and a snapshot one must
+    // WasmIRGen::coerceImportedGlobalValue uses, NOT the module's own
+    // global.set (WasmIRGen::onGlobalSet), which narrows nothing and stores
+    // an already-typed value. A live global and a snapshot one must
     // coerce identically, and setWasmGlobalNumber is what a snapshot does.
     auto res = Callable::executeCall1(
         lv.fn,

@@ -2402,40 +2402,49 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 ///   -> the matched Global object, or the global's value, or undefined, or
 ///   null.
 ///
-/// Four outcomes, deliberately distinguishable, because they call for
-/// different diagnostics (or, for the first two, different handling by the
-/// caller) and collapsing them names the one thing that was not wrong:
-///   - null: `importVal` is not a WebAssembly.Global at all. The caller then
-///     decides whether a raw JS value is acceptable for this import, which
-///     depends on the declaration and not on the value.
-///   - undefined: it IS a Global, but its value type or its mutability does
-///     not match the declaration.
-///   - the matched Global object itself: the type and mutability match and
-///     the global is LIVE -- it has no value of its own to return, its
-///     storage is another module's frame slot reached through its closures.
-///     A live global is always mutable, so only a mutable import can produce
-///     this outcome, and `WasmIRGen.cpp` keeps the object rather than this
-///     return value for a mutable import regardless, so the object is what
-///     the caller needed anyway.
-///   - anything else: the global's current value -- a Number for i32/f32/f64,
-///     a BigInt for i64, the reference itself for externref/funcref. A
-///     snapshot global is never LIVE, so this outcome and the previous one
-///     cannot be confused.
+/// Five branches, four answers. They are kept apart because they call for
+/// different diagnostics -- and, between null and undefined, different
+/// handling by the caller -- and collapsing them names the one thing that was
+/// not wrong. Each is a CONDITION, in the order the body tests them:
+///   - null, when `importVal` is not a WebAssembly.Global at all. The caller
+///     then decides whether a raw JS value is acceptable for this import,
+///     which depends on the declaration and not on the value.
+///   - null again, when the two literals `WasmIRGen` emits alongside the call
+///     are not a Number and a bool. That is a broken compiler contract rather
+///     than a rejected import, and "not a usable global" is the fail-closed
+///     answer; see the comment on that check.
+///   - undefined, when it IS a Global but its value type or its mutability
+///     does not match the declaration. BOTH halves are compared, so a
+///     reference-typed Global no more satisfies a numeric declaration than
+///     the other way round.
+///   - the matched Global object itself, when both match and the global is
+///     LIVE -- it has no value of its own to return, its storage is another
+///     module's frame slot reached through its closures. A live global is
+///     always mutable, so only a mutable import reaches this branch, and
+///     `WasmIRGen.cpp` keeps the object rather than this return value for a
+///     mutable import regardless, so the object is what the caller needed
+///     anyway.
+///   - otherwise the global's current value: a Number for i32/f32/f64, a
+///     BigInt for i64, the reference itself for externref/funcref. A snapshot
+///     global is never LIVE, so this branch and the previous one cannot be
+///     confused.
 ///
-/// THE TWO SENTINELS ARE AMBIGUOUS FOR A REFERENCE TYPE, and were not while
-/// a Wasm global's value could only be a Number or a BigInt. `null` and
-/// `undefined` are both legal values of an externref global, and `null` of a
-/// funcref one, so a Global holding `undefined` is reported as a type
-/// mismatch and one holding `null` as not being a Global at all -- two false
-/// diagnostics that this function cannot currently avoid. It is reachable:
-/// WasmIRGen maps ExternRef and FuncRef to codes 4 and 5 and emits them, this
-/// function does not bound the code, and both routes now build Globals
-/// carrying a reference.
+/// The four answers tell those branches apart FOR A NUMERIC TYPE. They do not
+/// for a reference type, and this is the one place where the protocol is
+/// currently wrong rather than merely partial.
+///
+/// `null` and `undefined` are both legal values of an externref global, and
+/// `null` of a funcref one, so the last branch can return either sentinel: a
+/// snapshot holding `undefined` is indistinguishable from a type mismatch,
+/// and one holding `null` from something that is not a Global at all. Two
+/// false diagnostics, and this function cannot avoid them -- the collision is
+/// in what it returns, not in what it checks. It was not a collision while a
+/// Wasm global's value could only be a Number or a BigInt.
 /// TODO: the link-path task of the reference-types plan replaces the protocol
-/// with the matched-OBJECT answer the live-global outcome already uses, which
-/// has no such collision because a WebAssembly.Global is never null or
-/// undefined. Until then, this function's answer is not reliable for a
-/// reference-typed declaration.
+/// with the matched-OBJECT answer the live branch already uses, which cannot
+/// collide because a WebAssembly.Global is never null or undefined. Until
+/// then, a value returned for a reference-typed declaration is not reliably
+/// distinguishable from the two failure answers.
 ///
 /// This replaced a `__wasm_type__` string comparison, and a global is the one
 /// kind where that comparison was not merely weak but useless: the string was
@@ -2446,9 +2455,11 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 /// type this engine has no Global representation for (currently only v128).
 /// A reference type has a ValType of its own -- ExternRef is 4, FuncRef is 5
 /// -- and Globals carrying one ARE constructed, by the JS constructor and by
-/// wasmMakeGlobal both, so a reference-typed declaration matches and reaches
-/// the value outcome. What that outcome cannot express is the ambiguity
-/// above.
+/// wasmMakeGlobal both, so a reference-typed declaration CAN now match. It is
+/// not thereby answered with a value: a mismatched type or mutability still
+/// takes the undefined branch and a matching live Global still returns the
+/// object. It is when it does reach the value branch that the collision above
+/// applies.
 CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
@@ -2516,8 +2527,8 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
   // otherwise (HermesValue.h:430-436), so NaN, an infinity or a negative
   // would abort a Debug build and be undefined in a release one -- and any
   // bytecode can call a private builtin with any argument. (wasmLinkGlobal
-  // at HermesBuiltin.cpp:2387 has the same shape and predates this; worth
-  // its own fix, not this one's.)
+  // above reads its type code the same way and predates this; worth its own
+  // fix, not this one's.)
   double rawCode = args.getArg(0).getNumber();
   if (LLVM_UNLIKELY(
           !(rawCode >= 0) ||
@@ -2787,12 +2798,12 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   // it throws here for now. That is a gap, not a rule, which is why the
   // message says the write is not implemented rather than not allowed.
   //
-  // It is here because the alternative is worse. As of this commit a JS
-  // caller can build a mutable reference-typed WebAssembly.Global and a
-  // module can import it -- one .wat and one line of JS reach this function
-  // with one -- and a Number would otherwise pass the check below and reach
-  // setWasmGlobalNumber, whose reference arms assert: a Debug abort, and a
-  // silent no-op in a release build.
+  // It is here because the alternative is worse. A JS caller can now build a
+  // mutable reference-typed WebAssembly.Global and a module can import it --
+  // one .wat and one line of JS reach this function with one -- and a Number
+  // would otherwise pass the check below and reach setWasmGlobalNumber, whose
+  // reference arms assert: a Debug abort, and a silent no-op in a release
+  // build.
   //
   // The per-type dispatch this becomes (externref stored as it stands,
   // funcref validated as null or an Exported Function, both before any
@@ -2847,13 +2858,15 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     return HermesValue::encodeUndefinedValue();
   }
-  // setWasmGlobalNumber, not setValue: it is the one NUMERIC writer of
-  // value_, so an i32 global's slot is int32-valued and an f32 global's
-  // float-valued whichever of the three writers wrote it. The values
-  // generated code pushes here are already in that form, so this cannot be
-  // observed to do anything -- it makes the invariant a property of the
-  // setter rather than of the whole compiler, and keeps the three writers
-  // from drifting apart.
+  // setWasmGlobalNumber, not setValue: every write to an i32, f32 or f64
+  // global's slot goes through it and is narrowed there, so an i32 global's
+  // slot is int32-valued and an f32 global's float-valued whichever writer
+  // wrote it. (A reference-typed global's slot is written with setValue
+  // instead, which narrows nothing because there is nothing to narrow; the
+  // branch above refuses to reach here with one.) The values generated code
+  // pushes here are already in that form, so this cannot be observed to do
+  // anything -- it makes the invariant a property of the setter rather than
+  // of the whole compiler, and keeps the writers from drifting apart.
   setWasmGlobalNumber(runtime, glob, val.getNumber());
   return HermesValue::encodeUndefinedValue();
 }
