@@ -59,15 +59,22 @@ static Handle<> makeJSClosure(Runtime &runtime) {
 /// \return a REAL WebAssembly Exported Function: a module compiled and
 /// instantiated at run time, with its export read off the exports object.
 ///
-/// This is the object the predicate exists to recognise, and it is worth the
-/// trouble of building because it is not the shape any hand-rolled subject
-/// has. WasmIRGen builds each export wrapper with createCreateFunctionInst
-/// (WasmIRGen.cpp), so a wrapper is an ordinary JSFunction closure; a
-/// predicate that restricted itself to NativeFunction would accept every
-/// hand-built subject in this file and reject every real export.
+/// The only subject in this file with genuine wrapper provenance. WasmIRGen
+/// builds each export wrapper with createCreateFunctionInst (WasmIRGen.cpp)
+/// and brands it through the generated wasmSetFuncInfo call, so this object is
+/// both the right kind -- an ordinary JSFunction closure -- and branded the way
+/// production code brands one. Every other subject here is a brand applied by
+/// hand to an object built for the test.
+///
+/// What made it necessary: the EARLIER version of these tests built every
+/// subject with NativeFunction::create, so a predicate narrowed to
+/// `vmisa<NativeFunction>` would have passed the whole file while rejecting
+/// every real export. The branded closure in the test below now defeats that
+/// mutation on its own; this subject is what keeps the tests anchored to the
+/// real object rather than to a reconstruction of it.
 ///
 /// The bytes are `(module (func (export "f") (result i32) (i32.const 42)))`
-/// as compiled by wat2wasm -- the smallest module with an exported function.
+/// as compiled by wat2wasm -- a small module with an exported function.
 static Handle<> makeRealExport(Runtime &runtime) {
   return evalExpr(runtime, R"JS(
     var bytes = new Uint8Array([
@@ -147,12 +154,17 @@ TEST_F(WasmBuiltinTest, WasmIsExportedFunctionPredicate) {
 
   EXPECT_TRUE(ask(exportedFn));
 
-  // The object kind the predicate actually exists to recognise. Every other
-  // subject in this test is hand-built and none of them has a real wrapper's
-  // shape: WasmIRGen builds each export wrapper with createCreateFunctionInst,
-  // so it is an ordinary JSFunction closure. Without this case a predicate
-  // narrowed to NativeFunction would pass the whole test and reject every
-  // real export.
+  // The object the predicate actually exists to recognise, and the only
+  // subject here with real wrapper provenance: WasmIRGen builds each export
+  // wrapper with createCreateFunctionInst and brands it through the generated
+  // wasmSetFuncInfo call, so this is a JSFunction closure that became an
+  // Exported Function the way production code makes one.
+  //
+  // The earlier version of this test built every subject with
+  // NativeFunction::create, so a predicate narrowed to NativeFunction would
+  // have passed it while rejecting every real export. The branded closure
+  // below now catches that too; this case is what ties the test to the real
+  // object.
   auto realExport = makeRealExport(runtime);
   ASSERT_TRUE(vmisa<JSFunction>(*realExport))
       << "an export wrapper should be an ordinary JS closure";
