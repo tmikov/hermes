@@ -63,8 +63,8 @@ static Handle<> makeJSClosure(Runtime &runtime) {
 /// builds each export wrapper with createCreateFunctionInst (WasmIRGen.cpp)
 /// and brands it through the generated wasmSetFuncInfo call, so this object is
 /// both the right kind -- an ordinary JSFunction closure -- and branded the way
-/// production code brands one. Every other subject here is a brand applied by
-/// hand to an object built for the test.
+/// production code brands one. Its brand was applied by the module's own
+/// generated code, not by this test calling wasmSetFuncInfo.
 ///
 /// What made it necessary: the EARLIER version of these tests built every
 /// subject with NativeFunction::create, so a predicate narrowed to
