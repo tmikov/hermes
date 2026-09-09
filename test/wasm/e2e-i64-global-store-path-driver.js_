@@ -1,0 +1,105 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-global-store-path.wat.
+//
+// Every loop below allocates something other than the global between two
+// stores, so that under -gc-sanitize-handles=1 the heap has moved by the time
+// the next store and read-back happen. A store that held its destination raw
+// across the BigInt allocation, or a value_ slot missing from the cell's
+// metadata, is then a wrong read-back rather than a value that happens to
+// survive.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+var N = 250;
+var STRIDE = 0x100000001n; // A non-zero upper word AND a non-zero lower one.
+
+// 1. The constructor's store. Each iteration builds a fresh Global, so the
+//    destination is a just-allocated cell that the BigInt allocation can
+//    still move.
+var globals = [];
+for (var i = 1; i <= N; i++) {
+  globals.push(
+    new WebAssembly.Global({value: 'i64', mutable: true}, BigInt(i) * STRIDE));
+}
+var ok = true;
+for (var i = 1; i <= N; i++) {
+  if (globals[i - 1].value !== BigInt(i) * STRIDE) {
+    ok = false;
+    print('constructor mismatch at ' + i + ': ' + globals[i - 1].value);
+    break;
+  }
+}
+print('constructor stores intact: ' + ok);
+
+// 2. The public `.value` setter, overwriting one global repeatedly.
+var g = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
+ok = true;
+for (var i = 1; i <= N; i++) {
+  var want = BigInt(i) * STRIDE;
+  g.value = want;
+  var junk = {i: i, a: [i, i + 1, i + 2]}; // Move the heap between stores.
+  if (g.value !== want) {
+    ok = false;
+    print('public setter mismatch at ' + i + ': ' + g.value);
+    break;
+  }
+}
+print('public setter stores intact: ' + ok);
+print('public setter final value: ' + g.value);
+
+// 3. The internal setter: the module writes the imported mutable global with
+//    global.set, which for a snapshot Global reaches the allocating store
+//    from inside generated code rather than from a native accessor.
+var acc = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
+var ex = new WebAssembly.Instance(mod, {e: {acc: acc}}).exports;
+var sum = 0n;
+ok = true;
+for (var i = 1; i <= N; i++) {
+  ex.add(STRIDE);
+  sum += STRIDE;
+  var junk2 = [i, {n: i}]; // Move the heap between stores.
+  if (acc.value !== sum) {
+    ok = false;
+    print('internal setter mismatch at ' + i + ': ' + acc.value);
+    break;
+  }
+}
+print('internal setter stores intact: ' + ok);
+print('internal setter final lo/hi: ' + ex.lo() + '/' + ex.hi());
+
+// 4. wasmMakeGlobal's snapshot store, once per instantiation. Fewer rounds
+//    than the loops above: instantiation is far more expensive than a single
+//    store, and this is the same allocating store reached from a third
+//    caller, not a different one.
+var SEED = 0x0123456789abcdefn;
+ok = true;
+var lastSeed = 0n;
+for (var i = 1; i <= 20; i++) {
+  var a = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
+  var ex2 = new WebAssembly.Instance(mod, {e: {acc: a}}).exports;
+  lastSeed = ex2.seed.value;
+  if (lastSeed !== SEED) {
+    ok = false;
+    print('wasmMakeGlobal mismatch at ' + i + ': ' + lastSeed);
+    break;
+  }
+}
+print('wasmMakeGlobal snapshot stores intact: ' + ok);
+print('wasmMakeGlobal snapshot value: ' + lastSeed);
+
+// Wrapping to 64 bits, asserted separately: it is about truncation at store
+// time, not about allocation or rooting.
+var w = new WebAssembly.Global({value: 'i64', mutable: true}, 2n ** 100n + 5n);
+print('constructor wraps: ' + w.value);
+w.value = 2n ** 100n + 7n;
+print('public setter wraps: ' + w.value);
+w.value = 2n ** 64n - 1n;
+print('public setter wraps negative: ' + w.value);
+print('done');

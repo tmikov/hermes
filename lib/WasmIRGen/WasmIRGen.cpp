@@ -63,23 +63,27 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
   return s;
 }
 
-/// Map a WasmValType to the numeric code wasmLinkGlobal compares against.
+/// Map a WasmValType to the numeric code wasmLinkGlobal and wasmMakeGlobal
+/// compare against.
 /// The codes are JSWebAssemblyGlobal::ValType, which is the enum stored in a
 /// WebAssembly.Global's internal field; they are spelled out here rather than
 /// included so that the Wasm frontend does not depend on a VM header. That
 /// makes them an ABI between two files that cannot see each other, so
-/// JSWebAssemblyGlobal.h carries static_asserts pinning the four values and
+/// JSWebAssemblyGlobal.h carries static_asserts pinning the six values and
 /// naming this function -- reordering the enum is a build error, not a
 /// silently wrong type check.
-/// 0xFF is "a Wasm type no Global can have" -- every reference type, and
-/// v128. It matches nothing, which is exactly the old behaviour: no
-/// __wasm_type__ string the Global constructor wrote ever named one either.
+/// 0xFF remains "a Wasm type no Global can have", which is now only v128; it
+/// matches nothing, and v128 is diagnosed before it gets this far anyway.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32
     case WasmValType::I64: return 1; // JSWebAssemblyGlobal::ValType::I64
     case WasmValType::F32: return 2; // JSWebAssemblyGlobal::ValType::F32
     case WasmValType::F64: return 3; // JSWebAssemblyGlobal::ValType::F64
+    // JSWebAssemblyGlobal::ValType::ExternRef
+    case WasmValType::ExternRef: return 4;
+    // JSWebAssemblyGlobal::ValType::FuncRef
+    case WasmValType::FuncRef: return 5;
     default: return 0xFF;
   }
 }
@@ -7907,8 +7911,9 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
       // This coercion IS A NO-OP on this path and is kept deliberately.
       // Read that as a statement about scope, not about trust: the value now
       // comes out of value_ through wasmGlobalGet, and setWasmGlobalNumber is
-      // the only writer of that field, so it is already an int32-valued
-      // double for an i32 global and float-representable for an f32 one --
+      // the only NUMERIC writer of that slot, so it is already an
+      // int32-valued double for an i32 global and float-representable for an
+      // f32 one --
       // and wasmLinkGlobal refused the import unless the Global's type
       // matched the declaration. Measured: deleting it here leaves every
       // behavioural test green, and fails only irgen-global-mutable-shared

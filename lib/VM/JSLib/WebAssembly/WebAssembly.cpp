@@ -2241,15 +2241,23 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // Create the Global object.
   Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
+  // The type must be set before either store: setWasmGlobalNumber coerces to
+  // it and is the one numeric writer of value_, so an i32 global never holds
+  // a fractional double however it was constructed, and setI64Value asserts
+  // on it.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
-  lv.glob->setI64Value(initI64);
-  // The type must already be set: setWasmGlobalNumber coerces to it, and it
-  // is the one place value_ is written, so an i32 global never holds a
-  // fractional double however it was constructed. i64 keeps initValue at 0
-  // and carries its value in i64Value_ above.
-  if (valType != JSWebAssemblyGlobal::ValType::I64)
-    setWasmGlobalNumber(lv.glob.get(), initValue);
+  if (valType == JSWebAssemblyGlobal::ValType::I64) {
+    // An allocating store now -- the slot holds the BigInt itself rather than
+    // a scalar -- so it needs a rooted destination and can fail. lv.glob is
+    // that root.
+    if (LLVM_UNLIKELY(
+            JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, initI64) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  } else {
+    setWasmGlobalNumber(runtime, lv.glob.get(), initValue);
+  }
 
   // NOTHING IS PUBLISHED ON THE GLOBAL. It used to carry one ordinary,
   // writable, enumerable own property, __wasm_type__, holding a string such
@@ -2297,13 +2305,10 @@ wasmGlobalValueGetter(void *context, Runtime &runtime) {
     return res->getHermesValue();
   }
 
-  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
-    // Exact, and a BigInt as the spec requires. Returning the low 32 bits as
-    // a Number would silently discard the upper half.
-    return BigIntPrimitive::fromSigned(runtime, glob->getI64Value());
-  }
-
-  return HermesValue::encodeTrustedNumberValue(glob->getValue());
+  // The slot is canonical for valType_ -- a Number for i32/f32/f64, and for
+  // i64 the BigInt the spec requires, wrapped at store time -- so the answer
+  // is the slot, with no per-type dispatch and nothing allocated here.
+  return glob->getValue();
 }
 
 /// WebAssembly.Global.prototype.value setter.
@@ -2326,6 +2331,7 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<> newVal;
     PinnedValue<Callable> fn;
+    PinnedValue<JSWebAssemblyGlobal> glob;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -2359,9 +2365,16 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
         return ExecutionStatus::EXCEPTION;
       return HermesValue::encodeUndefinedValue();
     }
-    glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
-    glob->setI64Value(
-        static_cast<int64_t>(lv.newVal->getBigInt()->truncateToSingleDigit()));
+    // The store allocates the BigInt, so the destination is pinned rather
+    // than held raw: the digit is read out of lv.newVal first and lv.glob is
+    // what survives the safepoint.
+    int64_t digit =
+        static_cast<int64_t>(lv.newVal->getBigInt()->truncateToSingleDigit());
+    lv.glob.castAndSetHermesValue<JSWebAssemblyGlobal>(args.getThisArg());
+    if (LLVM_UNLIKELY(
+            JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, digit) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
     return HermesValue::encodeUndefinedValue();
   }
 
@@ -2388,7 +2401,7 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     return HermesValue::encodeUndefinedValue();
   }
-  setWasmGlobalNumber(glob, numRes->getDouble());
+  setWasmGlobalNumber(runtime, glob, numRes->getDouble());
   return HermesValue::encodeUndefinedValue();
 }
 

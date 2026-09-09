@@ -567,12 +567,21 @@ ExecutionStatus setWasmTableSlot(
 /// wasmLinkGlobal hand that field straight to generated code, which treats an
 /// i32 global's value as an int32 everywhere downstream.
 ///
-/// Must not be called on an i64 global: its value lives in i64Value_, because
-/// a double cannot represent every i64 exactly. Defined in HermesBuiltin.cpp,
-/// which unlike WebAssembly.cpp is compiled whether or not HERMES_ENABLE_WASM
-/// is set -- the wasm* builtins that call it are.
+/// Must not be called on an i64 global, whose slot holds a BigInt, nor on a
+/// reference-typed one, whose slot holds the reference. Those rows of the
+/// value_ table have their own writers; this one owns the numeric rows.
+/// Defined in HermesBuiltin.cpp, which unlike WebAssembly.cpp is compiled
+/// whether or not HERMES_ENABLE_WASM is set -- the wasm* builtins that call
+/// it are.
+///
+/// Takes a Runtime & because the slot is a GCHermesValue and its store goes
+/// through the write barrier. It still does not allocate, so \p glob may be a
+/// raw pointer.
 class JSWebAssemblyGlobal;
-void setWasmGlobalNumber(JSWebAssemblyGlobal *glob, double val);
+void setWasmGlobalNumber(
+    Runtime &runtime,
+    JSWebAssemblyGlobal *glob,
+    double val);
 #endif
 
 } // namespace vm

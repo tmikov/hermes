@@ -953,8 +953,9 @@ class WasmIRGen {
   ///
   /// The second reason this comment used to give -- a mutable import being
   /// read at every global.get through the replaceable `.value` accessor -- is
-  /// GONE: that read is the wasmGlobalGet builtin now, and the field it
-  /// returns is written only by setWasmGlobalNumber, which canonicalises it.
+  /// GONE: that read is the wasmGlobalGet builtin now, and for a numeric
+  /// global the slot it returns is written only by setWasmGlobalNumber, which
+  /// canonicalises it.
   /// The call on the mutable global.get path is therefore a no-op; it is kept
   /// only so that its retirement happens once, with J4, rather than in two
   /// places. Do not read its presence there as evidence that the value is
