@@ -2418,9 +2418,24 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 ///     return value for a mutable import regardless, so the object is what
 ///     the caller needed anyway.
 ///   - anything else: the global's current value -- a Number for i32/f32/f64,
-///     a BigInt for i64. A Wasm global's value is never null or undefined, so
-///     neither sentinel is ambiguous, and a snapshot global is never
-///     LIVE, so this outcome and the previous one cannot be confused either.
+///     a BigInt for i64, the reference itself for externref/funcref. A
+///     snapshot global is never LIVE, so this outcome and the previous one
+///     cannot be confused.
+///
+/// THE TWO SENTINELS ARE AMBIGUOUS FOR A REFERENCE TYPE, and were not while
+/// a Wasm global's value could only be a Number or a BigInt. `null` and
+/// `undefined` are both legal values of an externref global, and `null` of a
+/// funcref one, so a Global holding `undefined` is reported as a type
+/// mismatch and one holding `null` as not being a Global at all -- two false
+/// diagnostics that this function cannot currently avoid. It is reachable:
+/// WasmIRGen maps ExternRef and FuncRef to codes 4 and 5 and emits them, this
+/// function does not bound the code, and both routes now build Globals
+/// carrying a reference.
+/// TODO: the link-path task of the reference-types plan replaces the protocol
+/// with the matched-OBJECT answer the live-global outcome already uses, which
+/// has no such collision because a WebAssembly.Global is never null or
+/// undefined. Until then, this function's answer is not reliable for a
+/// reference-typed declaration.
 ///
 /// This replaced a `__wasm_type__` string comparison, and a global is the one
 /// kind where that comparison was not merely weak but useless: the string was
@@ -2429,10 +2444,11 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 ///
 /// \p expectedValType is a JSWebAssemblyGlobal::ValType, or 0xFF for a Wasm
 /// type this engine has no Global representation for (currently only v128).
-/// A reference type now has a ValType of its own -- ExternRef is 4, FuncRef
-/// is 5 -- but nothing yet CONSTRUCTS a Global carrying one, so a
-/// reference-typed declaration still matches nothing and the outcome is
-/// unchanged.
+/// A reference type has a ValType of its own -- ExternRef is 4, FuncRef is 5
+/// -- and Globals carrying one ARE constructed, by the JS constructor and by
+/// wasmMakeGlobal both, so a reference-typed declaration matches and reaches
+/// the value outcome. What that outcome cannot express is the ambiguity
+/// above.
 CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
@@ -2766,15 +2782,24 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   }
 
   HermesValue val = args.getArg(1);
-  // INTERIM, and deliberately fail-closed. As of this commit a JS caller can
-  // build a mutable reference-typed WebAssembly.Global and a module can
-  // import it, so this function is reachable with one -- and a Number would
-  // otherwise pass the check below and reach setWasmGlobalNumber, whose
-  // reference arms assert. The per-type dispatch this becomes (externref
-  // stored as it stands, funcref validated as null or an Exported Function,
-  // both before any closure invocation) is the internal setter's own task in
-  // the reference-types plan; refusing is what keeps every commit before it
-  // honest.
+  // INTERIM, and deliberately fail-closed. THIS REFUSES A LEGAL OPERATION:
+  // `global.set` on an imported mutable externref global is valid Wasm, and
+  // it throws here for now. That is a gap, not a rule, which is why the
+  // message says the write is not implemented rather than not allowed.
+  //
+  // It is here because the alternative is worse. As of this commit a JS
+  // caller can build a mutable reference-typed WebAssembly.Global and a
+  // module can import it -- one .wat and one line of JS reach this function
+  // with one -- and a Number would otherwise pass the check below and reach
+  // setWasmGlobalNumber, whose reference arms assert: a Debug abort, and a
+  // silent no-op in a release build.
+  //
+  // The per-type dispatch this becomes (externref stored as it stands,
+  // funcref validated as null or an Exported Function, both before any
+  // closure invocation) is the internal setter's own task in the
+  // reference-types plan. Deleting these three lines is that task's, and
+  // e2e-global-ref-construct.wat pins the behaviour so the deletion is a
+  // visible change rather than a silent one.
   if (LLVM_UNLIKELY(
           glob->getValType() == JSWebAssemblyGlobal::ValType::ExternRef ||
           glob->getValType() == JSWebAssemblyGlobal::ValType::FuncRef))

@@ -2487,13 +2487,25 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
         "WebAssembly.Global.prototype.value: cannot set an immutable global");
   }
 
-  // INTERIM, and deliberately fail-closed. A mutable reference-typed Global
-  // is constructible as of this commit, and the rest of this function
+  // INTERIM, and deliberately fail-closed. THIS REFUSES A LEGAL WRITE:
+  // `new WebAssembly.Global({value: 'externref', mutable: true}).value = x`
+  // is a legal assignment for any x, and it throws here for now. That is a
+  // gap, not a rule, which is why the message says the write is not
+  // implemented rather than not allowed.
+  //
+  // It is here because the alternative is worse. A mutable reference-typed
+  // Global is constructible as of this commit, and the rest of this function
   // coerces with toNumber_RJS -- which would turn an externref object into
-  // NaN and then store that Number in a reference slot, tripping
-  // setWasmGlobalNumber's assertion. The per-type dispatch that replaces
-  // this (externref stored as it stands, funcref validated as null or an
-  // Exported Function) is the setter's own task in the reference-types plan.
+  // NaN and store that Number in a reference slot, tripping
+  // setWasmGlobalNumber's assertion: a Debug abort, and a silent no-op in a
+  // release build.
+  //
+  // The per-type dispatch that replaces this (externref stored as it stands,
+  // funcref validated as null or an Exported Function) is the setter's own
+  // task in the reference-types plan. Deleting this block is that task's, and
+  // e2e-global-ref-construct.wat pins the behaviour -- including its
+  // precedence against the immutability check above -- so the deletion is a
+  // visible change rather than a silent one.
   if (glob->getValType() == JSWebAssemblyGlobal::ValType::ExternRef ||
       glob->getValType() == JSWebAssemblyGlobal::ValType::FuncRef) {
     return runtime.raiseTypeError(

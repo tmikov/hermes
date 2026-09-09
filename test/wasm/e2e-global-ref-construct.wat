@@ -15,23 +15,45 @@
 ;; wasmMakeGlobal mode change is exercised through the compiler as well: an
 ;; immutable global export takes the SNAPSHOT arm and a mutable one the LIVE
 ;; arm, which are now selected by isMutable rather than by whether the value
-;; happens to be callable.
+;; happens to be callable. Its externref global IMPORT is how generated code
+;; reaches a reference-typed global at all: the driver supplies a JS-built
+;; Global for it, so instantiating is itself an assertion that one links.
 ;;
 ;; It runs with -gc-sanitize-handles=1 because the funcref brand check
 ;; ALLOCATES -- isWasmExportedFunction reaches HiddenClass::findPropertyNoMap,
 ;; which initializes a missing property map -- and because an externref
-;; global's value is the first GC POINTER a Global's value slot has ever held.
-;; The loops in the driver allocate between constructions so that a raw
-;; pointer held across either would be a use-after-free rather than a value
-;; that happened to survive. In a build without HERMESVM_SANITIZE_HANDLES the
-;; flag is ignored and this is an ordinary behavioural test.
+;; global's value is a GC pointer written and read through paths that did not
+;; exist before. The loops in the driver allocate between constructions so
+;; that a raw pointer held across either would be a use-after-free rather than
+;; a value that happened to survive. In a build without
+;; HERMESVM_SANITIZE_HANDLES the flag is ignored and this is an ordinary
+;; behavioural test.
+;;
+;; Some cases below pin INTERIM behaviour -- the ones whose expected message
+;; says a write is "not implemented yet". Both setters refuse a
+;; reference-typed global outright for now, which means a legal operation
+;; currently throws. It is pinned here so that the setter task's deletion of
+;; those refusals is a visible change with a test to update rather than a
+;; silent one. Those cases are to be rewritten then, not routed around.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js -gc-sanitize-handles=1 %S/e2e-global-ref-construct-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
+  ;; A mutable externref global import, satisfied by a JS-built
+  ;; WebAssembly.Global -- the route by which generated code reaches the
+  ;; internal setter with a reference-typed global.
+  (import "e" "ref" (global $eref (mut externref)))
+
   (func (export "add") (param i32 i32) (result i32)
     (i32.add (local.get 0) (local.get 1)))
+
+  ;; The read direction works: global.get on the import hands the host's own
+  ;; value back. The write direction is refused for now; see the header.
+  (func (export "get_ref") (result externref)
+    (global.get $eref))
+  (func (export "put_ref") (param externref)
+    (global.set $eref (local.get 0)))
 
   (global (export "g_const") i32 (i32.const 42))
   (global $mut (export "g_mut") (mut i32) (i32.const 100))
@@ -45,21 +67,30 @@
 
 ;; The expected output. It lives here rather than in the driver because
 ;; FileCheck reads this file.
-;; CHECK: fixture: function 5
-;; CHECK-NEXT: externref default: undefined / undefined
+;; CHECK: externref default: undefined / undefined
 ;; CHECK-NEXT: anyfunc default: null / object
 ;; CHECK-NEXT: funcref: TypeError: WebAssembly.Global(): 'funcref' is not a value type in the JS API; use 'anyfunc'
 ;; CHECK-NEXT: v128: TypeError: WebAssembly.Global(): 'v128' requires SIMD, which is not supported
 ;; CHECK-NEXT: bogus: TypeError: WebAssembly.Global(): 'value' must be 'i32', 'i64', 'f32', 'f64', 'externref' or 'anyfunc'
-;; CHECK-NEXT: anyfunc from a real export: true
 ;; CHECK-NEXT: anyfunc null: null
 ;; CHECK-NEXT: anyfunc from a plain function: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc explicit undefined: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc from an object: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: externref stores every JS value as it stands: true
-;; CHECK-NEXT: mutable reference snapshots: true true
-;; CHECK-NEXT: funcref constructions intact: true
+;; CHECK-NEXT: mutable reference snapshots hold their value: true true
+;; CHECK-NEXT: immutable externref write: TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
+;; CHECK-NEXT: mutable externref write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
+;; CHECK-NEXT: mutable anyfunc write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
+;; CHECK-NEXT: mutable numeric snapshot round-trips: 2
 ;; CHECK-NEXT: externref values traced across collections: true
+;; CHECK-NEXT: fixture: function 5
+;; CHECK-NEXT: anyfunc from a real export: true
+;; CHECK-NEXT: externref holds an export too: true
+;; CHECK-NEXT: funcref constructions intact: true
 ;; CHECK-NEXT: g_const: 42 TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
 ;; CHECK-NEXT: g_mut: 100 / 100
 ;; CHECK-NEXT: g_mut after a host write: 7 / 7
+;; CHECK-NEXT: global.get sees the host value: true
+;; CHECK-NEXT: put_ref an object: TypeError: Wasm global.set: writing a reference-typed global is not implemented yet
+;; CHECK-NEXT: put_ref a number: TypeError: Wasm global.set: writing a reference-typed global is not implemented yet
+;; CHECK-NEXT: the host value is untouched: true
