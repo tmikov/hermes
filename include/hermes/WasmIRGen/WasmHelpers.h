@@ -350,8 +350,10 @@ class WasmHelpers {
 
   /// Emit wasmIsExportedFunction: yield a boolean saying whether \p value is a
   /// WebAssembly Exported Function -- the brand wasmSetFuncInfo stamps, asked
-  /// from generated IR, which has no other way to ask it. Answers for any
-  /// argument rather than throwing, `null` and `undefined` included.
+  /// as a question. The builtin exists because the C++ helper that decides it,
+  /// isWasmExportedFunction, is not callable from generated IR; see the note
+  /// on the builtin in Builtins.def. Answers for any argument rather than
+  /// throwing, `null` and `undefined` included.
   Instruction *emitIsExportedFunction(Value *value);
 
   /// Emit wasmGlobalGet / wasmGlobalSet: read or write the shared value of an

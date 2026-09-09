@@ -21,7 +21,12 @@
 ;; e2e-global-ref-import.wat covers the collision, on snapshot Globals.
 ;;
 ;; The consumer is a separate module: an import is what puts the Global on
-;; the importing module's re-export path at all.
+;; the importing module's re-export path at all. It also carries the MUTABLE
+;; half of the sentinel table -- a mutable declaration satisfied by a mutable
+;; SNAPSHOT Global holding `null` or `undefined`, which the old link protocol
+;; refused as "not a WebAssembly.Global" and as a type mismatch respectively.
+;; The immutable half is in e2e-global-ref-import.wat, which has no mutable
+;; declaration to satisfy.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-global-ref-mut-reexport-consumer.wat_ -o %t-con.wasm && %hermesc --wasm -emit-binary -out %t-con.hbc %t-con.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-global-ref-mut-reexport-driver.js_ -- %t.hbc %t-con.hbc | %FileCheck --match-full-lines %s
@@ -48,4 +53,11 @@
 ;; CHECK-NEXT: a consumer write reaches the re-export: true
 ;; CHECK-NEXT: an exporter write reaches the consumer: true
 ;; CHECK-NEXT: the re-export is still the same object: true
+
+;; The mutable rows of the sentinel table. Each links, keeps the object, and
+;; then has its sentinel written over so that the value is shown to have been
+;; the sentinel rather than absent.
+;; CHECK-NEXT: mutable declaration <- mutable snapshot holding null: true true
+;; CHECK-NEXT: ...and one holding undefined: true true
+;; CHECK-NEXT: ...whose value the module then replaces: true true
 ;; CHECK-NEXT: done

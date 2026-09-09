@@ -16,19 +16,28 @@
 var args = hermescli.getScriptArgs();
 var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
 
-// One instantiation per import triple. The module has three imports, so
-// every case supplies all three and asserts on the ones it is about.
-function link(a, b, f) {
-  return new WebAssembly.Instance(mod, {e: {a: a, b: b, f: f}}).exports;
+function instantiate(importObject) {
+  return new WebAssembly.Instance(mod, importObject).exports;
 }
 
-function attempt(label, a, b, f) {
+// One instantiation per import set. The module has four imports, so every
+// case supplies all four and asserts on the ones it is about; the cases that
+// are about an ABSENT property build their import object by hand instead.
+function link(a, b, f) {
+  return instantiate({e: {a: a, b: b, f: f, n: 0}});
+}
+
+function attemptRaw(label, importObject) {
   try {
-    link(a, b, f);
+    instantiate(importObject);
     print(label + ': linked');
   } catch (e) {
     print(label + ': ' + e.name + ': ' + e.message);
   }
+}
+
+function attempt(label, a, b, f) {
+  attemptRaw(label, {e: {a: a, b: b, f: f, n: 0}});
 }
 
 // `new WebAssembly.Global({value: t})` with no second argument is
@@ -72,24 +81,42 @@ var ex4 = link(callable, G('externref', callable), null);
 print('a plain function is an ordinary externref: ' +
       (ex4.get_a() === callable) + ' ' + (ex4.get_b() === callable));
 
-// The import object cannot deliver a raw `undefined`: a present property
-// holding undefined and an absent one are reported alike, upstream of the
-// raw-value rule. Asserted so the limitation is recorded rather than assumed
-// away -- an externref admits undefined, and this route does not reach it.
-attempt('raw undefined for externref', objA, undefined, null);
+// --- `undefined`, and an absent property, are externref values ---
+// The second assertion on each line is the guard against a link path that
+// simply dropped everything: `a` still has to arrive by identity in the same
+// instantiation, because an unwritten slot would read as `undefined` too.
+var ex5 = link(objA, undefined, null);
+print('raw undefined satisfies externref: ' +
+      (ex5.get_b() === undefined) + ' ' + (ex5.get_a() === objA));
+var ex6 = instantiate({e: {a: objA, f: null, n: 0}});
+print('an absent externref import satisfies it too: ' +
+      (ex6.get_b() === undefined) + ' ' + (ex6.get_a() === objA));
+
+// The exemption is externref-only, and this is what says so. A funcref and a
+// numeric global still take the missing-import guard, present-and-undefined
+// or absent alike, and keep the message they had. (Naming a missing import
+// where node names a type error is dz 01a0855d-6b5b; whoever changes those
+// messages will find these four lines.)
+attempt('funcref <- undefined', objA, objB, undefined);
+attemptRaw('funcref <- absent', {e: {a: objA, b: objB, n: 0}});
+attemptRaw('i32 <- undefined',
+           {e: {a: objA, b: objB, f: null, n: undefined}});
+attemptRaw('i32 <- absent', {e: {a: objA, b: objB, f: null}});
 
 // --- The sentinel collision ---
 // Immutable snapshot Globals whose VALUES are the two sentinels. Each of
-// these link results used to be read as a refusal.
-var ex5 = link(G('externref', null), G('externref', undefined),
+// these link results used to be read as a refusal. (The mutable rows of the
+// same table are in e2e-global-ref-mut-reexport.wat, which has a mutable
+// declaration to satisfy.)
+var ex7 = link(G('externref', null), G('externref', undefined),
                G('anyfunc', null));
-print('Global(externref) holding null: ' + (ex5.get_a() === null));
-print('Global(externref) holding undefined: ' + (ex5.get_b() === undefined));
-print('Global(anyfunc) holding null: ' + (ex5.g_f.value === null));
+print('Global(externref) holding null: ' + (ex7.get_a() === null));
+print('Global(externref) holding undefined: ' + (ex7.get_b() === undefined));
+print('Global(anyfunc) holding null: ' + (ex7.g_f.value === null));
 // The same two values through an initializing constant expression and the
 // export wrapper, which is a different consumer of the same frame slots.
 print('both sentinels through an initializer: ' +
-      (ex5.g_a.value === null) + ' ' + (ex5.g_b.value === undefined));
+      (ex7.g_a.value === null) + ' ' + (ex7.g_b.value === undefined));
 
 // --- The funcref arm refuses ---
 attempt('funcref <- plain function', objA, objB, function () {});

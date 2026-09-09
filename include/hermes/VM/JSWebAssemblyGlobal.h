@@ -113,7 +113,14 @@ class JSWebAssemblyGlobal final : public JSObject {
   }
 
   /// Set the closure that reads a live global's storage.
+  /// Asserts the global is mutable. That is what makes LIVE IMPLIES MUTABLE
+  /// an invariant of the type rather than a property of today's one caller:
+  /// WasmIRGen's global import path fetches an immutable match's value with
+  /// wasmGlobalGet and states that the fetch runs no closure, which a live
+  /// immutable global would falsify silently, during instantiation.
+  /// setMutable() must therefore run first, as wasmMakeGlobal does.
   void setGetter(Runtime &runtime, Callable *fn) {
+    assert(mutable_ && "a live global must be mutable");
     getter_.set(runtime, fn, runtime.getHeap());
   }
 
@@ -124,15 +131,19 @@ class JSWebAssemblyGlobal final : public JSObject {
   }
 
   /// Set the closure that writes a live mutable global's storage.
+  /// Asserts the global is mutable, for the reason setGetter does: writing an
+  /// immutable global is a spec violation, and the pair is what makes a
+  /// global live.
   void setSetter(Runtime &runtime, Callable *fn) {
+    assert(mutable_ && "a live global must be mutable");
     setter_.set(runtime, fn, runtime.getHeap());
   }
 
   /// \return true if this global reads and writes a module's storage through
   /// closures rather than holding a value of its own. A live global is always
-  /// mutable and therefore always has both closures; wasmMakeGlobal refuses
-  /// any other combination, and WasmIRGen's global import path depends on
-  /// that when it fetches an immutable match's value.
+  /// mutable: setGetter and setSetter assert it, and wasmMakeGlobal installs
+  /// both closures or neither. WasmIRGen's global import path depends on that
+  /// when it fetches an immutable match's value.
   bool isLive(Runtime &runtime) const {
     return getter_.get(runtime) != nullptr;
   }
@@ -236,10 +247,10 @@ class JSWebAssemblyGlobal final : public JSObject {
   GCPointer<Callable> getter_;
 
   /// For a live global, the closure that writes the module's storage; null
-  /// for a snapshot one. Non-null exactly when getter_ is: a live global is
-  /// always mutable (wasmMakeGlobal refuses an immutable live global, and
-  /// the value fetch on WasmIRGen's immutable import path relies on that to
-  /// run no closure).
+  /// for a snapshot one. Non-null exactly when getter_ is: wasmMakeGlobal
+  /// installs both closures or neither, and setGetter/setSetter assert the
+  /// global is mutable -- which the value fetch on WasmIRGen's immutable
+  /// import path relies on to run no closure.
   GCPointer<Callable> setter_;
 };
 

@@ -13,13 +13,14 @@ function load(i) {
 }
 
 var exp = new WebAssembly.Instance(load(0)).exports;
+var conMod = load(1);
 
 // The value the import will be linked against. `null` is an ordinary
 // externref value here, not an absent one.
 var g = exp.g;
 print('the exported mutable global holds null: ' + (g.value === null));
 
-var con = new WebAssembly.Instance(load(1), {e: {g: g}}).exports;
+var con = new WebAssembly.Instance(conMod, {e: {g: g}}).exports;
 print('an externref Global holding null links: ' +
       (typeof con.get === 'function'));
 
@@ -41,5 +42,36 @@ print('a consumer write reaches the re-export: ' +
 exp.set(null);
 print('an exporter write reaches the consumer: ' + (con.get() === null));
 print('the re-export is still the same object: ' + (con.g_re === g));
+
+// --- The MUTABLE rows of the sentinel table ---
+// A mutable declaration satisfied by a mutable SNAPSHOT Global whose value is
+// a sentinel. The immutable rows are in e2e-global-ref-import.wat; these two
+// need a mutable declaration, which is what this consumer has. Both used to
+// be refused -- `null` as "not a WebAssembly.Global", `undefined` as a type
+// mismatch -- and neither refusal had happened.
+//
+// A mutable import keeps the OBJECT, so what is asserted here is that linking
+// succeeds and that the object is the one supplied. That the sentinel really
+// was the value is asserted by writing over it: the module reads `null` or
+// `undefined` first, then writes an object the Global must show.
+function mutSnapshot(v) {
+  return new WebAssembly.Global({value: 'externref', mutable: true}, v);
+}
+
+var gNull = mutSnapshot(null);
+var conNull = new WebAssembly.Instance(conMod, {e: {g: gNull}}).exports;
+var vNull = {tag: 'row3'};
+conNull.set(vNull);
+print('mutable declaration <- mutable snapshot holding null: ' +
+      (conNull.g_re === gNull) + ' ' + (gNull.value === vNull));
+
+var gUndef = mutSnapshot(undefined);
+var conUndef = new WebAssembly.Instance(conMod, {e: {g: gUndef}}).exports;
+print('...and one holding undefined: ' +
+      (conUndef.get() === undefined) + ' ' + (conUndef.g_re === gUndef));
+var vUndef = {tag: 'row4'};
+conUndef.set(vUndef);
+print('...whose value the module then replaces: ' +
+      (gUndef.value === vUndef) + ' ' + (conUndef.get() === vUndef));
 
 print('done');

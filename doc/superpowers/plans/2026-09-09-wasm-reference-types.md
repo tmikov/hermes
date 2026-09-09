@@ -474,10 +474,18 @@ externref global import" — describes a rule nobody wrote.
 - A **raw object** satisfying an immutable externref import.
 - A raw plain function **refused** for a funcref import.
 - **The sentinel collision**: import a global whose value genuinely **is**
-  `null`, and another whose value is `undefined`. These must be **immutable
-  snapshot** Globals — a mutable import discards the link result's value and
-  keeps the object, so a mutable case passes without exercising the collision
-  at all.
+  `null`, and another whose value is `undefined`. **Cover both mutabilities —
+  all four rows of the spec's table**, not immutable snapshots alone. An
+  earlier revision of this step said a mutable case could not exercise the
+  collision because a mutable import discards the link result's value; that is
+  backwards, and the spec was corrected against measurement during Task 4.
+  `wasmLinkGlobal` returns `getValue()` for any non-LIVE global, and
+  `WasmIRGen.cpp` compares that result against both sentinels *before* it
+  decides to keep the object for a mutable import, so a mutable snapshot
+  Global holding either sentinel link-errors too. The refusing branch is
+  chosen by the VALUE, not by the mutability. See the spec's four-row table
+  under "The sentinel collision" for the measured outcomes. (A **live** Global
+  is unaffected either way: the link result is already the object for one.)
 
 - [ ] **Step 4: The golden that must change**
 

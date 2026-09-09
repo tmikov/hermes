@@ -38,6 +38,16 @@
 ;; too, and what rules that out is the same module reading `obj_a` back by
 ;; identity a few lines above.
 ;;
+;; `undefined` is an externref value like any other, and the import-object
+;; lookup used to refuse it before the raw rule ever ran: a property holding
+;; `undefined` and an absent property read alike, and the guard called both a
+;; missing import. Both link now, for an IMMUTABLE EXTERNREF import and for
+;; nothing else. Measured on node v24.13.1, which has no missing-import
+;; concept for globals at all -- it reads the property, takes `undefined` when
+;; absent, and applies the type rule. The `n` import below is here to keep the
+;; exemption narrow: a numeric global still refuses `undefined`, as does a
+;; funcref one, and each keeps the message it had.
+;;
 ;; It runs with -gc-sanitize-handles=1 because the funcref raw arm calls
 ;; wasmIsExportedFunction, which ALLOCATES -- it reaches
 ;; HiddenClass::findPropertyNoMap, which initializes a missing property map
@@ -55,11 +65,15 @@
   (import "e" "a" (global $a externref))
   (import "e" "b" (global $b externref))
   (import "e" "f" (global $f funcref))
+  ;; A numeric import, so that the `undefined` exemption above is shown to be
+  ;; externref-only rather than a hole in the guard. Nothing else uses it.
+  (import "e" "n" (global $n i32))
 
   ;; These read the module's own frame slot -- what the link path snapshotted
   ;; -- and not the import object, which nothing consults again.
   (func (export "get_a") (result externref) global.get $a)
   (func (export "get_b") (result externref) global.get $b)
+  (func (export "get_n") (result i32) global.get $n)
 
   ;; A global initializer fed by an immutable reference import, re-exported.
   ;; This is the second consumer of the snapshot: the value travels the link
@@ -86,10 +100,19 @@
 ;; CHECK-NEXT: raw Exported Function satisfies funcref: true
 ;; CHECK-NEXT: a plain function is an ordinary externref: true true
 
-;; A raw `undefined` is an externref value the import object cannot deliver:
-;; the import lookup reports an absent property and a present undefined one
-;; the same way, before any of this branch runs. Recorded rather than fixed.
-;; CHECK-NEXT: raw undefined for externref: LinkError: module has no import e.b
+;; A raw `undefined` satisfies an externref import, and so does an ABSENT
+;; property, which reads as `undefined`. Both reach the same arm.
+;; CHECK-NEXT: raw undefined satisfies externref: true true
+;; CHECK-NEXT: an absent externref import satisfies it too: true true
+
+;; ...and the exemption is externref-only. A funcref and a numeric global
+;; still refuse `undefined`, and an absent property for either, each with the
+;; message it had. (That the message names a missing import rather than a
+;; type error is a divergence from node, filed as dz 01a0855d-6b5b.)
+;; CHECK-NEXT: funcref <- undefined: LinkError: module has no import e.f
+;; CHECK-NEXT: funcref <- absent: LinkError: module has no import e.f
+;; CHECK-NEXT: i32 <- undefined: LinkError: module has no import e.n
+;; CHECK-NEXT: i32 <- absent: LinkError: module has no import e.n
 
 ;; THE SENTINEL COLLISION. Each of these was a false diagnostic before the
 ;; matched-object answer; they are immutable snapshot Globals, so the import

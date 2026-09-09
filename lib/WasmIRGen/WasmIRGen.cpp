@@ -927,21 +927,42 @@ void WasmIRGen::createFunctions() {
       auto *importVal = builder_.createLoadPropertyInst(
           moduleObj, builder_.getLiteralString(imp.fieldName));
 
-      // Check import value is not undefined.
-      auto *impIsUndef = builder_.createBinaryOperatorInst(
-          importVal, undefinedVal,
-          ValueKind::BinaryStrictlyEqualInstKind);
-      auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
-      auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
-      builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
+      // Check the import value is not undefined -- EXCEPT where `undefined`
+      // is a value the declaration admits, which is an immutable externref
+      // global import and nothing else. An externref is any JS value,
+      // `undefined` included; a property that is absent and one that holds
+      // `undefined` read alike, so this guard would refuse a legitimate
+      // import and would refuse an omitted one for the wrong reason.
+      // Measured on node v24.13.1, the implementation this engine's
+      // descriptor spellings and defaults are matched against: it has no
+      // missing-import concept for globals at all -- it reads the property,
+      // takes `undefined` when absent, and applies the type rule. Both
+      // `{e: {b: undefined}}` and `{e: {}}` link and hand the module
+      // `undefined`.
+      //
+      // The guard stays for every other import kind, and for a funcref or
+      // numeric global, where node also refuses -- naming a type error where
+      // this names a missing import. That message difference is dz
+      // 01a0855d-6b5b and is not this change's subject.
+      const bool undefinedIsAValue = imp.kind == WasmExternalKind::Global &&
+          imp.globalType.type == WasmValType::ExternRef &&
+          !imp.globalType.mutable_;
+      if (!undefinedIsAValue) {
+        auto *impIsUndef = builder_.createBinaryOperatorInst(
+            importVal, undefinedVal,
+            ValueKind::BinaryStrictlyEqualInstKind);
+        auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
+        auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
+        builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
 
-      builder_.setInsertionBlock(impFailBB);
-      helpers_.emitLinkError(builder_.getLiteralString(
-          "module has no import " + imp.moduleName + "." + imp.fieldName));
-      builder_.createUnreachableInst();
+        builder_.setInsertionBlock(impFailBB);
+        helpers_.emitLinkError(builder_.getLiteralString(
+            "module has no import " + imp.moduleName + "." + imp.fieldName));
+        builder_.createUnreachableInst();
 
-      builder_.setInsertionBlock(impOkBB);
-      tlEntry_ = impOkBB;
+        builder_.setInsertionBlock(impOkBB);
+        tlEntry_ = impOkBB;
+      }
 
       // Per-kind type validation.
       switch (imp.kind) {
@@ -1126,12 +1147,11 @@ void WasmIRGen::createFunctions() {
           // and a Global is not a value.
           //
           // The fetch cannot run a closure. A closure is consulted only
-          // for a LIVE global, and a global becomes live only through
-          // JSWebAssemblyGlobal::setGetter, whose one caller in the tree is
-          // wasmMakeGlobal, under `const bool live = isMutable`. The
-          // mutability half of the match above has already refused a mutable
-          // Global for this immutable declaration, so a snapshot is what
-          // reaches the fetch.
+          // for a LIVE global, and JSWebAssemblyGlobal::setGetter asserts
+          // that the global it is installing a closure on is mutable, so a
+          // live IMMUTABLE global cannot be built. The mutability half of
+          // the match above has already refused a mutable Global for this
+          // immutable declaration, so a snapshot is what reaches the fetch.
           //
           // `importVal` rather than `linked` on the mutable side: what is
           // stored is the object the import object supplied, which is what
