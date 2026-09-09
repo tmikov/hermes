@@ -109,7 +109,6 @@ static std::string buildTagTypeString(const WasmFuncType &ft) {
   return s;
 }
 
-/// Map a WasmValType to an IR Type.
 /// If \p val is an AsInt32Inst whose operand is boolean, return the boolean
 /// operand directly (suitable for use as a CondBranchInst condition).
 /// Otherwise return \p val unchanged.
@@ -130,7 +129,14 @@ static Type wasmValTypeToIRType(WasmValType vt) {
     case WasmValType::F64:
       return Type::createNumber();
     case WasmValType::FuncRef:
-      return Type::createObject();
+      // ObjectOrNull, not Object: a funcref value is an Exported Function or
+      // null. Null is not a corner case here -- a declared funcref local is
+      // zero-initialized to it a few hundred lines below, in genFunctionBody.
+      // Object excludes null, and InstSimplify folds a strict comparison
+      // between disjoint types to a constant without testing anything, so an
+      // Object annotation would make `ref === null` answer false for a null
+      // funcref once the optimizer runs.
+      return Type::createObjectOrNull();
     case WasmValType::ExternRef:
       return Type::createAnyType();
     case WasmValType::V128:

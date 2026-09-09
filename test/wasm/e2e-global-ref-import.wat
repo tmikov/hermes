@@ -80,13 +80,17 @@
   ;; -- and not the import object, which nothing consults again.
   (func (export "get_a") (result externref) global.get $a)
   (func (export "get_b") (result externref) global.get $b)
+  ;; The funcref counterpart. It is a second, independent route to the same
+  ;; slot: `g_f` below reads it through a global initializer and an export
+  ;; wrapper, while this one returns it straight out of a Wasm function whose
+  ;; IR return type is the funcref annotation. Both are kept -- an annotation
+  ;; that excluded null would be invisible to the `g_f` route.
+  (func (export "get_f") (result funcref) global.get $f)
 
   ;; A global initializer fed by an immutable reference import, re-exported.
-  ;; This is the second consumer of the snapshot: the value travels the link
+  ;; This is another consumer of the snapshot: the value travels the link
   ;; path, an initializing constant expression, and wasmMakeGlobal's export
-  ;; wrapping. `g_f` is also how a funcref value is read back, since a
-  ;; `(result funcref)` export would annotate its return type as object, from
-  ;; which null is excluded until the nullable-annotation task lands.
+  ;; wrapping. The `get_f` route above shares only the first of those three.
   (global (export "g_f") funcref (global.get $f))
   (global (export "g_a") externref (global.get $a))
   (global (export "g_b") externref (global.get $b))
@@ -97,12 +101,14 @@
 ;; and, for g_a, an initializer and an export wrapper as well.
 ;; CHECK: Global(externref) imports: true true
 ;; CHECK-NEXT: Global(anyfunc) import is the same function: true
+;; CHECK-NEXT: (result funcref) route returns the same function: true
 ;; CHECK-NEXT: initializer fed by the import: true
 
 ;; A raw JS value satisfies an immutable reference import. Any JS value is an
 ;; externref; a funcref takes null or an Exported Function.
 ;; CHECK-NEXT: raw objects satisfy externref: true true
 ;; CHECK-NEXT: raw null satisfies funcref: true
+;; CHECK-NEXT: (result funcref) route returns null: true
 ;; CHECK-NEXT: raw Exported Function satisfies funcref: true
 ;; CHECK-NEXT: a plain function is an ordinary externref: true true
 

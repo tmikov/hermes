@@ -31,7 +31,7 @@
 ;; table.set: bounds-checks against the funcs array, then writes the slot
 ;; through the funnel rather than storing into an array directly -- storing
 ;; only the closure left the previous entry's type id in place.
-;; CHECK-LABEL: function wasm_func_1(p0: number, p1: object): undefined
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: null|object): undefined
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_exported]

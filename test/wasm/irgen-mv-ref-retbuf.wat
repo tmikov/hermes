@@ -65,12 +65,12 @@
 ;; unsigned. The reference is not: AsInt32Inst on a closure yields 0. The
 ;; CHECK-NEXT after the reference load is what pins the absence -- an
 ;; AsInt32Inst inserted there would break it.
-;; CHECK-LABEL: function wasm_func_2(): object
+;; CHECK-LABEL: function wasm_func_2(): null|object
 ;; CHECK:       %[[I:[0-9]+]] = LoadPropertyInst (:any) %{{[0-9]+}}: any, 0: number
 ;; CHECK-NEXT:  %{{[0-9]+}} = AsInt32Inst (:number) %[[I]]: any
 ;; CHECK-NEXT:  %[[RA:[0-9]+]] = LoadFrameInst (:any) %0: environment, [%VS0.retBufR]: any
 ;; CHECK-NEXT:  %[[REF:[0-9]+]] = LoadPropertyInst (:any) %[[RA]]: any, 1: number
-;; CHECK-NEXT:         StoreStackInst %[[REF]]: any, %{{[0-9]+}}: object
+;; CHECK-NEXT:         StoreStackInst %[[REF]]: any, %{{[0-9]+}}: null|object
 
 ;; --- Allocation: a JS Array of retBufSize/4 slots, next to the two views ---
 

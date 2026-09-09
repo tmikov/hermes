@@ -45,7 +45,7 @@
 ;; Exported Function through the builtin. Not a LoadPropertyInst: the array can
 ;; come from a table import, and an accessor at an index would run user JS
 ;; inside a Wasm function body.
-;; CHECK-LABEL: function wasm_func_3(p0: number): object
+;; CHECK-LABEL: function wasm_func_3(p0: number): null|object
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_exported]
 ;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableGetSlot]
