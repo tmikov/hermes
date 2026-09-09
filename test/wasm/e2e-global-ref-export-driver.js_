@@ -18,9 +18,11 @@ function attempt(f) {
   }
 }
 
-// The import is a WebAssembly.Global rather than a raw JS value: the raw
-// branch of the import path admits a Number and nothing else today, so an
-// object reaches the module only through a Global.
+// The import is a WebAssembly.Global rather than a raw JS value. A raw
+// object would satisfy this immutable externref import too, now that the raw
+// branch has an externref arm; going through a Global keeps this file's
+// subject the EXPORT path, and leaves the raw arms to
+// e2e-global-ref-import.wat.
 var hostValue = {tag: 'host'};
 var hostRef = new WebAssembly.Global({value: 'externref'}, hostValue);
 var ex = new WebAssembly.Instance(mod, {e: {hostref: hostRef}}).exports;

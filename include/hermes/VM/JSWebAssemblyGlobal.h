@@ -131,7 +131,8 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// \return true if this global reads and writes a module's storage through
   /// closures rather than holding a value of its own. A live global is always
   /// mutable and therefore always has both closures; wasmMakeGlobal refuses
-  /// any other combination, and wasmLinkGlobal depends on that.
+  /// any other combination, and WasmIRGen's global import path depends on
+  /// that when it fetches an immutable match's value.
   bool isLive(Runtime &runtime) const {
     return getter_.get(runtime) != nullptr;
   }
@@ -237,7 +238,8 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// For a live global, the closure that writes the module's storage; null
   /// for a snapshot one. Non-null exactly when getter_ is: a live global is
   /// always mutable (wasmMakeGlobal refuses an immutable live global, and
-  /// wasmLinkGlobal's success answer depends on that invariant).
+  /// the value fetch on WasmIRGen's immutable import path relies on that to
+  /// run no closure).
   GCPointer<Callable> setter_;
 };
 

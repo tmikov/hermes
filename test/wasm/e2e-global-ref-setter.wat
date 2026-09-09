@@ -33,9 +33,9 @@
 ;; The imported mutable externref global is the identity round trip the design
 ;; requires in the JS-to-Wasm direction: the host writes an object through
 ;; `.value` and `get_imp` hands back that same object. Its link-time value is
-;; an object rather than null, because wasmLinkGlobal still spells its two
-;; failures `null` and `undefined`; that collision is the link path's own gap
-;; and not this file's subject.
+;; an object because the round trip needs one to be about; a Global holding
+;; either sentinel links too, which is e2e-global-ref-import.wat's subject
+;; rather than this file's.
 ;;
 ;; It runs with -gc-sanitize-handles=1 because the setter allocates in
 ;; several places this file reaches: ToNumber, which runs user JS; the funcref

@@ -59,8 +59,9 @@ print('public setter final value: ' + g.value);
 //    from inside generated code rather than from a native accessor.
 var SEED = 0x0123456789abcdefn;
 var acc = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
-// Immutable, so the import loop keeps the VALUE wasmLinkGlobal returned
-// rather than the object; this is what makes the snapshot reader observable.
+// Immutable, so the import loop fetches the Global's VALUE at link time --
+// with wasmGlobalGet, past the brand check -- rather than keeping the object;
+// this is what makes the snapshot reader observable.
 var konst = new WebAssembly.Global({value: 'i64'}, SEED);
 var ex = new WebAssembly.Instance(mod, {e: {acc: acc, konst: konst}}).exports;
 var sum = 0n;
@@ -99,9 +100,9 @@ print('wasmMakeGlobal snapshot stores intact: ' + ok);
 print('wasmMakeGlobal snapshot value: ' + lastSeed);
 
 // The immutable import, read back through generated code. Unlike everything
-// above, this observes what wasmLinkGlobal returned rather than what a setter
-// stored -- and only an immutable import does, because a mutable one keeps
-// the Global object and throws the link result's value away.
+// above, this observes what the link-time fetch read out of the slot rather
+// than what a setter stored -- and only an immutable import does, because a
+// mutable one keeps the Global object and fetches nothing.
 print('immutable import lo/hi: ' + ex.konst_lo() + '/' + ex.konst_hi());
 
 // Wrapping to 64 bits, asserted separately: it is about truncation at store

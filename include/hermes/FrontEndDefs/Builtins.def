@@ -349,14 +349,17 @@ WASM_BUILTIN(wasmLinkTable)
 WASM_BUILTIN(wasmLinkMemory)
 // wasmLinkGlobal(importVal, expectedValType, expectedMutable): the brand
 // check that replaced the __wasm_type__ publication on a global. Returns the
-// global's value (a Number, or a BigInt for i64) for a matching snapshot
-// global, or the matched Global object itself for a matching LIVE global
-// (which has no value of its own -- its storage is another module's frame
-// slot), or undefined if it is a Global whose type or mutability does not
-// match, or null if it is not a WebAssembly.Global at all -- four outcomes
+// matched WebAssembly.Global OBJECT when its type and mutability both match
+// the declaration, or undefined for a Global that does not match, or null
+// when the argument is not a WebAssembly.Global at all -- three outcomes,
 // because they need different diagnostics or different handling by the
-// caller. expectedValType is a JSWebAssemblyGlobal::ValType, or 0xFF for a
-// Wasm type no Global can have.
+// caller. The object is the answer for a snapshot global as much as for a
+// live one: the global's VALUE used to be the snapshot answer, which a
+// reference-typed global cannot use, `null` and `undefined` being legal
+// values of one and the two failure answers both. A caller that wants the
+// value fetches it with wasmGlobalGet, which an immutable global import does
+// and a mutable one has no use for. expectedValType is a
+// JSWebAssemblyGlobal::ValType, or 0xFF for a Wasm type no Global can have.
 WASM_BUILTIN(wasmLinkGlobal)
 // wasmGlobalGet(globalObj) / wasmGlobalSet(globalObj, value): the shared
 // state of an imported MUTABLE global, read and written where `.value` used

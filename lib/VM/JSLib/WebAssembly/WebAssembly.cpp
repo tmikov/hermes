@@ -2428,10 +2428,11 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // putNamed_RJS, which walks the prototype chain, so a setter on
   // WebAssembly.Global.prototype ran user JS inside this constructor (H2).
   //
-  // The link path now reads valType_/mutable_ and the value itself through
-  // the wasmLinkGlobal builtin, whose dyn_vmcast is the brand check that
-  // replaced the string comparison. A WebAssembly.Global now has no own
-  // properties at all, which is also what the spec requires of it.
+  // The link path now reads valType_/mutable_ through the wasmLinkGlobal
+  // builtin, whose dyn_vmcast is the brand check that replaced the string
+  // comparison, and reads the value -- where it wants one -- through
+  // wasmGlobalGet. A WebAssembly.Global now has no own properties at all,
+  // which is also what the spec requires of it.
 
   return lv.glob.getHermesValue();
 }

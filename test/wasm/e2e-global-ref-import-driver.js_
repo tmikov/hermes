@@ -1,0 +1,107 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-import.wat.
+//
+// Every assertion is an identity comparison printed as a boolean. A
+// stringified value would not do: `null`, `undefined` and an object all have
+// distinct spellings, but a wrapper object holding the right thing prints the
+// same as the thing itself, and the funcref assertions are exactly about
+// which object arrived.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+// One instantiation per import triple. The module has three imports, so
+// every case supplies all three and asserts on the ones it is about.
+function link(a, b, f) {
+  return new WebAssembly.Instance(mod, {e: {a: a, b: b, f: f}}).exports;
+}
+
+function attempt(label, a, b, f) {
+  try {
+    link(a, b, f);
+    print(label + ': linked');
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+
+// `new WebAssembly.Global({value: t})` with no second argument is
+// DefaultValue(t), which is not the same as passing `undefined`: the funcref
+// default is null. Passing the argument through explicitly keeps the two
+// apart.
+function G(type, value) {
+  return new WebAssembly.Global({value: type}, value);
+}
+
+var objA = {tag: 'a'};
+var objB = {tag: 'b'};
+
+// A WebAssembly Exported Function to feed the funcref import with. It comes
+// from this very module, instantiated once with values that need nothing but
+// the raw arms: null is a funcref and any JS value is an externref.
+var seed = link(objA, objB, null);
+var fn = seed.get_a;
+
+// --- A genuine Global of the declared type ---
+var ex1 = link(G('externref', objA), G('externref', objB), G('anyfunc', fn));
+print('Global(externref) imports: ' +
+      (ex1.get_a() === objA) + ' ' + (ex1.get_b() === objB));
+print('Global(anyfunc) import is the same function: ' +
+      (ex1.g_f.value === fn));
+print('initializer fed by the import: ' + (ex1.g_a.value === objA));
+
+// --- A raw JS value, for an immutable import ---
+var ex2 = link(objA, objB, null);
+print('raw objects satisfy externref: ' +
+      (ex2.get_a() === objA) + ' ' + (ex2.get_b() === objB));
+print('raw null satisfies funcref: ' + (ex2.g_f.value === null));
+
+var ex3 = link(objA, objB, fn);
+print('raw Exported Function satisfies funcref: ' + (ex3.g_f.value === fn));
+
+// A plain JS function is a perfectly good externref -- the funcref rule is
+// not a rule about callables. Both the raw route and the Global route.
+var callable = function () { return 'host'; };
+var ex4 = link(callable, G('externref', callable), null);
+print('a plain function is an ordinary externref: ' +
+      (ex4.get_a() === callable) + ' ' + (ex4.get_b() === callable));
+
+// The import object cannot deliver a raw `undefined`: a present property
+// holding undefined and an absent one are reported alike, upstream of the
+// raw-value rule. Asserted so the limitation is recorded rather than assumed
+// away -- an externref admits undefined, and this route does not reach it.
+attempt('raw undefined for externref', objA, undefined, null);
+
+// --- The sentinel collision ---
+// Immutable snapshot Globals whose VALUES are the two sentinels. Each of
+// these link results used to be read as a refusal.
+var ex5 = link(G('externref', null), G('externref', undefined),
+               G('anyfunc', null));
+print('Global(externref) holding null: ' + (ex5.get_a() === null));
+print('Global(externref) holding undefined: ' + (ex5.get_b() === undefined));
+print('Global(anyfunc) holding null: ' + (ex5.g_f.value === null));
+// The same two values through an initializing constant expression and the
+// export wrapper, which is a different consumer of the same frame slots.
+print('both sentinels through an initializer: ' +
+      (ex5.g_a.value === null) + ' ' + (ex5.g_b.value === undefined));
+
+// --- The funcref arm refuses ---
+attempt('funcref <- plain function', objA, objB, function () {});
+attempt('funcref <- plain object', objA, objB, {});
+attempt('funcref <- number', objA, objB, 5);
+
+// --- Both halves of the brand check still discriminate ---
+attempt('externref <- Global(anyfunc)', G('anyfunc', null), objB, null);
+attempt('funcref <- Global(externref)', objA, objB, G('externref', null));
+attempt('externref <- Global(i32)', G('i32', 1), objB, null);
+attempt('externref <- Global(mut externref)',
+        new WebAssembly.Global({value: 'externref', mutable: true}, objA),
+        objB, null);
+
+print('done');

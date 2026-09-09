@@ -336,14 +336,23 @@ class WasmHelpers {
   Instruction *emitLinkMemory(Value *importVal);
 
   /// Emit wasmLinkGlobal: brand-check \p importVal as a genuine
-  /// WebAssembly.Global of the declared type and mutability, and yield its
-  /// value. Yields undefined if it is a Global that does not match, and null
-  /// if it is not a Global at all -- the caller needs the two apart, because
-  /// only the second can legitimately be a raw JS value.
+  /// WebAssembly.Global of the declared type and mutability, and yield THE
+  /// MATCHED OBJECT. Yields undefined if it is a Global that does not match,
+  /// and null if it is not a Global at all -- the caller needs the two apart,
+  /// because only the second can legitimately be a raw JS value. The value of
+  /// a matched global is not yielded here and is fetched with emitGlobalGet
+  /// where a caller wants one; a reference-typed global's value can be `null`
+  /// or `undefined`, which the two refusals already spell.
   Instruction *emitLinkGlobal(
       Value *importVal,
       Value *expectedValType,
       Value *expectedMutable);
+
+  /// Emit wasmIsExportedFunction: yield a boolean saying whether \p value is a
+  /// WebAssembly Exported Function -- the brand wasmSetFuncInfo stamps, asked
+  /// from generated IR, which has no other way to ask it. Answers for any
+  /// argument rather than throwing, `null` and `undefined` included.
+  Instruction *emitIsExportedFunction(Value *value);
 
   /// Emit wasmGlobalGet / wasmGlobalSet: read or write the shared value of an
   /// imported MUTABLE global, \p globalObj, in its internal field. That is

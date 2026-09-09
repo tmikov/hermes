@@ -27,9 +27,9 @@ function attempt(f) {
   }
 }
 
-// The import's link-time value is an object: wasmLinkGlobal still reports its
-// two failures as `null` and `undefined`, so a snapshot Global holding either
-// does not link yet.
+// The import's link-time value is an object because the identity round trip
+// below needs one to be about. A Global holding `null` or `undefined` links
+// as well; that is e2e-global-ref-import.wat's subject.
 var linkValue = {tag: 'link'};
 var hostRef =
     new WebAssembly.Global({value: 'externref', mutable: true}, linkValue);

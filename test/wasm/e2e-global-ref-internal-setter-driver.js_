@@ -38,8 +38,8 @@ print('before instantiation: ' + (provider.get_ext() === null) + ' ' +
 var seedObj = {tag: 'seed'};
 var seed = new WebAssembly.Global({value: 'externref'}, seedObj);
 // A snapshot destination for the same builtin: its storage is its own slot,
-// not a closure. It holds an Exported Function at link time because
-// wasmLinkGlobal still spells its two failures `null` and `undefined`.
+// not a closure. It holds an Exported Function at link time so that the
+// setter below has a value to overwrite.
 var jsFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, h);
 
 var consumer = new WebAssembly.Instance(load(1), {

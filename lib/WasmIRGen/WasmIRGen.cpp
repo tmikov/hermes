@@ -79,12 +79,12 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
 ///
 /// That is the Global-OBJECT route only, and it is NOT comprehensive
 /// rejection of v128. An immutable global import may also be satisfied by a
-/// RAW JS value, and the raw branch below splits on i64 versus everything
-/// else (`isI64` at the import loop): every non-i64 type, v128 included,
-/// takes the `typeof === "number"` arm, so a raw Number satisfies a v128
-/// immutable import today. Diagnosing v128 properly, with a message naming
-/// SIMD, is Task 12 of the reference-types plan; Task 5 rewrites the raw
-/// branch. Do not read this code as a v128 guard.
+/// RAW JS value, and the raw branch at the import loop has an arm per
+/// declared type: a BigInt for i64, any JS value for externref, `null` or an
+/// Exported Function for funcref, and a Number for what is left -- which is
+/// where v128 lands, so a raw Number satisfies a v128 immutable import today.
+/// Diagnosing v128 properly, with a message naming SIMD, is Task 12 of the
+/// reference-types plan. Do not read this code as a v128 guard.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32
@@ -1021,27 +1021,44 @@ void WasmIRGen::createFunctions() {
           // string property, which made a global the one kind where a plain
           // object literal linked outright and handed the module its own
           // `value`. wasmLinkGlobal brand-checks with dyn_vmcast instead, and
-          // returns the value from the internal field rather than through the
-          // replaceable `.value` accessor.
+          // answers a match with the Global OBJECT; the value of an immutable
+          // match is fetched below with wasmGlobalGet, out of the internal
+          // field rather than through the replaceable `.value` accessor.
           //
           // What a raw value may be is decided per import at compile time,
-          // per spec: a raw value allocates an *immutable* global, so it can
-          // never satisfy a mutable import; an i64 import takes a BigInt, and
-          // every other type takes a Number. Accepting either typeof for
-          // every type would let a BigInt satisfy an i32 import and a Number
-          // an i64 one.
-          const bool isI64 = imp.globalType.type == WasmValType::I64;
+          // per spec. A raw value allocates an *immutable* global, so it can
+          // never satisfy a mutable import; beyond that the DECLARED type
+          // decides, in three arms:
+          //   - a numeric type takes a Number, except i64, which takes a
+          //     BigInt. Accepting either typeof for every type would let a
+          //     BigInt satisfy an i32 import and a Number an i64 one. (v128
+          //     falls in with the Number types, which is wrong and is not
+          //     this branch's to fix; see globalValTypeCode.)
+          //   - externref takes ANY JS value, `null` and `undefined`
+          //     included, so its arm emits no check and has no diagnostic.
+          //   - funcref takes `null` or a WebAssembly Exported Function,
+          //     asked through the wasmIsExportedFunction builtin so that the
+          //     compiler and the JS API share one notion of the brand.
+          const WasmValType declaredType = imp.globalType.type;
+          const bool isI64 = declaredType == WasmValType::I64;
+          const bool isExternRef = declaredType == WasmValType::ExternRef;
+          const bool isFuncRef = declaredType == WasmValType::FuncRef;
           const bool rawAllowed = !imp.globalType.mutable_;
+          // The externref arm above refuses no raw value, so for an immutable
+          // externref import there is nothing for a raw diagnostic to say and
+          // no edge that would reach it.
+          const bool rawCanFail = !(rawAllowed && isExternRef);
 
           auto *linked = helpers_.emitLinkGlobal(
               importVal,
               builder_.getLiteralNumber(
-                  static_cast<double>(globalValTypeCode(imp.globalType.type))),
+                  static_cast<double>(globalValTypeCode(declaredType))),
               builder_.getLiteralBool(imp.globalType.mutable_));
           // null means "not a WebAssembly.Global"; undefined means "a
-          // WebAssembly.Global that does not match". They must stay apart:
-          // only the first can legitimately be a raw JS value, and reporting
-          // the second as "not a WebAssembly.Global" would be false.
+          // WebAssembly.Global that does not match"; anything else is the
+          // matched Global itself. The first two must stay apart: only "not a
+          // WebAssembly.Global" can legitimately be a raw JS value, and
+          // reporting a mismatch that way would be false.
           auto *notAGlobal = builder_.createBinaryOperatorInst(
               linked,
               builder_.getLiteralNull(),
@@ -1050,21 +1067,48 @@ void WasmIRGen::createFunctions() {
           auto *checkMatchBB = builder_.createBasicBlock(topLevelFunc);
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          auto *rawErrorBB = builder_.createBasicBlock(topLevelFunc);
-          BasicBlock *checkRawBB = nullptr;
+          BasicBlock *rawErrorBB =
+              rawCanFail ? builder_.createBasicBlock(topLevelFunc) : nullptr;
+          // The predecessors of acceptBB that carry the RAW import value.
+          // There is more than one only on the funcref arm, which admits
+          // `null` and a branded function by separate tests.
+          llvh::SmallVector<BasicBlock *, 2> rawAcceptBBs;
           if (rawAllowed) {
-            checkRawBB = builder_.createBasicBlock(topLevelFunc);
+            auto *checkRawBB = builder_.createBasicBlock(topLevelFunc);
             builder_.createCondBranchInst(
                 notAGlobal, checkRawBB, checkMatchBB);
 
             builder_.setInsertionBlock(checkRawBB);
-            auto *typeofVal = builder_.createTypeOfInst(importVal);
-            auto *rawOk = builder_.createBinaryOperatorInst(
-                typeofVal,
-                builder_.getLiteralString(isI64 ? "bigint" : "number"),
-                ValueKind::BinaryStrictlyEqualInstKind);
-            builder_.createCondBranchInst(
-                rawOk, acceptBB, rawErrorBB);
+            if (isExternRef) {
+              // Any JS value is an externref, so there is nothing to test.
+              // A check here would be a bug rather than extra safety: it
+              // would refuse a host reference the module is entitled to.
+              builder_.createBranchInst(acceptBB);
+              rawAcceptBBs.push_back(checkRawBB);
+            } else if (isFuncRef) {
+              // `null` first, because the predicate answers false for it and
+              // a null funcref is a legal import.
+              auto *isNull = builder_.createBinaryOperatorInst(
+                  importVal,
+                  builder_.getLiteralNull(),
+                  ValueKind::BinaryStrictlyEqualInstKind);
+              auto *checkBrandBB = builder_.createBasicBlock(topLevelFunc);
+              builder_.createCondBranchInst(isNull, acceptBB, checkBrandBB);
+              rawAcceptBBs.push_back(checkRawBB);
+
+              builder_.setInsertionBlock(checkBrandBB);
+              auto *branded = helpers_.emitIsExportedFunction(importVal);
+              builder_.createCondBranchInst(branded, acceptBB, rawErrorBB);
+              rawAcceptBBs.push_back(checkBrandBB);
+            } else {
+              auto *typeofVal = builder_.createTypeOfInst(importVal);
+              auto *rawOk = builder_.createBinaryOperatorInst(
+                  typeofVal,
+                  builder_.getLiteralString(isI64 ? "bigint" : "number"),
+                  ValueKind::BinaryStrictlyEqualInstKind);
+              builder_.createCondBranchInst(rawOk, acceptBB, rawErrorBB);
+              rawAcceptBBs.push_back(checkRawBB);
+            }
           } else {
             builder_.createCondBranchInst(
                 notAGlobal, rawErrorBB, checkMatchBB);
@@ -1073,38 +1117,66 @@ void WasmIRGen::createFunctions() {
           builder_.setInsertionBlock(checkMatchBB);
           auto *mismatch = builder_.createBinaryOperatorInst(
               linked, undefinedVal, ValueKind::BinaryStrictlyEqualInstKind);
-          builder_.createCondBranchInst(mismatch, linkErrorBB, acceptBB);
 
-          // For an immutable import the VALUE is what is kept, and
-          // wasmLinkGlobal already read it out of the internal field. For a
-          // mutable one the OBJECT is, because the module and the host share
-          // the global and each must see the other's writes.
-          Value *globalObjValue = imp.globalType.mutable_
-              ? static_cast<Value *>(importVal)
-              : static_cast<Value *>(linked);
+          // For a MUTABLE import the OBJECT is what is kept, because the
+          // module and the host share the global and each must see the
+          // other's writes, so a match needs no fetch. For an IMMUTABLE one
+          // the VALUE is kept, and it is fetched HERE -- in a block reached
+          // only by a successful match, since `linked` is the Global itself
+          // and a Global is not a value.
+          //
+          // The fetch cannot run a closure. A closure is consulted only
+          // for a LIVE global, and a global becomes live only through
+          // JSWebAssemblyGlobal::setGetter, whose one caller in the tree is
+          // wasmMakeGlobal, under `const bool live = isMutable`. The
+          // mutability half of the match above has already refused a mutable
+          // Global for this immutable declaration, so a snapshot is what
+          // reaches the fetch.
+          //
+          // `importVal` rather than `linked` on the mutable side: what is
+          // stored is the object the import object supplied, which is what
+          // the two are agreed to share. The brand check returns that same
+          // object on a match, so this is a statement about provenance and
+          // not a difference in value.
+          BasicBlock *matchedBB = checkMatchBB;
+          Value *matchedValue = importVal;
+          if (imp.globalType.mutable_) {
+            builder_.createCondBranchInst(mismatch, linkErrorBB, acceptBB);
+          } else {
+            auto *fetchBB = builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(mismatch, linkErrorBB, fetchBB);
+            builder_.setInsertionBlock(fetchBB);
+            matchedValue = helpers_.emitGlobalGet(linked);
+            builder_.createBranchInst(acceptBB);
+            matchedBB = fetchBB;
+          }
 
           builder_.setInsertionBlock(linkErrorBB);
           helpers_.emitLinkError(builder_.getLiteralString(
               "import " + imp.moduleName + "." + imp.fieldName +
               " is a WebAssembly.Global that does not match the declared " +
               (imp.globalType.mutable_ ? "mutable " : "immutable ") +
-              valTypeName(imp.globalType.type) + " global import"));
+              valTypeName(declaredType) + " global import"));
           builder_.createUnreachableInst();
 
-          builder_.setInsertionBlock(rawErrorBB);
-          {
+          if (rawErrorBB) {
+            builder_.setInsertionBlock(rawErrorBB);
             std::string rawErrMsg =
                 "import " + imp.moduleName + "." + imp.fieldName;
             if (!rawAllowed)
               rawErrMsg +=
                   " must be a WebAssembly.Global to satisfy a mutable"
                   " global import";
+            else if (isFuncRef)
+              rawErrMsg +=
+                  " must be null or a WebAssembly exported function to"
+                  " satisfy a funcref global import";
             else if (isI64)
               rawErrMsg += " must be a BigInt to satisfy an i64 global"
                            " import";
             else
               rawErrMsg += " must be a Number to satisfy an " +
-                  std::string(valTypeName(imp.globalType.type)) +
+                  std::string(valTypeName(declaredType)) +
                   " global import";
             helpers_.emitLinkError(builder_.getLiteralString(rawErrMsg));
             builder_.createUnreachableInst();
@@ -1120,9 +1192,9 @@ void WasmIRGen::createFunctions() {
           // object itself into an i32 slot. Nothing about this value is read
           // off the import object again.
           auto *resolved = builder_.createPhiInst();
-          if (checkRawBB)
-            resolved->addEntry(importVal, checkRawBB);
-          resolved->addEntry(globalObjValue, checkMatchBB);
+          for (BasicBlock *pred : rawAcceptBBs)
+            resolved->addEntry(importVal, pred);
+          resolved->addEntry(matchedValue, matchedBB);
 
           // Store the resolved import into importGlobalVals_ -- its value
           // for an immutable import, the WebAssembly.Global object itself

@@ -16,7 +16,10 @@
 ;;     not necessarily the one whose size had been validated.
 ;;   * a global was a __wasm_type__ string compared against
 ;;     "global:i32:const", and then a `.value` read. Both are ordinary
-;;     properties, so an object literal carrying them linked outright.
+;;     properties, so an object literal carrying them linked outright. The
+;;     value of an immutable import is still fetched, but from the brand-
+;;     checked Global through the wasmGlobalGet builtin, which reaches the
+;;     internal field rather than the replaceable accessor.
 ;;
 ;; Each is now ONE brand-checking builtin. The --implicit-check-not flags on
 ;; the RUN line are the real assertion: none of those property names, and no
@@ -73,14 +76,20 @@
 ;; CHECK: %36 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkGlobal]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %22: any, 0: number, false: boolean
 
 ;; Three outcomes, three destinations. null -> the raw-value path (%BB17),
-;; undefined -> "is a Global that does not match", anything else -> the value.
+;; undefined -> "is a Global that does not match" (%BB15), the matched Global
+;; itself -> the fetch block (%BB18).
 ;; CHECK-NEXT: %37 = BinaryStrictlyEqualInst (:any) %36: any, null: null
 ;; CHECK-NEXT: CondBranchInst %37: any, %BB17, %BB13
 ;; CHECK: %39 = BinaryStrictlyEqualInst (:any) %36: any, undefined: undefined
-;; CHECK-NEXT: CondBranchInst %39: any, %BB15, %BB14
+;; CHECK-NEXT: CondBranchInst %39: any, %BB15, %BB18
 
-;; The value stored is the builtin's result, not a re-read of anything.
-;; CHECK: %41 = PhiInst (:any) %22: any, %BB17, %36: any, %BB13
+;; What is stored is the fetch's result on the matched side and the import
+;; value itself on the raw side, and neither is a re-read of anything. The
+;; phi is what pins the fetch to the MATCHED-IMMUTABLE branch specifically:
+;; %122 reaches here from %BB18 alone, so a fetch emitted before the
+;; mismatch test -- on the not-a-Global value, say -- would come from another
+;; block and this line would go red.
+;; CHECK: %41 = PhiInst (:any) %22: any, %BB17, %122: any, %BB18
 ;; CHECK-NEXT: StoreFrameInst {{.*}}, %41: any, [%VS0.import_global_val_0]: any
 
 ;; The views are built over the recorded buffer.
@@ -89,3 +98,12 @@
 ;; The two global diagnostics, each naming what was actually wrong.
 ;; CHECK: [HermesBuiltin.wasmLinkError]{{.*}}"import e.g is a WebAssembly.Global that does not match the declared immutable i32 global import": string
 ;; CHECK: [HermesBuiltin.wasmLinkError]{{.*}}"import e.g must be a Number to satisfy an i32 global import": string
+
+;; The fetch block. wasmLinkGlobal answers a match with the Global OBJECT, so
+;; an IMMUTABLE import reads the value out of that object -- here, past the
+;; mismatch test, and through the builtin rather than the `.value` accessor.
+;; A mutable import keeps the object and emits none of this; that is pinned
+;; by the CHECK-NOT in irgen-global-mutable-shared.wat.
+;; CHECK: %BB18:
+;; CHECK-NEXT: %122 = CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalGet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %36: any
+;; CHECK-NEXT: BranchInst %BB14

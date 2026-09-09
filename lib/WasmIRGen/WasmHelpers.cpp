@@ -585,6 +585,11 @@ Instruction *WasmHelpers::emitLinkGlobal(
       {importVal, expectedValType, expectedMutable});
 }
 
+Instruction *WasmHelpers::emitIsExportedFunction(Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmIsExportedFunction, {value});
+}
+
 Instruction *WasmHelpers::emitGlobalGet(Value *globalObj) {
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmGlobalGet, {globalObj});

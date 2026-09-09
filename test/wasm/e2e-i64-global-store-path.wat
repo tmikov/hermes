@@ -31,11 +31,11 @@
   (import "e" "acc" (global $acc (mut i64)))
 
   ;; An IMMUTABLE i64 import, which is the only shape in which the SNAPSHOT
-  ;; READER's answer is observable from inside a module. For a mutable import
-  ;; the import loop keeps the Global OBJECT and discards the value
-  ;; wasmLinkGlobal returned, so a mutable import alone would pass even if
-  ;; that builtin handed back a wrong non-sentinel value; an immutable one
-  ;; snapshots the returned value into the frame slot the module reads.
+  ;; READER's answer is observable from inside a module. A mutable import
+  ;; keeps the Global OBJECT and fetches no value at link time, so it would
+  ;; pass even if the snapshot reader handed back a wrong value; an immutable
+  ;; one fetches with wasmGlobalGet and snapshots the answer into the frame
+  ;; slot the module reads.
   (import "e" "konst" (global $konst i64))
 
   ;; A module-local i64 global that is exported: each instantiation wraps it
@@ -75,9 +75,9 @@
 ;; CHECK-NEXT: wasmMakeGlobal snapshot stores intact: true
 ;; CHECK-NEXT: wasmMakeGlobal snapshot value: 81985529216486895
 
-;; The immutable import: what wasmLinkGlobal read out of the slot, snapshotted
-;; into the module's frame. 0x0123456789abcdef is lo=0x89abcdef (-1985229329
-;; as a signed i32) and hi=0x01234567.
+;; The immutable import: what the link-time wasmGlobalGet read out of the
+;; slot, snapshotted into the module's frame. 0x0123456789abcdef is
+;; lo=0x89abcdef (-1985229329 as a signed i32) and hi=0x01234567.
 ;; CHECK-NEXT: immutable import lo/hi: -1985229329/19088743
 
 ;; Wrapping to 64 bits, which happens at store time so the slot stays

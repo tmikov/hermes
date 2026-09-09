@@ -1388,8 +1388,10 @@ void setWasmGlobalValue(
   // ValType is documented as an ABI, so a further type is a plausible future
   // addition; under a `default:` it would fall through to an unconverted
   // store and silently break the "value_ is canonical for valType_"
-  // invariant in release builds -- the invariant wasmGlobalGet,
-  // wasmLinkGlobal and the now-no-op coerceImportedGlobalValue all lean on.
+  // invariant in release builds -- the invariant wasmGlobalGet and the
+  // now-no-op coerceImportedGlobalValue lean on. (wasmLinkGlobal used to
+  // read the slot too and no longer does: it answers a match with the Global
+  // object, and a caller that wants the value asks wasmGlobalGet for it.)
   //
   // That is not hypothetical: ExternRef and FuncRef were added and -Wswitch
   // reported "enumeration value 'ExternRef' not handled in switch" here.
@@ -2408,10 +2410,9 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 
 /// The link-time brand check for a global.
 /// wasmLinkGlobal(importVal, expectedValType, expectedMutable)
-///   -> the matched Global object, or the global's value, or undefined, or
-///   null.
+///   -> the matched WebAssembly.Global object, or undefined, or null.
 ///
-/// Five branches, four answers. They are kept apart because they call for
+/// Four branches, three answers. They are kept apart because they call for
 /// different diagnostics -- and, between null and undefined, different
 /// handling by the caller -- and collapsing them names the one thing that was
 /// not wrong. Each is a CONDITION, in the order the body tests them:
@@ -2426,34 +2427,29 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 ///     does not match the declaration. BOTH halves are compared, so a
 ///     reference-typed Global no more satisfies a numeric declaration than
 ///     the other way round.
-///   - the matched Global object itself, when both match and the global is
-///     LIVE -- it has no value of its own to return, its storage is another
-///     module's frame slot reached through its closures. A live global is
-///     always mutable, so only a mutable import reaches this branch, and
-///     `WasmIRGen.cpp` keeps the object rather than this return value for a
-///     mutable import regardless, so the object is what the caller needed
-///     anyway.
-///   - otherwise the global's current value: a Number for i32/f32/f64, a
-///     BigInt for i64, the reference itself for externref/funcref. A snapshot
-///     global is never LIVE, so this branch and the previous one cannot be
-///     confused.
+///   - the matched Global OBJECT itself, when both halves match. This
+///     function does not read the global's value; see the comment on that
+///     return.
 ///
-/// The four answers tell those branches apart FOR A NUMERIC TYPE. They do not
-/// for a reference type: the protocol this function speaks is not merely
-/// incomplete there, it reports failures that did not happen.
+/// THE OBJECT IS THE ANSWER FOR A MATCH OF EITHER KIND, live or snapshot.
+/// It used to be the answer only for a LIVE global -- one whose storage is
+/// another module's frame slot, so it has no value of its own -- while a
+/// matching SNAPSHOT global was answered with its VALUE. That protocol could
+/// not express a reference-typed global: `null` and `undefined` are both
+/// legal values of an externref global, and `null` of a funcref one, so a
+/// snapshot holding `undefined` was answered exactly as a type mismatch is,
+/// and one holding `null` exactly as something that is not a Global at all.
+/// Two false diagnostics, and the collision was in what this function
+/// returned rather than in what it checked. Measured before the change, over
+/// both mutabilities: a JS-built externref Global holding `null` reached the
+/// caller's not-a-Global branch and one holding `undefined` reached its
+/// mismatch branch, for a mutable and an immutable declaration alike.
 ///
-/// `null` and `undefined` are both legal values of an externref global, and
-/// `null` of a funcref one, so the last branch can return either sentinel: a
-/// snapshot holding `undefined` is indistinguishable from a type mismatch,
-/// and one holding `null` from something that is not a Global at all. Two
-/// false diagnostics, and this function cannot avoid them -- the collision is
-/// in what it returns, not in what it checks. It was not a collision while a
-/// Wasm global's value could only be a Number or a BigInt.
-/// TODO: the link-path task of the reference-types plan replaces the protocol
-/// with the matched-OBJECT answer the live branch already uses, which cannot
-/// collide because a WebAssembly.Global is never null or undefined. Until
-/// then, a value returned for a reference-typed declaration is not reliably
-/// distinguishable from the two failure answers.
+/// The object collides with neither sentinel, a WebAssembly.Global being an
+/// object. What the caller does with it differs by mutability: a MUTABLE
+/// import keeps the object, which is what sharing it requires, and an
+/// IMMUTABLE import fetches the value with wasmGlobalGet under the successful
+/// match.
 ///
 /// This replaced a `__wasm_type__` string comparison, and a global is the one
 /// kind where that comparison was not merely weak but useless: the string was
@@ -2464,11 +2460,7 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 /// type this engine has no Global representation for (currently only v128).
 /// A reference type has a ValType of its own -- ExternRef is 4, FuncRef is 5
 /// -- and Globals carrying one ARE constructed, by the JS constructor and by
-/// wasmMakeGlobal both, so a reference-typed declaration CAN now match. It is
-/// not thereby answered with a value: a mismatched type or mutability still
-/// takes the undefined branch and a matching live Global still returns the
-/// object. It is when it does reach the value branch that the collision above
-/// applies.
+/// wasmMakeGlobal both, so a reference-typed declaration can match here.
 CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
@@ -2492,25 +2484,18 @@ CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
           glob->isMutable() != expectedMutable))
     return HermesValue::encodeUndefinedValue();
 
-  // A live global's value is not readable here, and does not need to be: only
-  // an IMMUTABLE import consumes the value this builtin returns (see
-  // globalObjValue in WasmIRGen::finalizeModule's import loop), a live global
-  // is always mutable, and the mutability check above has already refused a
-  // mutable Global for an immutable declaration.
+  // The matched object, and nothing read out of it. A snapshot global's slot
+  // is canonical for its valType_ and could be returned from here directly,
+  // as it was until reference types made a value indistinguishable from a
+  // refusal; a live global has no value to read at all. Only an IMMUTABLE
+  // import wants a value, and it fetches one for itself with wasmGlobalGet
+  // after this call returns.
   //
-  // The matched object IS the success answer -- it is neither of the two
-  // failure sentinels, so no third protocol state is introduced. The caller
-  // stores importVal for a mutable import regardless, so what is returned
-  // here is discarded on exactly the path that can produce a live global.
-  if (glob->isLive(runtime))
-    return args.getArg(0);
-
-  // The slot is canonical for valType_ -- a Number for i32/f32/f64, a BigInt
-  // for i64, the reference itself for externref/funcref -- so the value is
-  // simply read out. This used to materialize the i64 BigInt here from a
-  // scalar field; the wrapping now happens at store time, so nothing is
-  // allocated and `glob` stays valid.
-  return glob->getValue();
+  // `glob` is not read past the checks above, and nothing between them and
+  // this return allocates. The object comes back out of the argument
+  // register, which the GC scans and updates in place, so what governs it
+  // afterwards is the caller's rooting rather than anything done here.
+  return args.getArg(0);
 }
 
 /// wasmMakeGlobal(valTypeCode, isMutable, valueOrGetter, setterOrUndefined)
@@ -2568,10 +2553,10 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
   //   !isMutable -- argument 2 is the value; argument 3 is unused.
   //
   // LIVE IMPLIES MUTABLE now holds by construction rather than by a check:
-  // `live` is true only where isMutable is. wasmLinkGlobal depends on it --
-  // it returns the matched OBJECT for a live global on the reasoning that
-  // only an immutable import consumes the returned value, so an immutable
-  // live Global would hand that object to an immutable import as its VALUE.
+  // `live` is true only where isMutable is. The global import path in
+  // WasmIRGen.cpp depends on it: it fetches an immutable match's value with
+  // wasmGlobalGet and states that the fetch runs no closure, which is true
+  // only because a matching IMMUTABLE Global cannot be live.
   //
   // The CONVERSE is not imposed on Global objects in general: the public
   // constructor builds a snapshot and takes its mutability from the
@@ -2702,10 +2687,13 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
 /// it. So this is the entry guard, and an unchecked vmcast here would be a
 /// Debug-only assert and a wild pointer in a release build.
 ///
-/// On the compiler side it is unreachable: the object comes from a hidden
-/// frame Variable written only in the accept block of the global import path,
-/// with the object wasmLinkGlobal admitted. I could not construct a call with
-/// anything else, and did not prove that none exists.
+/// On the compiler side it is unreachable: the calls generated code makes
+/// all pass an object wasmLinkGlobal admitted. An immutable import's
+/// link-time fetch hands wasmGlobalGet the link call's own result, in the
+/// block a successful match reaches; the other calls, of either builtin,
+/// load a hidden frame Variable written in the accept block of the global
+/// import path. I could not construct a call with anything else, and did not
+/// prove that none exists.
 CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
