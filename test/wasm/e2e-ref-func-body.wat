@@ -30,9 +30,10 @@
 ;;     if it satisfied the identity check by accident.
 ;;   - `$hidden` is named by no export and sits in no table. Its wrapper
 ;;     exists because `(elem declare)` is a declaration site, which is what
-;;     makes a body `ref.func` on it legal in the first place; script reaches
-;;     it only through this route, so `typeof` and a call are all that can be
-;;     asked of it.
+;;     makes a body `ref.func` on it legal in the first place. There is no
+;;     canonical object to compare it against, so the driver brands it with
+;;     the table oracle and stashes it twice to show the route hands out one
+;;     object rather than a fresh wrapper per execution.
 ;;
 ;; `unused` is never called. `ref.func; drop` in an uncalled function is the
 ;; shape that worked before the opcode was implemented -- the placeholder was
@@ -76,10 +77,13 @@
   (func (export "put_in_table") (param i32)
     (table.set 0 (local.get 0) (ref.func $target)))
 
-  ;; ref.func feeding ref.is_null. The value it pushes is typed `any` by the
-  ;; frame variable it comes out of, so no fold is possible here the way it
-  ;; was for the annotated sites ref-is-null.wat pins; this row is about the
-  ;; two opcodes meeting at all.
+  ;; ref.func feeding ref.is_null. This is not one of the five explicit
+  ;; wasmValTypeToIRType annotation sites ref-is-null.wat pins -- the value
+  ;; comes out of a frame variable, which createFunctions() declares `any`, so
+  ;; this row is about the two opcodes meeting, not about that annotation.
+  ;; (TypeInference does infer the variable's type from its stores and
+  ;; propagate it through the LoadFrameInst, so a fold is possible here; it
+  ;; just is not the fold ref-is-null.wat is about.)
   (func (export "is_null_of_ref_func") (result i32)
     (ref.is_null (ref.func $target)))
 
@@ -87,12 +91,17 @@
     ref.func $target
     drop))
 
-;; CHECK: instantiated: true
+;; The oracle can say no, so the brand check below is not free. First, so
+;; that a broken oracle cannot be masked by the lines it vouches for.
+;; CHECK: oracle refuses a plain JS function: not an Exported Function (TypeError)
+;; CHECK-NEXT: instantiated: true
 ;; The starting state, so that "it holds the wrapper" is a change and not the
 ;; initial value.
 ;; CHECK-NEXT: g starts null: true
 ;; CHECK-NEXT: after stash_target, g.value === target: true
-;; CHECK-NEXT: and it is not the internal closure: 43
+;; ToInt32('42') is 42 and ToInt32({}) is 0, so both answers are coercion
+;; results and neither is the argument passed through.
+;; CHECK-NEXT: non-number arguments are coerced: 43 1
 ;; CHECK-NEXT: get_g() === target: true
 ;; A live global: the reference was taken before stash_target ran.
 ;; CHECK-NEXT: a retained live Global saw the global.set: true
@@ -100,8 +109,10 @@
 ;; The slot funnel accepts it, and the object it stored is the same one.
 ;; CHECK-NEXT: table.set of ref.func, read back: true
 ;; CHECK-NEXT: hidden is a function, not target: function true
+;; CHECK-NEXT: hidden is an Exported Function: wrapper
 ;; CHECK-NEXT: hidden calls: 7
+;; Executed twice, so this says the route hands out one object rather than
+;; building a fresh wrapper each time.
+;; CHECK-NEXT: hidden is the same object each time: true
 ;; CHECK-NEXT: ref.is_null of a ref.func: 0 number
-;; The oracle can say no, so the identity lines above are not free.
-;; CHECK-NEXT: Table.prototype.set refuses a plain JS function: TypeError
 ;; CHECK-NEXT: done

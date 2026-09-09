@@ -419,13 +419,18 @@ void WasmIRGen::computeEscapableFuncs() {
   //
   // A ref.func in a FUNCTION BODY adds no index here, and that is a claim
   // about Wasm validation rather than about this module's shape. The operand
-  // of ref.func must be in the module's `refs` set -- the function indices
-  // that occur outside function bodies -- so wabt refuses `ref.func $f` in a
-  // body unless $f also appears in an element segment, in a ref.func global
-  // initializer, or in an export. The first two are the loops below; exports
-  // are added by createFunctions(). compileWasmModule() runs
-  // validateWasmBinary() (which is wabt::ValidateModule) before it builds any
-  // IR, so a module that breaks the rule is refused before reaching here.
+  // of ref.func must be in the module's `refs` set, which Core 2.0 fills from
+  // the indices occurring outside function bodies and outside the start
+  // function. wabt's `declared_funcs_` has two writers implementing that:
+  // SharedValidator::OnExport for an exported function, and OnRefFunc when
+  // `in_init_expr_` -- an element expression or a global initializer.
+  // OnStart checks the start function's signature and inserts nothing. So
+  // wabt refuses `ref.func $f` in a body unless $f also appears in an element
+  // segment, in a ref.func global initializer or in an export. The first two
+  // are the loops below; exports are added by createFunctions().
+  // compileWasmModule() runs validateWasmBinary() (which is
+  // wabt::ValidateModule) before it builds any IR, so a module that breaks the
+  // rule is refused before reaching here.
   // compile-invalid-ref-func-undeclared.wat is that rejection, run against a
   // binary built with wat2wasm --no-check.
   //
@@ -442,9 +447,10 @@ void WasmIRGen::computeEscapableFuncs() {
   // reaches script and requires a wrapper on each; route 22 is a body
   // ref.func.
   //
-  // If a new way to introduce a funcref lands -- call_ref, say -- check
-  // whether validation ties it to `refs` the way ref.func is tied; if it does
-  // not, its indices belong here.
+  // If an instruction that materializes a function reference BY INDEX is ever
+  // supported, check whether validation ties its operand to `refs` the way
+  // ref.func's is tied; if it does not, its indices belong here. (call_ref is
+  // not such an instruction: it consumes a reference that already exists.)
   //
   // This set no longer affects parameter typing: the J4 interim typed float
   // params of these functions `:any` and coerced them at entry, and that is

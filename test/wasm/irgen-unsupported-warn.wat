@@ -21,14 +21,15 @@
 ;; ref.func is exercised in a function that nothing calls, which is the shape
 ;; that worked before it was implemented (the placeholder was pushed and
 ;; dropped) and has to keep working. "It does not warn" on its own would also
-;; be satisfied by dropping the opcode on the floor, so the load of
-;; exported_func_0 -- the wrapper variable of $ref_test, which is function 0
-;; -- is checked as well.
+;; be satisfied by dropping the opcode on the floor, so the third RUN reads
+;; the IR and requires a load of exported_func_0 -- the wrapper variable of
+;; $ref_test, which is function 0 -- inside wasm_func_0's own body.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck --check-prefix=NOREF %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>/dev/null | %FileCheck --check-prefix=IR %s
 
 (module
   (table 1 funcref)
@@ -46,10 +47,15 @@
     i32x4.add
     drop))
 
-;; Warnings go to stderr and the IR dump to stdout, so the two are merged in
-;; an order this test must not depend on.
-;; CHECK-DAG: warning: unsupported Wasm opcode: binary(unknown)
-;; CHECK-DAG: LoadFrameInst (:any) {{.*}}[%VS0.exported_func_0]
+;; CHECK: warning: unsupported Wasm opcode: binary(unknown)
+
+;; The wrapper load, read from stdout alone and bounded by the labels of the
+;; function it has to be inside. Unbounded, an instantiate-function load of
+;; the same variable -- which other modules do emit, for a re-exported
+;; function -- would satisfy this with the body dropping the opcode.
+;; IR-LABEL: function wasm_func_0(): undefined
+;; IR: LoadFrameInst (:any) {{.*}}[%VS0.exported_func_0]
+;; IR-LABEL: function_end
 
 ;; No reference opcode warns. A NOT-only FileCheck run so that this covers
 ;; the whole output rather than the part before some other match.

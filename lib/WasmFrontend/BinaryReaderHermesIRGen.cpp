@@ -1734,10 +1734,12 @@ wabt::Result BinaryReaderHermesIRGen::EndModule() {
   // Finalize the module: apply data segments, call start function, build
   // exports object, and emit the return instruction. This must happen after
   // all sections (including the data section) have been parsed.
-  // finalizeModule() refuses a module whose exports name indices that do not
-  // exist. Propagating that as a read failure is what turns it into a
-  // diagnostic from the compiler driver rather than an out-of-bounds read;
-  // WasmCompile.cpp reports irgen's message in place of the generic one.
+  // finalizeModule() can refuse the module -- because an export names an index
+  // that does not exist, or because an earlier step recorded a reason it could
+  // not report itself. Propagating that as a read failure is what turns it
+  // into a diagnostic from the compiler driver rather than an out-of-bounds
+  // read; WasmCompile.cpp reports irgen's message in place of the generic
+  // one.
   if (irgen_) {
     if (!irgen_->finalizeModule())
       return wabt::Result::Error;

@@ -40,8 +40,11 @@ class WasmIRGen {
   /// bodies are translated.
   void createFunctions();
 
-  /// Populate escapableFuncs_ with the indices of functions for which a
-  /// funcref value can exist. Called once by createFunctions(), before
+  /// Populate escapableFuncs_ with the function indices named by an element
+  /// segment or by a ref.func global initializer. It is not the whole set of
+  /// indices a funcref value can name -- exports and imports are added
+  /// separately -- and the comment on the definition says why a function body
+  /// contributes nothing. Called once by createFunctions(), before
   /// exportedFuncVars_ is sized, because that set decides which indices get a
   /// canonical Exported Function.
   void computeEscapableFuncs();
@@ -51,12 +54,15 @@ class WasmIRGen {
   /// exports object, and emits the return instruction.
   /// Must be called after createFunctions() and after all function bodies
   /// and data sections have been processed.
-  /// \return false, with getErrorMessage() describing why, if the module is
-  ///   malformed in a way only detectable here. The IR module is left
-  ///   half-built in that case and must be discarded.
+  /// \return false, with getErrorMessage() describing why, if this module is
+  ///   refused -- either by a check made here, or by an earlier step that
+  ///   recorded its reason and had no way to fail the read (onRefFunc()).
+  ///   The IR module is left half-built in that case and must be discarded.
   bool finalizeModule();
 
-  /// Why finalizeModule() returned false. Empty while it has not failed.
+  /// Why the module was refused. Empty until some step refuses it; a step
+  /// that runs before finalizeModule() can fill it, so a non-empty value here
+  /// does not mean finalizeModule() has run.
   llvh::StringRef getErrorMessage() const {
     return errorMsg_;
   }
@@ -474,11 +480,11 @@ class WasmIRGen {
   /// ref.func: push the canonical Exported Function of \p funcIndex -- the
   /// wrapper, not the internal closure, because this value can reach script
   /// through a funcref global, a table slot or a funcref result. The wrapper
-  /// exists because Wasm validation only lets a function body name a function
-  /// index that also occurs outside function bodies, and
-  /// computeEscapableFuncs() covers those occurrences; see the comment there.
-  /// If it is absent anyway, this records an error message and
-  /// finalizeModule() refuses the module.
+  /// exists because Wasm validation only lets a function body name an index
+  /// that an element segment, a ref.func global initializer or an export also
+  /// names, and all three already get one; see computeEscapableFuncs(). If it
+  /// is absent anyway, this records an error message and finalizeModule()
+  /// refuses the module.
   void onRefFunc(uint32_t funcIndex);
 
   // --- Unsupported opcode handling (D.13) ---
@@ -501,8 +507,10 @@ class WasmIRGen {
   IRBuilder builder_;
   WasmHelpers helpers_;
 
-  /// Set by finalizeModule() when it refuses the module; see
-  /// getErrorMessage().
+  /// Why the module was refused, set by whichever step refuses it --
+  /// finalizeModule()'s own checks, or onRefFunc() during body translation,
+  /// which has no way to fail the read and leaves its reason here for
+  /// finalizeModule() to report. See getErrorMessage().
   std::string errorMsg_;
 
   /// Check that every export names an index that exists in its index space.

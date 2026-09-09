@@ -9,6 +9,25 @@
 // is proving.
 
 var args = hermescli.getScriptArgs();
+
+// The oracle. WebAssembly.Table.prototype.set accepts null or a genuine
+// Exported Function and refuses everything else; the brand it tests is an
+// internal property script can neither name nor write. It is printed refusing
+// a plain JS function FIRST, so a broken oracle cannot make the brand checks
+// below pass by accident.
+var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+function brand(v) {
+  if (typeof v !== 'function')
+    return 'not a function (' + typeof v + ')';
+  try {
+    oracle.set(0, v);
+  } catch (e) {
+    return 'not an Exported Function (' + e.name + ')';
+  }
+  return 'wrapper';
+}
+print('oracle refuses a plain JS function: ' + brand(function () {}));
+
 var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
 var E = new WebAssembly.Instance(mod, {}).exports;
 
@@ -30,9 +49,11 @@ E.stash_target();
 // so is anything else that merely calls through to the same code.
 print('after stash_target, g.value === target: ' + (E.g.value === E.target));
 
-// And it behaves like the wrapper, not like the raw closure: an i32 parameter
-// arrives coerced. 42 -> 43.
-print('and it is not the internal closure: ' + E.g.value(42));
+// And it behaves like the wrapper. Both arguments need real coercion to reach
+// the i32 parameter -- ToInt32('42') is 42 and ToInt32({}) is 0 -- so neither
+// answer is one the value could produce by passing the argument through.
+print('non-number arguments are coerced: ' +
+      E.g.value('42') + ' ' + E.g.value({}));
 
 // The same slot, read from inside the module and returned as a funcref.
 print('get_g() === target: ' + (E.get_g() === E.target));
@@ -49,30 +70,21 @@ print('after clear, g.value is null: ' + (E.g.value === null));
 E.put_in_table(0);
 print('table.set of ref.func, read back: ' + (E.tbl.get(0) === E.target));
 
-// $hidden is exported nowhere; this route is the only way script sees it, so
-// there is no canonical object to compare against and `typeof` plus a call is
-// what can be asked.
+// $hidden is exported nowhere, so there is no canonical object to compare
+// against. The oracle still brands it, and stashing it twice says the route
+// hands out one object rather than making a new one per execution.
 E.stash_hidden();
 var h = E.g.value;
 print('hidden is a function, not target: ' + typeof h + ' ' + (h !== E.target));
+print('hidden is an Exported Function: ' + brand(h));
 print('hidden calls: ' + h());
+E.clear();
+E.stash_hidden();
+print('hidden is the same object each time: ' + (E.g.value === h));
 
 // A ref.func value is not null. Printed with its typeof so that a string "0"
 // -- which concatenation would render identically -- is not accepted.
 var inz = E.is_null_of_ref_func();
 print('ref.is_null of a ref.func: ' + inz + ' ' + typeof inz);
-
-// Table.prototype.set is the brand check the lines above lean on. Without
-// this, "read back === target" could be satisfied by a table that accepted
-// and returned anything.
-var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
-var refused;
-try {
-  oracle.set(0, function () {});
-  refused = 'accepted it';
-} catch (e) {
-  refused = e.name;
-}
-print('Table.prototype.set refuses a plain JS function: ' + refused);
 
 print('done');

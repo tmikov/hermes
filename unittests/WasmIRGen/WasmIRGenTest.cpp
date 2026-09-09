@@ -16,6 +16,10 @@
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 using namespace hermes;
 using namespace hermes::wasm;
 
@@ -4336,6 +4340,91 @@ TEST(WasmIRGenTest, GlobalGetI64Split) {
       ++loadCount;
   }
   EXPECT_EQ(loadCount, 2);
+}
+
+// --- ref.func tests ---
+
+/// Collect the names of the Variables that \p func loads from a frame.
+static std::vector<std::string> loadedFrameVars(Function *func) {
+  std::vector<std::string> names;
+  for (auto &bb : *func)
+    for (auto &inst : bb)
+      if (auto *lf = llvh::dyn_cast<LoadFrameInst>(&inst))
+        names.push_back(lf->getLoadVariable()->getName().str().str());
+  return names;
+}
+
+/// A body `ref.func` on a function that IS exported. The export is one of the
+/// three declaration sites Wasm validation accepts, so the index has a
+/// canonical Exported Function and onRefFunc() loads it.
+///
+/// This is the control for the test below: without it, "the module is
+/// refused" would also be satisfied by an onRefFunc() that refused
+/// everything.
+TEST(WasmIRGenTest, RefFuncLoadsTheWrapperNotTheClosure) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+  moduleInfo.exports.push_back(
+      WasmExport{"f", WasmExternalKind::Function, 0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+  irgen.onRefFunc(0);
+  irgen.onDrop();
+  irgen.endFunction();
+
+  EXPECT_TRUE(irgen.finalizeModule());
+  EXPECT_TRUE(irgen.getErrorMessage().empty());
+
+  // The wrapper's Variable, not the internal closure's. The closure has an
+  // internal calling convention and script can reach a funcref value, so
+  // which of the two is loaded is what this opcode has to get right.
+  auto names = loadedFrameVars(irgen.getIRFunctions()[0]);
+  EXPECT_NE(
+      std::find(names.begin(), names.end(), "exported_func_0"), names.end());
+  EXPECT_EQ(std::find(names.begin(), names.end(), "closure_0"), names.end());
+}
+
+/// A body `ref.func` on a function that no export, element segment or
+/// `ref.func` global initializer names. Wasm validation refuses such a module
+/// and `compileWasmModule()` validates before it builds any IR, so IRGen is
+/// not supposed to see one -- which is why computeEscapableFuncs() takes no
+/// census of function bodies.
+///
+/// WasmIRGen does not re-derive the validator's rule, so onRefFunc() refuses
+/// rather than emit a funcref with no wrapper, and this test keeps the refusal
+/// working: reaching it from a lit test would mean disabling
+/// validateWasmBinary(). Making onRefFunc() load closureVars_[funcIndex]
+/// instead turns finalizeModule() green here.
+TEST(WasmIRGenTest, RefFuncWithoutAWrapperRefusesTheModule) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Deliberately no export, no element segment and no global initializer, so
+  // createFunctions() creates no exported_func_0.
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+  irgen.onRefFunc(0);
+  irgen.onDrop();
+  irgen.endFunction();
+
+  EXPECT_FALSE(irgen.finalizeModule());
+  // The message names the opcode and the index, so a refusal for some other
+  // reason -- an out-of-range export, say -- does not satisfy this.
+  EXPECT_EQ(
+      irgen.getErrorMessage(),
+      "ref.func names function index 0, which has no canonical exported "
+      "function");
 }
 
 } // namespace
