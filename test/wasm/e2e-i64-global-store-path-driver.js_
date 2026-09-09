@@ -57,8 +57,12 @@ print('public setter final value: ' + g.value);
 // 3. The internal setter: the module writes the imported mutable global with
 //    global.set, which for a snapshot Global reaches the allocating store
 //    from inside generated code rather than from a native accessor.
+var SEED = 0x0123456789abcdefn;
 var acc = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
-var ex = new WebAssembly.Instance(mod, {e: {acc: acc}}).exports;
+// Immutable, so the import loop keeps the VALUE wasmLinkGlobal returned
+// rather than the object; this is what makes the snapshot reader observable.
+var konst = new WebAssembly.Global({value: 'i64'}, SEED);
+var ex = new WebAssembly.Instance(mod, {e: {acc: acc, konst: konst}}).exports;
 var sum = 0n;
 ok = true;
 for (var i = 1; i <= N; i++) {
@@ -78,12 +82,12 @@ print('internal setter final lo/hi: ' + ex.lo() + '/' + ex.hi());
 //    than the loops above: instantiation is far more expensive than a single
 //    store, and this is the same allocating store reached from a third
 //    caller, not a different one.
-var SEED = 0x0123456789abcdefn;
 ok = true;
 var lastSeed = 0n;
 for (var i = 1; i <= 20; i++) {
   var a = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
-  var ex2 = new WebAssembly.Instance(mod, {e: {acc: a}}).exports;
+  var k = new WebAssembly.Global({value: 'i64'}, SEED);
+  var ex2 = new WebAssembly.Instance(mod, {e: {acc: a, konst: k}}).exports;
   lastSeed = ex2.seed.value;
   if (lastSeed !== SEED) {
     ok = false;
@@ -93,6 +97,12 @@ for (var i = 1; i <= 20; i++) {
 }
 print('wasmMakeGlobal snapshot stores intact: ' + ok);
 print('wasmMakeGlobal snapshot value: ' + lastSeed);
+
+// The immutable import, read back through generated code. Unlike everything
+// above, this observes what wasmLinkGlobal returned rather than what a setter
+// stored -- and only an immutable import does, because a mutable one keeps
+// the Global object and throws the link result's value away.
+print('immutable import lo/hi: ' + ex.konst_lo() + '/' + ex.konst_hi());
 
 // Wrapping to 64 bits, asserted separately: it is about truncation at store
 // time, not about allocation or rooting.

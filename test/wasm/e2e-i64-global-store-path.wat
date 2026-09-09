@@ -30,6 +30,14 @@
   ;; store -- rather than a live global's setter closure.
   (import "e" "acc" (global $acc (mut i64)))
 
+  ;; An IMMUTABLE i64 import, which is the only shape in which the SNAPSHOT
+  ;; READER's answer is observable from inside a module. For a mutable import
+  ;; the import loop keeps the Global OBJECT and discards the value
+  ;; wasmLinkGlobal returned, so a mutable import alone would pass even if
+  ;; that builtin handed back a wrong non-sentinel value; an immutable one
+  ;; snapshots the returned value into the frame slot the module reads.
+  (import "e" "konst" (global $konst i64))
+
   ;; A module-local i64 global that is exported: each instantiation wraps it
   ;; with wasmMakeGlobal, whose snapshot i64 arm is the fourth allocating
   ;; store.
@@ -49,6 +57,13 @@
     global.get $acc
     i64.const 32
     i64.shr_u
+    i32.wrap_i64)
+
+  (func (export "konst_lo") (result i32) global.get $konst i32.wrap_i64)
+  (func (export "konst_hi") (result i32)
+    global.get $konst
+    i64.const 32
+    i64.shr_u
     i32.wrap_i64))
 
 ;; Each of the four allocating stores, driven repeatedly.
@@ -59,6 +74,11 @@
 ;; CHECK-NEXT: internal setter final lo/hi: 250/250
 ;; CHECK-NEXT: wasmMakeGlobal snapshot stores intact: true
 ;; CHECK-NEXT: wasmMakeGlobal snapshot value: 81985529216486895
+
+;; The immutable import: what wasmLinkGlobal read out of the slot, snapshotted
+;; into the module's frame. 0x0123456789abcdef is lo=0x89abcdef (-1985229329
+;; as a signed i32) and hi=0x01234567.
+;; CHECK-NEXT: immutable import lo/hi: -1985229329/19088743
 
 ;; Wrapping to 64 bits, which happens at store time so the slot stays
 ;; canonical. Separate from the store-path assertions above: it exercises

@@ -2187,17 +2187,20 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
 
   // Helper to create a comparison string and check equality.
   //
-  // The descriptor's string is re-derived from lv.valueTypeVal AFTER the
-  // create() below rather than hoisted above the lambda. create() allocates,
-  // which is a safepoint, and a raw StringPrimitive* taken before it is
-  // stale: under -gc-sanitize-handles=1 this was a heap-use-after-free in
-  // StringPrimitive::equals on every `new WebAssembly.Global(...)`.
+  // The descriptor's string is re-derived from lv.valueTypeVal after the
+  // StringPrimitive::create inside this lambda, rather than hoisted above
+  // the lambda. That create() allocates, which is a safepoint, and a raw
+  // StringPrimitive* taken before it is stale: under -gc-sanitize-handles=1
+  // this was a heap-use-after-free in StringPrimitive::equals on every
+  // `new WebAssembly.Global(...)`.
   auto matchStr = [&](const char *s, size_t len) -> bool {
     auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
     if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
       return false;
-    return lv.valueTypeVal->getString()->equals(
-        vmcast<StringPrimitive>(*res));
+    // Two statements, matching parseValTypeString below: the allocation
+    // completes before the descriptor's string is read out.
+    auto *other = vmcast<StringPrimitive>(*res);
+    return lv.valueTypeVal->getString()->equals(other);
   };
 
   if (matchStr("i32", 3)) {

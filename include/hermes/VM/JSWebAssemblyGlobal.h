@@ -95,10 +95,8 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// must be rooted across it and the store can fail. It replaces a scalar
   /// field write that could do neither.
   /// \return EXCEPTION if the BigInt could not be allocated.
-  static ExecutionStatus setI64Value(
-      Handle<JSWebAssemblyGlobal> self,
-      Runtime &runtime,
-      int64_t val);
+  static ExecutionStatus
+  setI64Value(Handle<JSWebAssemblyGlobal> self, Runtime &runtime, int64_t val);
 
   /// Get the value type.
   ValType getValType() const {

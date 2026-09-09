@@ -72,8 +72,12 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
 /// JSWebAssemblyGlobal.h carries static_asserts pinning the six values and
 /// naming this function -- reordering the enum is a build error, not a
 /// silently wrong type check.
-/// 0xFF remains "a Wasm type no Global can have", which is now only v128; it
-/// matches nothing, and v128 is diagnosed before it gets this far anyway.
+/// 0xFF remains "a Wasm type no Global can have", which is now only v128. It
+/// matches nothing, so a v128 global import reports a mismatch and a v128
+/// global export is refused by wasmMakeGlobal as an unknown value type. That
+/// is the only thing keeping v128 out of the runtime today: a proper
+/// frontend diagnostic, with a message naming SIMD, is Task 12 of the
+/// reference-types plan.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32

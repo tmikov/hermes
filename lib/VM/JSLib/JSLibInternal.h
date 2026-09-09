@@ -560,12 +560,14 @@ ExecutionStatus setWasmTableSlot(
 /// global holds an int32-valued double, an f32 global a float-representable
 /// one, an f64 global the double as it stands.
 ///
-/// EVERY writer of that field goes through here -- the Global constructor, the
-/// `value` setter, and the wasmGlobalSet builtin that generated Wasm code uses
-/// -- so "value_ is canonical for valType_" is a property of this one function
-/// rather than an assumption spread over three call sites. wasmGlobalGet and
-/// wasmLinkGlobal hand that field straight to generated code, which treats an
-/// i32 global's value as an int32 everywhere downstream.
+/// Every NUMERIC writer of that slot goes through here -- the Global
+/// constructor, the `value` setter, and the wasmGlobalSet builtin that
+/// generated Wasm code uses -- so "value_ is canonical for valType_" is a
+/// property of this one function for the numeric rows of the table, rather
+/// than an assumption spread over three call sites. The i64 row has its own
+/// writer, JSWebAssemblyGlobal::setI64Value, because it allocates.
+/// wasmGlobalGet and wasmLinkGlobal hand the slot straight to generated code,
+/// which treats an i32 global's value as an int32 everywhere downstream.
 ///
 /// Must not be called on an i64 global, whose slot holds a BigInt, nor on a
 /// reference-typed one, whose slot holds the reference. Those rows of the

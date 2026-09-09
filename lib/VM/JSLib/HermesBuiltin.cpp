@@ -2602,9 +2602,11 @@ CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
   // re-loaded per access rather than cached across the call.
   //
   // Be precise about what is new here. This builtin ALREADY throws on a bad
-  // argument and ALREADY allocates a BigInt for an i64 global, so neither
-  // allocation nor an exception is introduced. What is new is interpreted
-  // execution and the rooting obligations that come with it.
+  // argument, so an exception is not introduced, and it allocated on the
+  // snapshot i64 path before the value slot became a traced BigInt -- that
+  // allocation moved to store time and the snapshot path below now allocates
+  // nothing. What is new is interpreted execution and the rooting
+  // obligations that come with it.
   if (Callable *fn = glob->getGetter(runtime)) {
     struct : public Locals {
       PinnedValue<Callable> fn;
@@ -2651,9 +2653,10 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   //
   // The raw Callable* is consumed immediately and only a BOOL survives.
   // Unlike the public setter this builtin never calls toNumber_RJS -- it
-  // type-checks its argument directly -- so the only safepoint here is the
-  // executeCall1 itself. Pinning anyway keeps the two setters the same shape
-  // and survives anyone later adding a coercion above the call.
+  // type-checks its argument directly. There are TWO safepoints below: the
+  // executeCall1 on the live path, and the i64 snapshot store, which now
+  // materializes a BigInt. lv.glob is the root for the second. Anyone adding
+  // a third -- a reference-typed brand check, say -- must root across it too.
   struct : public Locals {
     PinnedValue<Callable> fn;
     PinnedValue<> arg;
@@ -2710,12 +2713,11 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   }
   // setWasmGlobalNumber, not setValue: it is the one NUMERIC writer of
   // value_, so an i32 global's slot is int32-valued and an f32 global's
-  // float-valued
-  // whichever of the three writers wrote it. The values generated
-  // code pushes here are already in that form, so this cannot be observed to
-  // do anything -- it makes the invariant a property of the setter rather
-  // than of the whole compiler, and keeps the three writers from drifting
-  // apart.
+  // float-valued whichever of the three writers wrote it. The values
+  // generated code pushes here are already in that form, so this cannot be
+  // observed to do anything -- it makes the invariant a property of the
+  // setter rather than of the whole compiler, and keeps the three writers
+  // from drifting apart.
   setWasmGlobalNumber(runtime, glob, val.getNumber());
   return HermesValue::encodeUndefinedValue();
 }
