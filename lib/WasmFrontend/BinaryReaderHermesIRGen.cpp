@@ -752,12 +752,11 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefIsNullExpr() {
-  // Not implemented. Without an override wabt's default no-op runs, which
-  // leaves the operand on the value stack: the reference itself is then
-  // returned in place of the i32 result, silently and with no diagnostic.
-  // Warn and keep the stack consistent, as ref.null and ref.func do.
+  // ref.is_null is not a constant expression -- the initializer positions
+  // this reader also drives admit const, global.get, ref.null and ref.func
+  // -- so only a function body has anything to hand the IR generator.
   if (inFunctionBody_ && irgen_)
-    irgen_->warnUnsupported("ref.is_null", 1, 1);
+    irgen_->onRefIsNull();
   return wabt::Result::Ok;
 }
 

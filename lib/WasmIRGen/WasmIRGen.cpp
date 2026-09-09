@@ -7684,6 +7684,18 @@ void WasmIRGen::onRefNull() {
   push(builder_.getLiteralNull());
 }
 
+void WasmIRGen::onRefIsNull() {
+  if (unreachable_)
+    return;
+  Value *ref = pop();
+  // Strict equality. A loose one would also answer 1 for `undefined`, which
+  // is an ordinary non-null externref value.
+  auto *isNull = builder_.createBinaryOperatorInst(
+      ref, builder_.getLiteralNull(), ValueKind::BinaryStrictlyEqualInstKind);
+  // Wasm wants an i32; AsInt32Inst turns the boolean into 1 or 0.
+  push(builder_.createAsInt32Inst(isNull));
+}
+
 void WasmIRGen::onElemDrop(uint32_t segmentIndex) {
   if (unreachable_)
     return;

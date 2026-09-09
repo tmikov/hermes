@@ -465,6 +465,12 @@ class WasmIRGen {
   /// could not be told apart from one cleared by a missing JS argument.
   void onRefNull();
 
+  /// ref.is_null: pop a reference and push i32 1 if it is null, else 0. The
+  /// comparison is strict, so `undefined` -- a legal non-null externref --
+  /// answers 0. It also depends on wasmValTypeToIRType annotating a funcref
+  /// as nullable; test/wasm/ref-is-null.wat goes red if that changes.
+  void onRefIsNull();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values

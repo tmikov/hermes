@@ -1,0 +1,66 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for ref-is-null.wat.
+//
+// The assertions print the raw result rather than a boolean derived from it,
+// so a result of `true`, `undefined` or a reference is visibly not 1. That
+// still cannot tell 1 from Number(1) or from a string "1", so the `shape`
+// line at the end checks typeof separately.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+function instantiate(imports) {
+  return new WebAssembly.Instance(mod, imports).exports;
+}
+
+// A first instantiation with a null funcref, only to obtain one of this
+// module's Exported Functions to feed the second one with. Its own exports
+// are not asserted on.
+var seed = instantiate({
+  e: {fnull: null, ffn: null, enull: null, eundef: undefined, eobj: {}},
+});
+var fn = seed.lit_f;
+
+var obj = {tag: 'x'};
+var x = instantiate({
+  e: {fnull: null, ffn: fn, enull: null, eundef: undefined, eobj: obj},
+});
+
+print('lit: ' + x.lit_f() + ' ' + x.lit_e());
+
+print('param_f(null): ' + x.param_f(null));
+print('param_f(exported fn): ' + x.param_f(fn));
+print('param_e(null): ' + x.param_e(null));
+print('param_e(undefined): ' + x.param_e(undefined));
+print('param_e(object): ' + x.param_e(obj));
+
+print('local init: ' + x.local_f_init() + ' ' + x.local_e_init());
+print('local_f_set(null/fn): ' + x.local_f_set(null) + ' ' + x.local_f_set(fn));
+print('local_e_set(null/undefined/object): ' + x.local_e_set(null) + ' ' +
+      x.local_e_set(undefined) + ' ' + x.local_e_set(obj));
+
+print('call_f(null/fn): ' + x.call_fnull() + ' ' + x.call_ffn());
+print('call_e(null/undefined/object): ' + x.call_enull() + ' ' +
+      x.call_eundef() + ' ' + x.call_eobj());
+
+// Table slots, in the order the element segment installed them:
+// 0 get_fnull, 1 get_ffn, 2 get_enull, 3 get_eundef, 4 get_eobj.
+print('ind_f(null/fn): ' + x.ind_f(0) + ' ' + x.ind_f(1));
+print('ind_e(null/undefined/object): ' + x.ind_e(2) + ' ' + x.ind_e(3) + ' ' +
+      x.ind_e(4));
+
+// The result is an i32. `| 0` is identity on 1 and 0 but maps `true` to 1
+// and `undefined` to 0, so it is printed next to typeof rather than instead
+// of it. A boolean, `undefined` and a reference each fail the typeof half; a
+// number that is not 1 or 0 fails the other half.
+var one = x.param_f(null);
+var zero = x.param_f(fn);
+print('shape: ' + typeof one + ' ' + (one | 0) + ' ' + (zero | 0));
+
+print('done');
