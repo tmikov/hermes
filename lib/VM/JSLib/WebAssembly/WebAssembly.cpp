@@ -1645,9 +1645,21 @@ wasmTableConstructor(void *context, Runtime &runtime) {
     return runtime.raiseTypeError(
         "WebAssembly.Table(): 'element' must be a string");
   }
-  auto *elemStr = lv.elementVal->getString();
-  bool isAnyfunc = elemStr->equals(
-      runtime.getPredefinedString(Predefined::anyfunc));
+  // The descriptor's string is re-derived from lv.elementVal for each
+  // comparison rather than hoisted into a raw StringPrimitive*. BOTH
+  // comparisons cross an allocation: getPredefinedString materializes a lazy
+  // identifier if the predefined string has not been built yet, and
+  // StringPrimitive::create obviously allocates. Under
+  // -gc-sanitize-handles=1 the hoisted pointer was a heap-use-after-free in
+  // StringPrimitive::equals on every `new WebAssembly.Table(...)`.
+  //
+  // Each comparison is split across two statements on purpose: the operand
+  // that can allocate is fully evaluated first, and only then is the
+  // descriptor's string read out, so neither pointer is live across the
+  // other's allocation whatever order the compiler picks for the arguments.
+  StringPrimitive *anyfuncStr =
+      runtime.getPredefinedString(Predefined::anyfunc);
+  bool isAnyfunc = lv.elementVal->getString()->equals(anyfuncStr);
   // Also accept "funcref" as an alias for "anyfunc" per the spec.
   if (!isAnyfunc) {
     auto funcrefRes = StringPrimitive::create(
@@ -1656,7 +1668,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     auto *funcrefStr = vmcast<StringPrimitive>(*funcrefRes);
-    if (!elemStr->equals(funcrefStr)) {
+    if (!lv.elementVal->getString()->equals(funcrefStr)) {
       return runtime.raiseTypeError(
           "WebAssembly.Table(): 'element' must be 'anyfunc' or 'funcref'");
     }
@@ -2417,15 +2429,25 @@ wasmGlobalValueOfMethod(void *context, Runtime &runtime) {
 
 /// Parse a Wasm value type string ("i32", "i64", "f32", "f64") into a
 /// JSWebAssemblyTag::ValType. Returns true on success.
+///
+/// \p str is a HANDLE, not a raw StringPrimitive*, and that is load-bearing:
+/// the lambda below allocates a comparison string on every call, so a raw
+/// pointer the caller copied in is stale by the time equals() dereferences
+/// it. Rooting it on the CALLER's side does not help -- the copy in this
+/// frame is what gets used. Under -gc-sanitize-handles=1 that was a
+/// heap-use-after-free on every `new WebAssembly.Tag(...)`.
 static bool parseValTypeString(
     Runtime &runtime,
-    StringPrimitive *str,
+    Handle<StringPrimitive> str,
     JSWebAssemblyTag::ValType &result) {
   auto matchStr = [&](const char *s, size_t len) -> bool {
     auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
     if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
       return false;
-    return str->equals(vmcast<StringPrimitive>(*res));
+    // Two statements: the allocation completes before `str` is dereferenced,
+    // and Handle re-reads the rooted slot rather than a stale copy.
+    auto *other = vmcast<StringPrimitive>(*res);
+    return str->equals(other);
   };
 
   if (matchStr("i32", 3)) {
@@ -2470,6 +2492,7 @@ wasmTagConstructor(void *context, Runtime &runtime) {
     PinnedValue<JSObject> paramsObj;
     PinnedValue<> lenVal;
     PinnedValue<> elemVal;
+    PinnedValue<StringPrimitive> elemStr;
     PinnedValue<JSWebAssemblyTag> tag;
   } lv;
   LocalsRAII lraii(runtime, &lv);
@@ -2530,7 +2553,10 @@ wasmTagConstructor(void *context, Runtime &runtime) {
     }
 
     JSWebAssemblyTag::ValType vt;
-    if (!parseValTypeString(runtime, lv.elemVal->getString(), vt)) {
+    // Rooted before the call: parseValTypeString allocates on every
+    // comparison, so it takes a handle rather than a raw pointer.
+    lv.elemStr = lv.elemVal->getString();
+    if (!parseValTypeString(runtime, lv.elemStr, vt)) {
       return runtime.raiseTypeError(
           "WebAssembly.Tag(): parameter type must be "
           "'i32', 'i64', 'f32', or 'f64'");
@@ -2581,7 +2607,14 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
 
   lv.tagHandle = tag;
 
-  const auto &paramTypes = lv.tagHandle->getParameters();
+  // COPIED, not bound by reference. getParameters() returns a reference to a
+  // std::vector living inside the JSWebAssemblyTag CELL, and the cell moves:
+  // the loop below calls getComputed_RJS and toNumber_RJS, each of which runs
+  // arbitrary user JS, and then indexes paramTypes[i] afterwards. A reference
+  // would be reading a stale vector header by then. The vector holds one byte
+  // per Wasm parameter, so the copy is not worth avoiding.
+  const std::vector<JSWebAssemblyTag::ValType> paramTypes =
+      lv.tagHandle->getParameters();
   uint32_t paramCount = paramTypes.size();
 
   // Second arg must be an iterable/array-like with matching length.
@@ -2694,16 +2727,24 @@ wasmExceptionGetArgMethod(void *context, Runtime &runtime) {
         "WebAssembly.Tag");
   }
 
+  // Both cells are pinned BEFORE the coercion below, which runs a user
+  // `valueOf` and can move or collect anything: this method used to hold both
+  // raw across it and then dereference them, tag->getParameters() for the
+  // bounds check and exc->getPayload() for the answer.
+  struct : public Locals {
+    PinnedValue<> indexVal;
+    PinnedValue<JSWebAssemblyException> exc;
+    PinnedValue<JSWebAssemblyTag> tag;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  lv.exc = exc;
+  lv.tag = tag;
+
   // Tag must identity-match.
-  if (exc->getTag(runtime) != tag) {
+  if (lv.exc->getTag(runtime) != lv.tag.get()) {
     return runtime.raiseTypeError(
         "WebAssembly.Exception.prototype.getArg: tag does not match");
   }
-
-  struct : public Locals {
-    PinnedValue<> indexVal;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
 
   lv.indexVal = args.getArg(1);
   auto indexRes = toNumber_RJS(runtime, lv.indexVal);
@@ -2714,12 +2755,12 @@ wasmExceptionGetArgMethod(void *context, Runtime &runtime) {
   uint32_t index = static_cast<uint32_t>(indexD);
 
   if (static_cast<double>(index) != indexD ||
-      index >= tag->getParameters().size()) {
+      index >= lv.tag->getParameters().size()) {
     return runtime.raiseRangeError("WebAssembly.Exception.prototype.getArg: "
                                    "index out of range");
   }
 
-  auto *payload = exc->getPayload(runtime);
+  auto *payload = lv.exc->getPayload(runtime);
   if (!payload) {
     return HermesValue::encodeUndefinedValue();
   }
