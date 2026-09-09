@@ -1366,12 +1366,20 @@ static bool readWasmFuncInfo(
 }
 
 // Defined here rather than in WebAssembly.cpp, alongside isWasmExportedFunction
-// and setWasmTableSlot and for the same reason: WebAssembly.cpp is compiled
-// only when HERMES_ENABLE_WASM is on, while the wasm* builtins below are
-// compiled unconditionally, because Builtins.def numbering is deliberately
-// independent of the flag (see the note above wasmLinkErrorProto). A helper
-// those builtins call therefore has to live in a translation unit that is
-// always built -- defining it there broke the default WASM=OFF build.
+// and setWasmTableSlot and for the same reason: all three are shared between
+// the wasm* builtins in this file and the JS API in WebAssembly.cpp -- hence
+// the declarations in JSLibInternal.h -- and they belong next to
+// readWasmFuncInfo and the ValType invariant they maintain.
+//
+// This is NOT a build-configuration constraint. An earlier version of this
+// comment said the wasm builtins here were compiled unconditionally and
+// concluded that a helper they call had to live in an always-built
+// translation unit; neither half is true. The whole run of wasm builtin
+// implementations in this file sits inside one #ifdef HERMES_ENABLE_WASM, so
+// with Wasm off none of this is compiled either -- every wasm builtin id
+// resolves to the single wasmDisabled body instead (see the note above it).
+// What IS independent of the flag is Builtins.def NUMBERING, which is a
+// different claim: the ids exist in both configurations, the bodies do not.
 void setWasmGlobalNumber(
     Runtime &runtime,
     JSWebAssemblyGlobal *glob,

@@ -12,6 +12,7 @@
 
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/VM/Callable.h"
+#include "hermes/VM/JSNativeFunctions.h"
 #include "hermes/VM/JSObject.h"
 
 using namespace hermes::vm;
@@ -23,7 +24,11 @@ using WasmBuiltinTest = RuntimeTestFixture;
 /// \return a fresh, unbranded native function. Serves both as the object a
 /// brand is stamped onto and as the "closure" such a brand wraps, since
 /// wasmSetFuncInfo requires a Callable for each.
-static Handle<NativeFunction> makeFunction(Runtime &runtime) {
+///
+/// A NativeFunction is NOT the shape of a real export; see makeRealExport.
+/// It is kept as one of several object kinds the predicate must handle, not
+/// as the representative one.
+static Handle<NativeFunction> makeNativeFunction(Runtime &runtime) {
   return NativeFunction::create(
       runtime,
       runtime.functionPrototype,
@@ -33,6 +38,44 @@ static Handle<NativeFunction> makeFunction(Runtime &runtime) {
       Predefined::getSymbolID(Predefined::emptyString),
       0,
       Runtime::makeNullHandle<JSObject>());
+}
+
+/// Evaluate \p src as a script and \return its completion value.
+static Handle<> evalExpr(Runtime &runtime, llvh::StringRef src) {
+  hermes::hbc::CompileFlags flags;
+  auto res = runtime.run(src, "file:///wasm-builtin-test.js", flags);
+  EXPECT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+  if (res == ExecutionStatus::EXCEPTION)
+    return Runtime::getUndefinedValue();
+  return runtime.makeHandle(*res);
+}
+
+/// \return an ordinary JS closure -- a JSFunction, which is what a real Wasm
+/// export is, unlike the NativeFunction above.
+static Handle<> makeJSClosure(Runtime &runtime) {
+  return evalExpr(runtime, "(function jsClosure() {})");
+}
+
+/// \return a REAL WebAssembly Exported Function: a module compiled and
+/// instantiated at run time, with its export read off the exports object.
+///
+/// This is the object the predicate exists to recognise, and it is worth the
+/// trouble of building because it is not the shape any hand-rolled subject
+/// has. WasmIRGen builds each export wrapper with createCreateFunctionInst
+/// (WasmIRGen.cpp), so a wrapper is an ordinary JSFunction closure; a
+/// predicate that restricted itself to NativeFunction would accept every
+/// hand-built subject in this file and reject every real export.
+///
+/// The bytes are `(module (func (export "f") (result i32) (i32.const 42)))`
+/// as compiled by wat2wasm -- the smallest module with an exported function.
+static Handle<> makeRealExport(Runtime &runtime) {
+  return evalExpr(runtime, R"JS(
+    var bytes = new Uint8Array([
+        0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0,
+        7, 5, 1, 1, 102, 0, 0, 10, 6, 1, 4, 0, 65, 42, 11]);
+    var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes.buffer));
+    inst.exports.f;
+  )JS");
 }
 
 /// The wasmIsExportedFunction builtin: the WebAssembly Exported Function brand
@@ -60,6 +103,15 @@ TEST_F(WasmBuiltinTest, WasmIsExportedFunctionPredicate) {
   ASSERT_TRUE(lenRes->get().isNumber());
   EXPECT_EQ(1.0, lenRes->get().getNumber());
 
+  // Listed in NativeFunctions.def, which is the fourth registration point:
+  // it generates the pointer-to-name table getFunctionName consults, and
+  // NativeFunction::_snapshotNameImpl uses that for heap-snapshot names. A
+  // missing entry is not a dispatch failure, it is an anonymous entry in a
+  // snapshot, so nothing else in this file would notice.
+  EXPECT_STREQ(
+      "wasmIsExportedFunction",
+      getFunctionName(vmcast<NativeFunction>(*pred)->getFunctionPtr()));
+
   /// Call the builtin on \p arg. The result must be a boolean: a predicate
   /// that answered anything else would be a value generated IR would then
   /// branch on incorrectly.
@@ -82,8 +134,8 @@ TEST_F(WasmBuiltinTest, WasmIsExportedFunctionPredicate) {
   ASSERT_NE(nullptr, setInfoRaw);
   auto setInfo = runtime.makeHandle(setInfoRaw);
 
-  auto exportedFn = makeFunction(runtime);
-  auto closure = makeFunction(runtime);
+  auto exportedFn = makeNativeFunction(runtime);
+  auto closure = makeNativeFunction(runtime);
   auto setRes = Callable::executeCall3(
       setInfo,
       runtime,
@@ -94,6 +146,39 @@ TEST_F(WasmBuiltinTest, WasmIsExportedFunctionPredicate) {
   ASSERT_EQ(ExecutionStatus::RETURNED, setRes.getStatus());
 
   EXPECT_TRUE(ask(exportedFn));
+
+  // The object kind the predicate actually exists to recognise. Every other
+  // subject in this test is hand-built and none of them has a real wrapper's
+  // shape: WasmIRGen builds each export wrapper with createCreateFunctionInst,
+  // so it is an ordinary JSFunction closure. Without this case a predicate
+  // narrowed to NativeFunction would pass the whole test and reject every
+  // real export.
+  auto realExport = makeRealExport(runtime);
+  ASSERT_TRUE(vmisa<JSFunction>(*realExport))
+      << "an export wrapper should be an ordinary JS closure";
+  ASSERT_FALSE(vmisa<NativeFunction>(*realExport));
+  EXPECT_TRUE(ask(realExport)) << "a real module export must be recognised";
+
+  // An unbranded closure of that same kind is not one, so the JSFunction case
+  // is not simply "everything callable is true".
+  auto jsClosure = makeJSClosure(runtime);
+  ASSERT_TRUE(vmisa<JSFunction>(*jsClosure));
+  EXPECT_FALSE(ask(jsClosure)) << "an unbranded JS closure is not exported";
+
+  // And a hand-branded closure of that kind IS one: the answer follows the
+  // brand, not the object's kind.
+  auto brandedJSFn = makeJSClosure(runtime);
+  ASSERT_EQ(
+      ExecutionStatus::RETURNED,
+      Callable::executeCall3(
+          setInfo,
+          runtime,
+          Runtime::getUndefinedValue(),
+          brandedJSFn.getHermesValue(),
+          jsClosure.getHermesValue(),
+          HermesValue::encodeTrustedNumberValue(9))
+          .getStatus());
+  EXPECT_TRUE(ask(brandedJSFn));
 
   // Everything else is false rather than an error. The builtin is a
   // PRIVATE_BUILTIN, reachable from any bytecode emitting a CallBuiltin with
@@ -173,18 +258,12 @@ TEST_F(WasmBuiltinSanitizeTest, WasmIsExportedFunctionMovesTheHeap) {
   ASSERT_TRUE(*pred);
   ASSERT_TRUE(*setInfo);
 
-  auto exportedFn = makeFunction(runtime);
-  auto closure = makeFunction(runtime);
-  ASSERT_EQ(
-      ExecutionStatus::RETURNED,
-      Callable::executeCall3(
-          setInfo,
-          runtime,
-          Runtime::getUndefinedValue(),
-          exportedFn.getHermesValue(),
-          closure.getHermesValue(),
-          HermesValue::encodeTrustedNumberValue(7))
-          .getStatus());
+  // A real module export and an ordinary closure, not two NativeFunctions:
+  // the shape whose rooting matters is the one the funcref paths will hand
+  // this builtin.
+  auto exportedFn = makeRealExport(runtime);
+  auto closure = makeJSClosure(runtime);
+  ASSERT_TRUE(vmisa<JSFunction>(*exportedFn));
 
   // Repeat, allocating in between, so the answer has to survive the heap
   // moving under it rather than being read once from a settled heap. The
