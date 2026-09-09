@@ -139,9 +139,12 @@ print('mutable anyfunc write a plain function: ' + attempt(function () {
   return 'wrote';
 }));
 
+// Compared against a typed literal rather than printed: string concatenation
+// reads the same for 2, 2n and "2".
 var gNum = new WebAssembly.Global({value: 'i32', mutable: true}, 1);
 gNum.value = 2;
-print('mutable numeric snapshot round-trips: ' + gNum.value);
+print('mutable numeric snapshot round-trips: ' + (gNum.value === 2) + ' ' +
+      typeof gNum.value);
 
 // --- An externref value is a GC pointer in the value slot ---
 // The loop allocates between constructions, so under -gc-sanitize-handles=1
@@ -182,7 +185,7 @@ var ex = new WebAssembly.Instance(mod, {e: {ref: hostRef}}).exports;
 // A real Exported Function: an ordinary JS closure that WasmIRGen built and
 // the module's own generated code branded.
 var add = ex.add;
-print('fixture: ' + typeof add + ' ' + add(2, 3));
+print('fixture: ' + typeof add + ' ' + (add(2, 3) === 5));
 
 print('anyfunc from a real export: ' +
       (new WebAssembly.Global({value: 'anyfunc'}, add).value === add));
@@ -221,13 +224,14 @@ print('anyfunc write back to null: ' + (gmFn.value === null));
 // wasmMakeGlobal now selects its mode on isMutable: g_const takes the
 // snapshot arm, g_mut the live one. A live global is a two-way view, so the
 // write below is visible to the module's own global.get.
-print('g_const: ' + ex.g_const.value + ' ' + attempt(function () {
+print('g_const: ' + (ex.g_const.value === 42) + ' ' + attempt(function () {
   ex.g_const.value = 1;
   return 'wrote';
 }));
-print('g_mut: ' + ex.g_mut.value + ' / ' + ex.get_mut());
+print('g_mut: ' + (ex.g_mut.value === 100) + ' ' + (ex.get_mut() === 100));
 ex.g_mut.value = 7;
-print('g_mut after a host write: ' + ex.g_mut.value + ' / ' + ex.get_mut());
+print('g_mut after a host write: ' + (ex.g_mut.value === 7) + ' ' +
+      (ex.get_mut() === 7));
 
 // --- The imported mutable externref global, through generated code ---
 // The READ direction works today: global.get on the import hands back the

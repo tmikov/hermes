@@ -15,11 +15,11 @@
 ;; and compares identity.
 ;;
 ;; The setter now dispatches on the declared type before any coercion, and
-;; this file is the table: an externref takes any JS value as it stands, an anyfunc
-;; takes null or an Exported Function, an i64 takes a BigInt wrapped to 64
-;; bits, and a numeric global still COERCES with ToNumber -- which is what
-;; separates this setter from the internal one, whose test refuses the same
-;; values (e2e-global-ref-internal-setter.wat).
+;; this file is the table: an externref takes any JS value as it stands, an
+;; anyfunc takes null or an Exported Function, an i64 takes a BigInt wrapped
+;; to 64 bits, and a numeric global still COERCES with ToNumber -- which is
+;; what separates this setter from the internal one, whose test refuses the
+;; same values (e2e-global-ref-internal-setter.wat).
 ;;
 ;; The module supplies two things a pure-JS test cannot. One is a real
 ;; Exported Function, built by WasmIRGen and branded by the module's own

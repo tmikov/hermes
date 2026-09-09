@@ -81,17 +81,17 @@
 ;; CHECK-NEXT: mutable externref write: true
 ;; CHECK-NEXT: mutable externref write null: true
 ;; CHECK-NEXT: mutable anyfunc write a plain function: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
-;; CHECK-NEXT: mutable numeric snapshot round-trips: 2
+;; CHECK-NEXT: mutable numeric snapshot round-trips: true number
 ;; CHECK-NEXT: externref values traced across collections: true
-;; CHECK-NEXT: fixture: function 5
+;; CHECK-NEXT: fixture: function true
 ;; CHECK-NEXT: anyfunc from a real export: true
 ;; CHECK-NEXT: externref holds an export too: true
 ;; CHECK-NEXT: funcref constructions intact: true
 ;; CHECK-NEXT: anyfunc write an export: true
 ;; CHECK-NEXT: anyfunc write back to null: true
-;; CHECK-NEXT: g_const: 42 TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
-;; CHECK-NEXT: g_mut: 100 / 100
-;; CHECK-NEXT: g_mut after a host write: 7 / 7
+;; CHECK-NEXT: g_const: true TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
+;; CHECK-NEXT: g_mut: true true
+;; CHECK-NEXT: g_mut after a host write: true true
 ;; CHECK-NEXT: global.get sees the host value: true
 ;; CHECK-NEXT: put_ref an object: true true
 ;; CHECK-NEXT: put_ref a number: true true
