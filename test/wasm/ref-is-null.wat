@@ -96,11 +96,14 @@
     ref.is_null)
 
   ;; --- The other consumer shape: the i32 feeding a branch rather than a
-  ;; return. onBrIf runs the condition through peekThroughAsInt32, which
-  ;; discards the AsInt32Inst and branches on the boolean underneath, so the
-  ;; narrowing this opcode emits is undone again on this path. Answers 10 for
-  ;; null and 20 for non-null, so a branch taken the wrong way is not merely
-  ;; a swapped 0 and 1. ---
+  ;; return. onBrIf passes the condition through peekThroughAsInt32, which is
+  ;; a no-op here: it unwraps only an operand that is already boolean, and the
+  ;; comparison onRefIsNull builds is typed `any` when onBrIf sees it. So
+  ;; br_if branches on the AsInt32Inst itself, and the -O0 dump shows
+  ;; `CondBranchInst %7: number` consuming it. (Whether that guard is ever
+  ;; true at IRGen time, which would make the helper dead, is dz
+  ;; 01a085ae-1c61.) Answers 10 for null and 20 for non-null, so a branch
+  ;; taken the wrong way is not merely a swapped 0 and 1. ---
   (func (export "brif_f") (param funcref) (result i32)
     (block
       local.get 0
@@ -151,12 +154,14 @@
 ;; CHECK-NEXT: brif_f(null/fn): 10 20
 ;; CHECK-NEXT: brif_e(null/undefined/object): 10 20 20
 
-;; And the answer is the number 1 or the number 0. Both halves of each pair
-;; are needed: typeof refuses a boolean, `undefined` and a reference, while
-;; the strict comparison refuses a string, since '1' === 1 is false and the
-;; lines above cannot tell "0" from 0. Both results are checked, not just the
-;; null one: a string returned for only the non-null case was measured to
-;; satisfy the lines above.
+;; And the answer is the number 1 or the number 0. The strict comparison is
+;; what does the work -- `=== 1` and `=== 0` fix both the value and the type,
+;; which the lines above cannot, since string concatenation prints "0" and 0
+;; the same. The typeof half is redundant with it and kept only because it
+;; names the wrong answer in the output instead of just saying false. What is
+;; not redundant is checking BOTH results: a string returned for only the
+;; non-null case was measured to satisfy every other line the behavioural run
+;; prints.
 ;; CHECK-NEXT: shape: number true / number true
 
 ;; CHECK-NEXT: done
@@ -164,36 +169,77 @@
 ;; --- The annotation itself, at -O0, where no fold can hide it ---
 ;;
 ;; The behavioural rows above are counterfactual evidence: they answer
-;; correctly, and answer wrongly when the annotation is narrowed. That works
-;; only because InstSimplify is scheduled ahead of Inlining
-;; (lib/Optimizer/PassManager/Pipeline.cpp), so the direct call is still a
-;; CallInst when the fold happens; Inlining replaces a call with the returned
-;; value without transferring the call's type. These lines do not depend on
-;; that ordering. They name each place wasmValTypeToIRType's funcref
-;; annotation lands and read it off the instruction.
+;; correctly, and answer wrongly when the annotation is narrowed. For the
+;; call_f row that depends on pass order -- Inlining replaces a call with the
+;; returned value without transferring the call's type, so the fold that
+;; makes the row go red has to happen first, and it does only because
+;; InstSimplify is added ahead of Inlining in
+;; lib/Optimizer/PassManager/Pipeline.cpp. The parameter, local and
+;; call_indirect rows have no inlinable call and do not depend on that.
 ;;
-;; The function numbers follow the module's own function order, so inserting a
-;; function above shifts them.
+;; The lines below are read from a -O0 dump, so no optimization pass has run
+;; by the time they are matched. They name each place wasmValTypeToIRType's
+;; funcref annotation lands, read it off the instruction, and require the
+;; compared operand to be the very value the annotated instruction produced --
+;; adjacency alone would also be satisfied by a comparison against some other
+;; value of the same type.
 
-;; The function's own return type -- $get_fnull, the fifth site.
+;; The function's own return type -- $get_fnull, the fifth site. There is no
+;; comparison in it to connect, and it is not exported, so the direct-call pin
+;; below is what anchors its number: it names $get_fnull as call_fnull's
+;; callee.
 ;; IR-LABEL: function wasm_func_0(): null|object
+;; IR-LABEL: function_end
 
-;; A parameter, and the stack slot it is stored into: param_f.
+;; A parameter: param_f. The slot, the load out of that slot, and the operand
+;; the comparison consumes are required to be one value, by name.
 ;; IR-LABEL: function wasm_func_7(p0: null|object): number
-;; IR: %{{[0-9]+}} = AllocStackInst (:null|object) $local_0: any
-;; IR: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %{{[0-9]+}}: null|object, null: null
+;; IR: %[[PSLOT:[0-9]+]] = AllocStackInst (:null|object) $local_0: any
+;; IR: %[[PVAL:[0-9]+]] = LoadStackInst (:null|object) %[[PSLOT]]: null|object
+;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %[[PVAL]]: null|object, null: null
+;; IR-LABEL: function_end
 
-;; A declared local's slot: local_f_init.
+;; A declared local's slot: local_f_init, connected the same way.
 ;; IR-LABEL: function wasm_func_9(): number
-;; IR: %{{[0-9]+}} = AllocStackInst (:null|object) $local_0: any
-;; IR: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %{{[0-9]+}}: null|object, null: null
+;; IR: %[[LSLOT:[0-9]+]] = AllocStackInst (:null|object) $local_0: any
+;; IR: %[[LVAL:[0-9]+]] = LoadStackInst (:null|object) %[[LSLOT]]: null|object
+;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %[[LVAL]]: null|object, null: null
+;; IR-LABEL: function_end
 
-;; A direct call result: call_fnull.
+;; A direct call result: call_fnull. The comparison consumes the call, not
+;; merely a value printed next to it.
 ;; IR-LABEL: function wasm_func_13(): number
-;; IR: %{{[0-9]+}} = CallInst (:null|object) %{{[0-9]+}}: any, %wasm_func_0(): functionCode
-;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %{{[0-9]+}}: null|object, null: null
+;; IR: %[[DCALL:[0-9]+]] = CallInst (:null|object) %{{[0-9]+}}: any, %wasm_func_0(): functionCode
+;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %[[DCALL]]: null|object, null: null
+;; IR-LABEL: function_end
 
 ;; A call_indirect result: ind_f. A separate annotation site from the above.
 ;; IR-LABEL: function wasm_func_18(p0: number): number
-;; IR: %{{[0-9]+}} = CallInst (:null|object) %{{[0-9]+}}: any, empty: any
-;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %{{[0-9]+}}: null|object, null: null
+;; IR: %[[ICALL:[0-9]+]] = CallInst (:null|object) %{{[0-9]+}}: any, empty: any
+;; IR-NEXT: %{{[0-9]+}} = BinaryStrictlyEqualInst (:any) %[[ICALL]]: null|object, null: null
+;; IR-LABEL: function_end
+
+;; --- And those numbers, anchored by name ---
+;;
+;; The pins above address functions by index, which a function inserted into
+;; the module renumbers. The four export wrappers below keep their export's
+;; name and call their internal function by an explicit target, so these lines
+;; turn a renumbering into a failure even when the function that lands on the
+;; old number has the same shape -- measured by inserting a copy of param_f
+;; above it, which leaves the shape pin for wasm_func_7 green.
+
+;; IR-LABEL: function wasm_export_param_f(p0: any): any
+;; IR: CallInst (:any) %{{[0-9]+}}: any, %wasm_func_7(): functionCode
+;; IR-LABEL: function_end
+
+;; IR-LABEL: function wasm_export_local_f_init(): any
+;; IR: CallInst (:any) %{{[0-9]+}}: any, %wasm_func_9(): functionCode
+;; IR-LABEL: function_end
+
+;; IR-LABEL: function wasm_export_call_fnull(): any
+;; IR: CallInst (:any) %{{[0-9]+}}: any, %wasm_func_13(): functionCode
+;; IR-LABEL: function_end
+
+;; IR-LABEL: function wasm_export_ind_f(p0: any): any
+;; IR: CallInst (:any) %{{[0-9]+}}: any, %wasm_func_18(): functionCode
+;; IR-LABEL: function_end
