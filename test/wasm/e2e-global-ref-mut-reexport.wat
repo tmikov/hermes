@@ -27,6 +27,11 @@
 ;; refused as "not a WebAssembly.Global" and as a type mismatch respectively.
 ;; The immutable half is in e2e-global-ref-import.wat, which has no mutable
 ;; declaration to satisfy.
+;;
+;; It carries the third side of the `undefined` exemption for the same reason:
+;; the exemption is IMMUTABLE-externref-only, so a mutable externref import
+;; still refuses a supplied or omitted `undefined`, and this is the module
+;; that can be asked.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-global-ref-mut-reexport-consumer.wat_ -o %t-con.wasm && %hermesc --wasm -emit-binary -out %t-con.hbc %t-con.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-global-ref-mut-reexport-driver.js_ -- %t.hbc %t-con.hbc | %FileCheck --match-full-lines %s
@@ -54,10 +59,18 @@
 ;; CHECK-NEXT: an exporter write reaches the consumer: true
 ;; CHECK-NEXT: the re-export is still the same object: true
 
-;; The mutable rows of the sentinel table. Each links, keeps the object, and
-;; then has its sentinel written over so that the value is shown to have been
-;; the sentinel rather than absent.
-;; CHECK-NEXT: mutable declaration <- mutable snapshot holding null: true true
-;; CHECK-NEXT: ...and one holding undefined: true true
-;; CHECK-NEXT: ...whose value the module then replaces: true true
+;; The mutable rows of the sentinel table. Each row reads its sentinel back
+;; -- from the Global and from inside the module -- before anything writes,
+;; keeps the object supplied, and only then has the sentinel written over, so
+;; that it is shown to have been a value rather than an absence.
+;; CHECK-NEXT: mutable declaration <- mutable snapshot holding null: true true true
+;; CHECK-NEXT: ...whose null the module then replaces: true true
+;; CHECK-NEXT: ...and one holding undefined: true true true
+;; CHECK-NEXT: ...whose undefined the module then replaces: true true
+
+;; The third side of the `undefined` exemption: it is IMMUTABLE-externref-only,
+;; so a mutable externref import still takes the missing-import guard, whether
+;; the property is present and undefined or absent.
+;; CHECK-NEXT: mut externref <- undefined: LinkError: module has no import e.g
+;; CHECK-NEXT: mut externref <- absent: LinkError: module has no import e.g
 ;; CHECK-NEXT: done

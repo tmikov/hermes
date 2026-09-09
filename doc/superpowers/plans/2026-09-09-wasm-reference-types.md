@@ -479,13 +479,14 @@ externref global import" — describes a rule nobody wrote.
   earlier revision of this step said a mutable case could not exercise the
   collision because a mutable import discards the link result's value; that is
   backwards, and the spec was corrected against measurement during Task 4.
-  `wasmLinkGlobal` returns `getValue()` for any non-LIVE global, and
-  `WasmIRGen.cpp` compares that result against both sentinels *before* it
-  decides to keep the object for a mutable import, so a mutable snapshot
-  Global holding either sentinel link-errors too. The refusing branch is
+  **Measured on `a5a44f9db`**, before this task changes any of it:
+  `wasmLinkGlobal` returned `getValue()` for any non-LIVE global, and
+  `WasmIRGen.cpp` compared that result against both sentinels *before*
+  deciding to keep the object for a mutable import, so a mutable snapshot
+  Global holding either sentinel link-errored too. The refusing branch was
   chosen by the VALUE, not by the mutability. See the spec's four-row table
   under "The sentinel collision" for the measured outcomes. (A **live** Global
-  is unaffected either way: the link result is already the object for one.)
+  was unaffected either way: the link result was already the object for one.)
 
 - [ ] **Step 4: The golden that must change**
 

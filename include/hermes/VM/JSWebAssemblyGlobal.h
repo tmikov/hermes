@@ -113,27 +113,35 @@ class JSWebAssemblyGlobal final : public JSObject {
   }
 
   /// Set the closure that reads a live global's storage.
-  /// Asserts the global is mutable. That is what makes LIVE IMPLIES MUTABLE
-  /// an invariant of the type rather than a property of today's one caller:
-  /// WasmIRGen's global import path fetches an immutable match's value with
-  /// wasmGlobalGet and states that the fetch runs no closure, which a live
-  /// immutable global would falsify silently, during instantiation.
-  /// setMutable() must therefore run first, as wasmMakeGlobal does.
+  /// Asserts the global is mutable AT THE MOMENT THE CLOSURE IS INSTALLED,
+  /// which is what the assertion can see and all it claims: setMutable()
+  /// remains callable afterwards, so this does not make live-implies-mutable
+  /// an invariant of the type. What keeps it one in practice is that both
+  /// callers of setMutable -- wasmMakeGlobal and the JS constructor -- set
+  /// mutability once, during construction, before the object escapes.
+  /// It matters because WasmIRGen's global import path fetches an immutable
+  /// match's value with wasmGlobalGet and states that the fetch runs no
+  /// closure; a live immutable global would falsify that silently, during
+  /// instantiation. setMutable() must run first, as wasmMakeGlobal does.
   void setGetter(Runtime &runtime, Callable *fn) {
     assert(mutable_ && "a live global must be mutable");
     getter_.set(runtime, fn, runtime.getHeap());
   }
 
-  /// \return the closure that writes a live mutable global's storage, or
-  /// nullptr if this global is a snapshot or is immutable.
+  /// \return the closure that writes a live global's storage, or nullptr if
+  /// this global is a snapshot. Non-null exactly when getGetter() is:
+  /// wasmMakeGlobal installs both closures or neither, and setSetter asserts
+  /// the global is mutable, so "live but immutable" is not a state a caller
+  /// of these setters can reach.
   Callable *getSetter(Runtime &runtime) const {
     return setter_.get(runtime);
   }
 
   /// Set the closure that writes a live mutable global's storage.
-  /// Asserts the global is mutable, for the reason setGetter does: writing an
-  /// immutable global is a spec violation, and the pair is what makes a
-  /// global live.
+  /// Asserts the global is mutable at installation time, for the reason
+  /// setGetter does, and with the same limit on what that establishes:
+  /// writing an immutable global is a spec violation, and the pair of
+  /// closures is what makes a global live.
   void setSetter(Runtime &runtime, Callable *fn) {
     assert(mutable_ && "a live global must be mutable");
     setter_.set(runtime, fn, runtime.getHeap());
@@ -141,9 +149,10 @@ class JSWebAssemblyGlobal final : public JSObject {
 
   /// \return true if this global reads and writes a module's storage through
   /// closures rather than holding a value of its own. A live global is always
-  /// mutable: setGetter and setSetter assert it, and wasmMakeGlobal installs
-  /// both closures or neither. WasmIRGen's global import path depends on that
-  /// when it fetches an immutable match's value.
+  /// mutable: setGetter and setSetter assert it when the closures go in,
+  /// wasmMakeGlobal installs both or neither, and mutability is set once at
+  /// construction and not changed afterwards. WasmIRGen's global import path
+  /// depends on that when it fetches an immutable match's value.
   bool isLive(Runtime &runtime) const {
     return getter_.get(runtime) != nullptr;
   }
@@ -249,8 +258,8 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// For a live global, the closure that writes the module's storage; null
   /// for a snapshot one. Non-null exactly when getter_ is: wasmMakeGlobal
   /// installs both closures or neither, and setGetter/setSetter assert the
-  /// global is mutable -- which the value fetch on WasmIRGen's immutable
-  /// import path relies on to run no closure.
+  /// global is mutable when they run -- which the value fetch on WasmIRGen's
+  /// immutable import path relies on to run no closure.
   GCPointer<Callable> setter_;
 };
 

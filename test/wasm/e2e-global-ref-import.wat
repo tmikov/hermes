@@ -31,12 +31,15 @@
 ;; "raw Exported Function", and one stuck at true fails
 ;; "raw plain function".
 ;;
-;; The two externref imports carry DISTINCT values in every case that links,
-;; so a link path that dropped a value, or crossed two slots, shows up as a
-;; false rather than as an equal-looking pair. The `undefined` assertion in
-;; particular needs that: undefined is what an unwritten slot would read as
-;; too, and what rules that out is the same module reading `obj_a` back by
-;; identity a few lines above.
+;; There are two externref imports so that the slots are distinguishable. In
+;; the cases where they carry different values -- which is most of them, the
+;; plain-function case being the exception, since it puts one callable in both
+;; -- a link path that dropped a value or crossed two slots reads as a false
+;; rather than as an equal-looking pair. The `undefined` assertions need that
+;; most: undefined is also what an unwritten slot reads as, and what rules
+;; that out is `a` coming back by identity in the same instantiation --
+;; itself an exempt immutable externref, so it travels the same guard-elided
+;; path.
 ;;
 ;; `undefined` is an externref value like any other, and the import-object
 ;; lookup used to refuse it before the raw rule ever ran: a property holding
@@ -46,7 +49,10 @@
 ;; concept for globals at all -- it reads the property, takes `undefined` when
 ;; absent, and applies the type rule. The `n` import below is here to keep the
 ;; exemption narrow: a numeric global still refuses `undefined`, as does a
-;; funcref one, and each keeps the message it had.
+;; funcref one, and each keeps the message it had. The third side of that
+;; boundary -- a MUTABLE externref import, which also keeps the guard -- is
+;; pinned in e2e-global-ref-mut-reexport.wat, which has a mutable declaration
+;; to supply.
 ;;
 ;; It runs with -gc-sanitize-handles=1 because the funcref raw arm calls
 ;; wasmIsExportedFunction, which ALLOCATES -- it reaches
@@ -66,14 +72,14 @@
   (import "e" "b" (global $b externref))
   (import "e" "f" (global $f funcref))
   ;; A numeric import, so that the `undefined` exemption above is shown to be
-  ;; externref-only rather than a hole in the guard. Nothing else uses it.
+  ;; narrow rather than a hole in the guard. Nothing in the module body reads
+  ;; it: its whole purpose is to be supplied, or not, from the driver.
   (import "e" "n" (global $n i32))
 
   ;; These read the module's own frame slot -- what the link path snapshotted
   ;; -- and not the import object, which nothing consults again.
   (func (export "get_a") (result externref) global.get $a)
   (func (export "get_b") (result externref) global.get $b)
-  (func (export "get_n") (result i32) global.get $n)
 
   ;; A global initializer fed by an immutable reference import, re-exported.
   ;; This is the second consumer of the snapshot: the value travels the link
@@ -105,10 +111,12 @@
 ;; CHECK-NEXT: raw undefined satisfies externref: true true
 ;; CHECK-NEXT: an absent externref import satisfies it too: true true
 
-;; ...and the exemption is externref-only. A funcref and a numeric global
-;; still refuse `undefined`, and an absent property for either, each with the
-;; message it had. (That the message names a missing import rather than a
-;; type error is a divergence from node, filed as dz 01a0855d-6b5b.)
+;; ...and the exemption is IMMUTABLE-externref-only. A funcref and a numeric
+;; global still refuse `undefined`, and an absent property for either, each
+;; with the message it had; so does a mutable externref import, pinned in
+;; e2e-global-ref-mut-reexport.wat. (That the message names a missing import
+;; rather than a type error is a divergence from node, filed as dz
+;; 01a0855d-6b5b.)
 ;; CHECK-NEXT: funcref <- undefined: LinkError: module has no import e.f
 ;; CHECK-NEXT: funcref <- absent: LinkError: module has no import e.f
 ;; CHECK-NEXT: i32 <- undefined: LinkError: module has no import e.n

@@ -20,9 +20,10 @@ function instantiate(importObject) {
   return new WebAssembly.Instance(mod, importObject).exports;
 }
 
-// One instantiation per import set. The module has four imports, so every
-// case supplies all four and asserts on the ones it is about; the cases that
-// are about an ABSENT property build their import object by hand instead.
+// One instantiation per import set. The module has four imports, and `link`
+// supplies all four, with `n` fixed at 0 because no case that uses `link`
+// is about `n`. Anything that needs a different shape -- an absent property,
+// or a supplied `undefined` for `n` -- builds its import object by hand.
 function link(a, b, f) {
   return instantiate({e: {a: a, b: b, f: f, n: 0}});
 }

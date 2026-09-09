@@ -1146,12 +1146,17 @@ void WasmIRGen::createFunctions() {
           // only by a successful match, since `linked` is the Global itself
           // and a Global is not a value.
           //
-          // The fetch cannot run a closure. A closure is consulted only
-          // for a LIVE global, and JSWebAssemblyGlobal::setGetter asserts
-          // that the global it is installing a closure on is mutable, so a
-          // live IMMUTABLE global cannot be built. The mutability half of
-          // the match above has already refused a mutable Global for this
-          // immutable declaration, so a snapshot is what reaches the fetch.
+          // The fetch cannot run a closure. A closure is consulted only for
+          // a LIVE global, and no route builds a live immutable one:
+          // JSWebAssemblyGlobal::setGetter and setSetter assert the global is
+          // mutable when the closures go in, and both callers of setMutable
+          // -- wasmMakeGlobal and the JS constructor -- set mutability once,
+          // at construction, before the object escapes. (The assertions are
+          // about installation time; setMutable is not itself guarded, so
+          // this rests on the callers as well as on them.) The mutability
+          // half of the match above has already refused a mutable Global for
+          // this immutable declaration, so a snapshot is what reaches the
+          // fetch.
           //
           // `importVal` rather than `linked` on the mutable side: what is
           // stored is the object the import object supplied, which is what

@@ -50,28 +50,56 @@ print('the re-export is still the same object: ' + (con.g_re === g));
 // be refused -- `null` as "not a WebAssembly.Global", `undefined` as a type
 // mismatch -- and neither refusal had happened.
 //
-// A mutable import keeps the OBJECT, so what is asserted here is that linking
-// succeeds and that the object is the one supplied. That the sentinel really
-// was the value is asserted by writing over it: the module reads `null` or
-// `undefined` first, then writes an object the Global must show.
+// A mutable import keeps the OBJECT, so each row asserts four things, in this
+// order: the Global still holds the sentinel, the MODULE reads that sentinel
+// out of it, the object kept is the one supplied, and then -- after a write --
+// the sentinel is shown to have been a value rather than an absence, because
+// an object replaces it on both sides. Reading the sentinel back BEFORE the
+// write is what makes the row about the sentinel: a row that only wrote and
+// re-read would pass just as well had the Global started out holding an
+// object.
 function mutSnapshot(v) {
   return new WebAssembly.Global({value: 'externref', mutable: true}, v);
 }
 
 var gNull = mutSnapshot(null);
 var conNull = new WebAssembly.Instance(conMod, {e: {g: gNull}}).exports;
+print('mutable declaration <- mutable snapshot holding null: ' +
+      (gNull.value === null) + ' ' + (conNull.get() === null) + ' ' +
+      (conNull.g_re === gNull));
 var vNull = {tag: 'row3'};
 conNull.set(vNull);
-print('mutable declaration <- mutable snapshot holding null: ' +
-      (conNull.g_re === gNull) + ' ' + (gNull.value === vNull));
+print('...whose null the module then replaces: ' +
+      (gNull.value === vNull) + ' ' + (conNull.get() === vNull));
 
 var gUndef = mutSnapshot(undefined);
 var conUndef = new WebAssembly.Instance(conMod, {e: {g: gUndef}}).exports;
 print('...and one holding undefined: ' +
-      (conUndef.get() === undefined) + ' ' + (conUndef.g_re === gUndef));
+      (gUndef.value === undefined) + ' ' + (conUndef.get() === undefined) +
+      ' ' + (conUndef.g_re === gUndef));
 var vUndef = {tag: 'row4'};
 conUndef.set(vUndef);
-print('...whose value the module then replaces: ' +
+print('...whose undefined the module then replaces: ' +
       (gUndef.value === vUndef) + ' ' + (conUndef.get() === vUndef));
+
+// --- The third side of the exemption boundary ---
+// `undefined` is exempt from the missing-import guard for an IMMUTABLE
+// externref import and nothing else. A MUTABLE one keeps the guard, because a
+// raw value cannot satisfy a mutable declaration at all -- per spec a raw
+// value allocates an immutable global -- so `undefined` is not a value this
+// declaration admits either. The funcref and numeric sides are pinned in
+// e2e-global-ref-import.wat; this module is the one with a mutable
+// declaration to supply. (dz 01a0855d-6b5b holds the divergence in what the
+// message says.)
+function attemptCon(label, importObject) {
+  try {
+    new WebAssembly.Instance(conMod, importObject);
+    print(label + ': linked');
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+attemptCon('mut externref <- undefined', {e: {g: undefined}});
+attemptCon('mut externref <- absent', {e: {}});
 
 print('done');
