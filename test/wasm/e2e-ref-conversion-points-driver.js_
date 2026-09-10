@@ -13,11 +13,30 @@
 
 var args = hermescli.getScriptArgs();
 
-// The brand oracle: WebAssembly.Table.prototype.set takes null or a genuine
-// Exported Function and refuses everything else, testing an internal property
-// script can neither name nor write. Printed refusing a plain JS function
-// first, so a broken oracle cannot make the assertions below pass by
-// accident.
+// The brand probe -- called `oracle` in the row it prints.
+// WebAssembly.Table.prototype.set takes null or a genuine Exported Function
+// and refuses everything else, testing an internal property script can
+// neither name nor write.
+//
+// It is a second ROUTE to the brand rather than an independent oracle: `set`
+// calls isWasmExportedFunction (WebAssembly.cpp:2038), and the
+// wasmIsExportedFunction builtin that the conversion-point checks go through
+// calls the same function (HermesBuiltin.cpp:1493). The sharing is deliberate
+// -- one notion of the brand for the JS API and for generated code -- but it
+// means this probe corroborates nothing about the refusal rows below: a brand
+// wrong in the same way for both would satisfy the probe and the checks
+// together. What carries those rows is E.count(), which shares nothing with
+// the brand and says the body never ran.
+//
+// What the probe does carry is the `ref_import` row. The other statements
+// about that wrapper say only that the checks accepted it -- the same notion
+// answering a second time -- and that two calls return one object. This is
+// where it is asked whether the thing `ref.func` builds for an IMPORTED
+// function is branded at all. The refusal is printed here and that acceptance
+// on its own row, so both sides of the one notion are on the record.
+//
+// This comment was corrected while task 9 was writing the same probe for
+// exception payloads and found the claim overstated in both.
 var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
 function brand(v) {
   if (typeof v !== 'function')
