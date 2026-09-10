@@ -123,8 +123,14 @@
     (call $bump)
     (local.get $t)))
 
-;; The oracle is printed refusing a plain JS function first, so a broken
-;; oracle cannot vouch for the brand assertions below.
+;; The brand probe's refusal, then the row it actually carries. The probe
+;; reaches the brand through the same isWasmExportedFunction the conversion
+;; points do -- see the driver comment -- so it vouches for none of the
+;; refusal rows below; those are carried by the counter, which shares nothing
+;; with the brand. The `ref_import` row is the one thing here that needs the
+;; probe: everything else about that wrapper says only that the checks
+;; accepted it, and this asks whether what `ref.func` builds for an IMPORTED
+;; function is branded at all.
 ;; CHECK: oracle refuses a plain JS function: not an Exported Function
 ;; CHECK-NEXT: ref_import is an Exported Function: wrapper
 ;; CHECK-NEXT: ref_import is one object: true

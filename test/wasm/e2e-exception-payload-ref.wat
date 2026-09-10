@@ -165,7 +165,12 @@
         (local.set $r (i32.const 3))))
     (local.get $r)))
 
-;; The oracle first, so a broken oracle cannot vouch for the brand rows.
+;; The brand probe's two verdicts first. It reaches the brand through the same
+;; isWasmExportedFunction the generated check does -- see the driver comment
+;; for why that sharing is deliberate -- so it cannot vouch for the refusal
+;; rows below. What these two rows establish is that `plain` and `E.target`
+;; sit on opposite sides of that one notion; the independent oracle for the
+;; refusal rows is E.ran(), which shares nothing with the brand.
 ;; CHECK: oracle refuses a plain JS function: not an Exported Function
 ;; CHECK-NEXT: oracle accepts target: wrapper
 ;; CHECK-NEXT: target and target2 are different objects: true
