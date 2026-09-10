@@ -5751,6 +5751,18 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
   // The array layout is: [tagIndex, v0, v1, ...]
   // where i64 values occupy two consecutive slots (lo, hi).
   // Payload values start at array index 1.
+  //
+  // The match above reads element 0 and nothing else -- see
+  // wasmMatchException in lib/VM/JSLib/HermesBuiltin.cpp, which compares that
+  // element against the tag and returns the array unexamined. So the loads
+  // below are where a funcref payload item is first seen, and where it is
+  // tested. The test is applied to `val` -- the result of the one
+  // LoadPropertyInst that also feeds push() -- rather than to a second read
+  // of the same index, because a payload item can be an accessor: reading it
+  // twice would let it answer the test with one value and hand the Wasm
+  // stack another. test/wasm/e2e-exception-payload-ref.wat counts the reads
+  // and compares the delivered value against the one the first read
+  // returned.
   const WasmFuncType &tagType = moduleInfo_.getTagType(tagIndex);
   uint32_t arrIdx = 1; // Start after tagIndex at position 0.
   for (size_t i = 0; i < tagType.params.size(); ++i) {
@@ -5764,7 +5776,24 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
       pushI64(val, hiVal);
       arrIdx += 2;
     } else {
-      push(val);
+      // ExternRef is deliberately not tested: any JS value is a valid
+      // externref, so a test on that arm would refuse a host reference the
+      // module is entitled to.
+      Value *pushVal = val;
+      if (tagType.params[i] == WasmValType::FuncRef) {
+        // A rejected item raises a TypeError rather than falling through to
+        // entry.nextCatchBlock: the tag DID match, and answering "no match"
+        // here would hand the exception to an outer handler or rethrow it,
+        // hiding the refusal. The refusal also abandons this loop -- the
+        // loads for the items after i are emitted after the test, on the
+        // path the test passes -- so those items are never read.
+        pushVal = emitBodyFuncRefCheck(
+            val,
+            "Wasm catch: funcref payload " + llvh::Twine(i) +
+                " requires null or a WebAssembly exported function");
+        assert(pushVal == val && "the test must hand back what it tested");
+      }
+      push(pushVal);
       arrIdx += 1;
     }
   }
@@ -6171,22 +6200,41 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
 Value *WasmIRGen::emitFuncRefCheck(
     Value *value,
     const llvh::Twine &diagnostic) {
-  auto *func = builder_.getInsertionBlock()->getParent();
-  // This helper is written for the two Functions built outside
+  // This entry point is for the two Functions built outside
   // begin/endFunction -- the export wrapper and the import trampoline. The
   // ThrowTypeErrorInst below keeps the nullptr catch target it is given:
   // hermes::fixupCatchTargets (lib/IR/Analysis.cpp) is what supplies a real
   // one to a BaseThrowInst inside a `try`, and endFunction() runs it over
   // currentFunc_ when a body is finished, which neither of these reaches.
   // Their nullptr is therefore final, and right while they build no `try`.
-  //
-  // A body Function WOULD get that repair, so the catch target is not what
-  // would make a body caller wrong. Nothing here establishes that one IS
-  // wrong -- only that it is outside what this helper was written for and
-  // reasoned about. The assertion says that and no more.
   assert(
-      func != currentFunc_ &&
-      "emitFuncRefCheck is for wrappers and trampolines, not function bodies");
+      builder_.getInsertionBlock()->getParent() != currentFunc_ &&
+      "emitFuncRefCheck is for wrappers and trampolines; a function body "
+      "wants emitBodyFuncRefCheck");
+  return emitFuncRefCheckImpl(value, diagnostic);
+}
+
+Value *WasmIRGen::emitBodyFuncRefCheck(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  // The body counterpart. Here the ThrowTypeErrorInst's nullptr catch target
+  // is a placeholder rather than an answer: endFunction() calls
+  // hermes::fixupCatchTargets(currentFunc_), which walks every block with its
+  // enclosing TryStartInst and rewrites the catch target of any BaseThrowInst
+  // terminator -- ThrowTypeErrorInst is one. So a throw emitted here inside a
+  // Wasm `try` ends up targeting that try's catch dispatch, so an enclosing
+  // Wasm `catch_all` sees it. `catch_nested` in
+  // test/wasm/e2e-exception-payload-ref.wat is that case end to end.
+  assert(
+      builder_.getInsertionBlock()->getParent() == currentFunc_ &&
+      "emitBodyFuncRefCheck emits into the body being compiled");
+  return emitFuncRefCheckImpl(value, diagnostic);
+}
+
+Value *WasmIRGen::emitFuncRefCheckImpl(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  auto *func = builder_.getInsertionBlock()->getParent();
   auto *checkBrandBB = builder_.createBasicBlock(func);
   auto *throwBB = builder_.createBasicBlock(func);
   auto *okBB = builder_.createBasicBlock(func);
@@ -6203,7 +6251,8 @@ Value *WasmIRGen::emitFuncRefCheck(
   auto *branded = helpers_.emitIsExportedFunction(value);
   builder_.createCondBranchInst(branded, okBB, throwBB);
 
-  // Catch target nullptr: see the assertion at the top of this function.
+  // The catch target is left nullptr here; what becomes of it depends on
+  // which entry point was used, and both of those explain it.
   builder_.setInsertionBlock(throwBB);
   builder_.createThrowTypeErrorInst(builder_.getLiteralString(diagnostic));
 

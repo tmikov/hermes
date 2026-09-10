@@ -415,7 +415,10 @@ class WasmIRGen {
 
   /// Enter a try block with the given result types.
   void onTry(const std::vector<WasmValType> &resultTypes);
-  /// Handle a catch clause for the given tag index.
+  /// Handle a catch clause for the given tag index. Emits the tag test and
+  /// the payload loads. A funcref payload item that is neither null nor a
+  /// WebAssembly Exported Function makes the emitted handler raise a
+  /// TypeError instead of continuing to the next catch clause.
   void onCatch(uint32_t tagIndex);
   /// Handle a catch_all clause.
   void onCatchAll();
@@ -931,7 +934,24 @@ class WasmIRGen {
   /// one that was tested.
   ///
   /// The builtin ALLOCATES, so this is a safepoint like any other call.
+  ///
+  /// This entry point is for the Functions built outside begin/endFunction --
+  /// the export wrapper and the import trampoline; emitBodyFuncRefCheck() is
+  /// the same test for code emitted into currentFunc_. They share one
+  /// implementation and emit the same IR; what differs is what supplies the
+  /// ThrowTypeErrorInst's catch target afterwards, which the definitions
+  /// spell out.
   Value *emitFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// emitFuncRefCheck() for a function body: same test, same emission
+  /// contract, same return value, and see that declaration for all of it.
+  /// Separate only so that each entry point can assert which Function it is
+  /// emitting into.
+  Value *emitBodyFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// The shared body of emitFuncRefCheck() and emitBodyFuncRefCheck(). Call
+  /// one of those instead: they carry the doc comment and the assertion.
+  Value *emitFuncRefCheckImpl(Value *value, const llvh::Twine &diagnostic);
 
   /// Store `initial` and `maximum` on a WebAssembly.Memory or
   /// WebAssembly.Table descriptor object from values that are only known at

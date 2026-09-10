@@ -1,0 +1,276 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-exception-payload-ref.wat. Read that file's header for
+// what this is proving. `thrown` is whatever the module's `boom` import
+// throws, so each row below chooses the exception array the Wasm handler will
+// unpack, and E.ran() says whether the handler body ran at all.
+
+var args = hermescli.getScriptArgs();
+
+var armed = true;
+var thrown = null;
+var plain = function () {
+  return 7;
+};
+var obj = {tag: 'host'};
+
+var E = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0])),
+  {
+    e: {
+      boom: function () {
+        if (armed)
+          throw thrown;
+      },
+    },
+  }).exports;
+
+// The brand oracle: WebAssembly.Table.prototype.set takes null or a genuine
+// Exported Function and refuses everything else, testing an internal property
+// script can neither name nor write. It is printed refusing a plain JS
+// function and accepting an export, so a broken oracle cannot make the
+// assertions below pass by accident.
+var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+function brand(v) {
+  if (typeof v !== 'function')
+    return 'not a function (' + typeof v + ')';
+  try {
+    oracle.set(0, v);
+  } catch (e) {
+    return 'not an Exported Function';
+  }
+  return 'wrapper';
+}
+print('oracle refuses a plain JS function: ' + brand(plain));
+print('oracle accepts target: ' + brand(E.target));
+print('target and target2 are different objects: ' + (E.target !== E.target2));
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// The array layout, read off a genuine Wasm throw rather than assumed. This
+// is what says the funcref of `(i64 funcref)` lives at index 3: the i64 took
+// indices 1 and 2.
+var genuine = null;
+try {
+  E.throw_i64fn();
+} catch (e) {
+  genuine = e;
+}
+print('genuine is an array of length: ' + Array.isArray(genuine) + ' ' +
+      genuine.length);
+print('genuine[0] is the tag: ' + (genuine[0] === E.t_i64fn));
+print('genuine i64 halves: ' + genuine[1] + ' ' + genuine[2]);
+print('genuine[3] is the target wrapper: ' + (genuine[3] === E.target));
+
+// What an untouched result looks like: with nothing thrown, no handler runs
+// and `catch_fn` returns the sentinel its local started at. Without this row
+// the "delivered" rows below could not tell a real delivery from a local that
+// happened to hold the right thing already.
+armed = false;
+E.reset();
+print('catch_fn(nothing thrown): ' + (E.catch_fn() === E.sentinel) + ' ' +
+      E.ran());
+armed = true;
+
+// --- funcref payloads that must be delivered ---
+
+function catchFn(payload) {
+  E.reset();
+  thrown = payload;
+  return E.catch_fn();
+}
+var r = catchFn([E.t_fn, E.target]);
+print('catch_fn(target): ' + (r === E.target) + ' ' + E.ran());
+r = catchFn([E.t_fn, E.target2]);
+print('catch_fn(target2): ' + (r === E.target2) + ' ' + E.ran());
+// `null` is a legal funcref. It is printed as well as compared, because
+// `undefined` also fails `=== E.sentinel` and the boolean alone would not
+// say which of the two came back.
+r = catchFn([E.t_fn, null]);
+print('catch_fn(null): ' + String(r) + ' ' + (r === null) + ' ' + E.ran());
+
+// --- funcref payloads that must be refused ---
+// E.ran() is the load-bearing half: the handler body bumps it after the
+// payload is on the stack, so 0 says the refusal happened during payload
+// extraction and nothing downstream had to save us.
+
+function refuseFn(label, value) {
+  E.reset();
+  thrown = [E.t_fn, value];
+  print('catch_fn(' + label + '): ' + attempt(function () {
+    return E.catch_fn();
+  }) + ' ' + E.ran());
+}
+refuseFn('plain function', plain);
+refuseFn('5', 5);
+refuseFn('undefined', undefined);
+refuseFn('{}', obj);
+// And the handler still works afterwards, so E.ran() was stuck on the
+// refusals rather than on the export.
+r = catchFn([E.t_fn, E.target]);
+print('catch_fn(target again): ' + (r === E.target) + ' ' + E.ran());
+
+// --- a refusal is a TypeError, not a tag mismatch ---
+// catch_fn_or_all answers 1 when the funcref handler ran and 2 when the tag
+// did not match and the catch_all ran. The mismatch row is real, so 2 is a
+// value this test has seen produced; the refusal row must not be 2.
+
+function orAll(label, payload) {
+  E.reset();
+  thrown = payload;
+  print('catch_fn_or_all(' + label + '): ' + attempt(function () {
+    return E.catch_fn_or_all();
+  }) + ' ' + E.ran());
+}
+orAll('target', [E.t_fn, E.target]);
+orAll('a different tag', [E.t_i32, 7]);
+orAll('plain function', [E.t_fn, plain]);
+
+// The same three with an enclosing try, where the refusal is raised while the
+// inner handler chain runs and the outer catch_all is in a position to see
+// it. 3 is the outer catch_all's answer.
+function nested(label, payload) {
+  E.reset();
+  thrown = payload;
+  print('catch_nested(' + label + '): ' + attempt(function () {
+    return E.catch_nested();
+  }) + ' ' + E.ran());
+}
+nested('target', [E.t_fn, E.target]);
+nested('a different tag', [E.t_i32, 7]);
+nested('plain function', [E.t_fn, plain]);
+
+// --- the mixed (i64 funcref) payload ---
+// E.lo()/E.hi() are the halves the handler reassembled, so a handler that
+// read the wrong indices would show it here rather than only in the funcref.
+
+E.reset();
+thrown = [E.t_i64fn, 5, 7, E.target];
+r = E.catch_i64fn();
+print('catch_i64fn(5, 7, target): ' + (r === E.target) + ' ' + E.lo() + ' ' +
+      E.hi() + ' ' + E.ran());
+E.reset();
+thrown = [E.t_i64fn, 5, 7, plain];
+print('catch_i64fn(5, 7, plain function): ' + attempt(function () {
+  return E.catch_i64fn();
+}) + ' ' + E.lo() + ' ' + E.hi() + ' ' + E.ran());
+
+// A genuine Wasm exception array, mutated and thrown back in: the tag object
+// is the real one and the i64 halves are the engine's own.
+E.reset();
+genuine[3] = plain;
+thrown = genuine;
+print('catch_i64fn(genuine, funcref replaced): ' + attempt(function () {
+  return E.catch_i64fn();
+}) + ' ' + E.lo() + ' ' + E.hi() + ' ' + E.ran());
+E.reset();
+genuine[3] = E.target2;
+thrown = genuine;
+r = E.catch_i64fn();
+print('catch_i64fn(genuine, funcref target2): ' + (r === E.target2) + ' ' +
+      E.lo() + ' ' + E.hi() + ' ' + E.ran());
+
+// --- accessor-backed payload items ---
+// The item is read through a getter that returns a different value each
+// time, so "was it read once" and "which read reached the Wasm stack" are the
+// same question. A handler that tested one read and pushed another would
+// deliver values[1] and report two reads.
+
+function withAccessor(tag, prefix, values) {
+  var arr = [tag].concat(prefix);
+  var idx = arr.length;
+  var n = 0;
+  Object.defineProperty(arr, idx, {
+    configurable: true,
+    enumerable: true,
+    get: function () {
+      n++;
+      return values[n - 1];
+    },
+  });
+  return {
+    arr: arr,
+    reads: function () {
+      return n;
+    },
+  };
+}
+
+// Two acceptable values. Identity says which read was pushed.
+var p = withAccessor(E.t_fn, [], [E.target, E.target2]);
+E.reset();
+thrown = p.arr;
+r = E.catch_fn();
+print('accessor(target, target2): ' + (r === E.target) + ' ' +
+      (r === E.target2) + ' reads ' + p.reads() + ' ' + E.ran());
+
+// Valid first, invalid second: this must succeed and deliver the first.
+p = withAccessor(E.t_fn, [], [E.target, plain]);
+E.reset();
+thrown = p.arr;
+r = E.catch_fn();
+print('accessor(target, plain function): ' + (r === E.target) + ' reads ' +
+      p.reads() + ' ' + E.ran());
+
+// Invalid first: a TypeError, and the second value is never asked for.
+p = withAccessor(E.t_fn, [], [plain, E.target]);
+E.reset();
+thrown = p.arr;
+print('accessor(plain function, target): ' + attempt(function () {
+  return E.catch_fn();
+}) + ' reads ' + p.reads() + ' ' + E.ran());
+
+// The same, at index 3 of a (i64 funcref) payload.
+p = withAccessor(E.t_i64fn, [5, 7], [E.target, E.target2]);
+E.reset();
+thrown = p.arr;
+r = E.catch_i64fn();
+print('accessor i64(target, target2): ' + (r === E.target) + ' reads ' +
+      p.reads() + ' ' + E.lo() + ' ' + E.hi() + ' ' + E.ran());
+p = withAccessor(E.t_i64fn, [5, 7], [plain, E.target]);
+E.reset();
+thrown = p.arr;
+print('accessor i64(plain function, target): ' + attempt(function () {
+  return E.catch_i64fn();
+}) + ' reads ' + p.reads() + ' ' + E.lo() + ' ' + E.hi() + ' ' + E.ran());
+
+// --- externref payloads: every JS value, unchanged ---
+// A test on this arm would be a bug, not extra safety. The object row runs
+// before the undefined row, so "the path always yields undefined" is already
+// excluded by the time undefined is asserted.
+
+function catchExt(value) {
+  E.reset();
+  thrown = [E.t_ext, value];
+  return E.catch_ext();
+}
+print('catch_ext(plain function): ' + (catchExt(plain) === plain) + ' ' +
+      E.ran());
+print('catch_ext(target): ' + (catchExt(E.target) === E.target) + ' ' +
+      E.ran());
+print('catch_ext(5): ' + (catchExt(5) === 5) + ' ' + E.ran());
+print('catch_ext({}): ' + (catchExt(obj) === obj) + ' ' + E.ran());
+print('catch_ext(undefined): ' + (catchExt(undefined) === undefined) + ' ' +
+      E.ran());
+print('catch_ext(null): ' + (catchExt(null) === null) + ' ' + E.ran());
+// And the externref arm still reads its item exactly once: no test was added
+// there that would have read it a second time.
+p = withAccessor(E.t_ext, [], [obj, plain]);
+E.reset();
+thrown = p.arr;
+r = E.catch_ext();
+print('accessor ext({}, plain function): ' + (r === obj) + ' reads ' +
+      p.reads() + ' ' + E.ran());
+
+print('done');
