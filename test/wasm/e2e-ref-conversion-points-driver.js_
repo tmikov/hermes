@@ -1,0 +1,216 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-ref-conversion-points.wat. Read that file's header for
+// what this is proving. The module's counter is printed beside every line
+// that calls into Wasm, and it is the oracle for "did the body run": the
+// bodies validate nothing themselves, so a counter that moved on a value
+// that should have been refused is the defect.
+
+var args = hermescli.getScriptArgs();
+
+// The brand oracle: WebAssembly.Table.prototype.set takes null or a genuine
+// Exported Function and refuses everything else, testing an internal property
+// script can neither name nor write. Printed refusing a plain JS function
+// first, so a broken oracle cannot make the assertions below pass by
+// accident.
+var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+function brand(v) {
+  if (typeof v !== 'function')
+    return 'not a function (' + typeof v + ')';
+  try {
+    oracle.set(0, v);
+  } catch (e) {
+    return 'not an Exported Function';
+  }
+  return 'wrapper';
+}
+print('oracle refuses a plain JS function: ' + brand(function () {}));
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// What each import returns, and how often it was actually invoked. The call
+// counts separate "the trampoline refused the result" from "the import was
+// never reached" -- without them a wrapper that refused the CALL would read
+// the same as one that refused the RESULT.
+var oneVal = null;
+var pairVal = null;
+var extVal = null;
+var extpairVal = null;
+var oneCalls = 0;
+var pairCalls = 0;
+
+var E = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0])),
+  {
+    e: {
+      one: function () {
+        oneCalls++;
+        return oneVal;
+      },
+      pair: function () {
+        pairCalls++;
+        return [22, pairVal];
+      },
+      ext: function () {
+        return extVal;
+      },
+      extpair: function () {
+        return [22, extpairVal];
+      },
+    },
+  }).exports;
+
+var plain = function () {
+  return 7;
+};
+var obj = {tag: 'host'};
+
+// ref.func on an IMPORTED function: a canonical wrapper for a function this
+// module does not define. Both checks below have to accept it.
+var impWrapper = E.ref_import();
+print('ref_import is an Exported Function: ' + brand(impWrapper));
+print('ref_import is one object: ' + (E.ref_import() === impWrapper));
+
+// --- funcref parameters: accepted ---
+// null is printed as well as compared. `undefined` fails `=== null`, so the
+// boolean alone would say only "not null"; printing the value names what came
+// back instead.
+var r = E.take_fn(null);
+print('take_fn(null): ' + String(r) + ' ' + (r === null) + ' ' + E.count());
+print('take_fn(target): ' + (E.take_fn(E.target) === E.target) + ' ' +
+      E.count());
+print('take_fn(ref_target()): ' + (E.take_fn(E.ref_target()) === E.target) +
+      ' ' + E.count());
+print('take_fn(ref_import()): ' + (E.take_fn(impWrapper) === impWrapper) +
+      ' ' + E.count());
+
+// --- funcref parameters: refused before the body runs ---
+// The counter after each refusal is the load-bearing half. Each of these
+// values is aimed at a body that stores it nowhere and hands it back, so
+// nothing but the conversion point can say no to it.
+print('take_fn(plain function): ' + attempt(function () {
+  return E.take_fn(plain);
+}) + ' ' + E.count());
+print('take_fn(5): ' + attempt(function () {
+  return E.take_fn(5);
+}) + ' ' + E.count());
+print('take_fn(undefined): ' + attempt(function () {
+  return E.take_fn(undefined);
+}) + ' ' + E.count());
+print('take_fn({}): ' + attempt(function () {
+  return E.take_fn(obj);
+}) + ' ' + E.count());
+// And the export still works afterwards, so the counter above was stuck on
+// the refusals rather than on the export.
+print('take_fn(a wrapper again): ' + (E.take_fn(E.target) === E.target) +
+      ' ' + E.count());
+
+// Argument order. `probe` must be coerced for the f64 at argument 0 before
+// argument 1 is refused, so its valueOf count is 1 after the refusal.
+var probeCalls = 0;
+var probe = {
+  valueOf: function () {
+    probeCalls++;
+    return 1.5;
+  },
+};
+print('take_num_fn(probe, plain function): ' + attempt(function () {
+  return E.take_num_fn(probe, plain);
+}) + ' ' + E.count() + ' ' + probeCalls);
+print('take_num_fn(probe, target): ' +
+      (E.take_num_fn(probe, E.target) === E.target) + ' ' + E.count() +
+      ' ' + probeCalls);
+
+// --- externref parameters: any JS value, unchanged ---
+// A check on this arm would be a bug, not extra safety. The object row runs
+// before the undefined row, so "the path always yields undefined" is already
+// excluded by the time undefined is asserted.
+print('take_ext(plain function): ' + (E.take_ext(plain) === plain) + ' ' +
+      E.count());
+print('take_ext(5): ' + (E.take_ext(5) === 5) + ' ' + E.count());
+print('take_ext(undefined): ' + (E.take_ext(undefined) === undefined) + ' ' +
+      E.count());
+print('take_ext(null): ' + (E.take_ext(null) === null) + ' ' + E.count());
+print('take_ext({}): ' + (E.take_ext(obj) === obj) + ' ' + E.count());
+// An externref beside a funcref: the funcref is tested, the externref is not,
+// and a plain JS function is a perfectly good externref.
+print('take_ext_fn(plain function, target): ' +
+      (E.take_ext_fn(plain, E.target) === plain) + ' ' + E.count());
+
+// --- single-result funcref import ---
+oneVal = null;
+r = E.call_one();
+print('call_one(null): ' + String(r) + ' ' + (r === null) + ' ' + E.count() +
+      ' ' + oneCalls);
+oneVal = E.target;
+print('call_one(target): ' + (E.call_one() === E.target) + ' ' + E.count() +
+      ' ' + oneCalls);
+oneVal = impWrapper;
+print('call_one(ref_import()): ' + (E.call_one() === impWrapper) + ' ' +
+      E.count() + ' ' + oneCalls);
+oneVal = plain;
+print('call_one(plain function): ' + attempt(function () {
+  return E.call_one();
+}) + ' ' + E.count() + ' ' + oneCalls);
+oneVal = 5;
+print('call_one(5): ' + attempt(function () {
+  return E.call_one();
+}) + ' ' + E.count() + ' ' + oneCalls);
+oneVal = undefined;
+print('call_one(undefined): ' + attempt(function () {
+  return E.call_one();
+}) + ' ' + E.count() + ' ' + oneCalls);
+oneVal = E.target;
+print('call_one(target again): ' + (E.call_one() === E.target) + ' ' +
+      E.count() + ' ' + oneCalls);
+
+// --- multi-value funcref import: the funcref is result 1 ---
+pairVal = null;
+r = E.call_pair();
+print('call_pair(null): ' + String(r) + ' ' + (r === null) + ' ' + E.count() +
+      ' ' + pairCalls);
+pairVal = E.target;
+print('call_pair(target): ' + (E.call_pair() === E.target) + ' ' + E.count() +
+      ' ' + pairCalls);
+pairVal = plain;
+print('call_pair(plain function): ' + attempt(function () {
+  return E.call_pair();
+}) + ' ' + E.count() + ' ' + pairCalls);
+pairVal = undefined;
+print('call_pair(undefined): ' + attempt(function () {
+  return E.call_pair();
+}) + ' ' + E.count() + ' ' + pairCalls);
+pairVal = E.target;
+print('call_pair(target again): ' + (E.call_pair() === E.target) + ' ' +
+      E.count() + ' ' + pairCalls);
+
+// --- externref results: any JS value, both arms ---
+extVal = plain;
+print('call_ext(plain function): ' + (E.call_ext() === plain) + ' ' +
+      E.count());
+extVal = 5;
+print('call_ext(5): ' + (E.call_ext() === 5) + ' ' + E.count());
+extVal = undefined;
+print('call_ext(undefined): ' + (E.call_ext() === undefined) + ' ' +
+      E.count());
+extVal = null;
+print('call_ext(null): ' + (E.call_ext() === null) + ' ' + E.count());
+extpairVal = plain;
+print('call_extpair(plain function): ' + (E.call_extpair() === plain) + ' ' +
+      E.count());
+extpairVal = undefined;
+print('call_extpair(undefined): ' + (E.call_extpair() === undefined) + ' ' +
+      E.count());
+
+print('done');

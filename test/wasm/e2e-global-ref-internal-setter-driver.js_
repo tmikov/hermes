@@ -12,6 +12,12 @@
 // funcref global takes null or an Exported Function and refuses everything
 // else, while an externref global takes any JS value at all -- a case here
 // that refused one would be asserting a bug.
+//
+// The funcref values the builtin refuses no longer get as far as the builtin
+// from here: put_fn and put_jsfn are exported `(param funcref)` functions, and
+// the parameter conversion refuses them at the export wrapper. The messages
+// below say so. The builtin's own refusal is asked in
+// unittests/VMRuntime/WasmBuiltinTest.cpp, which calls it directly.
 
 var args = hermescli.getScriptArgs();
 function load(i) {
@@ -93,8 +99,10 @@ print('put_fn undefined: ' + attempt(function () {
   consumer.put_fn(undefined);
   return 'wrote';
 }));
-// Validation happens before the setter closure is invoked, so none of the
-// three reached the provider's frame slot.
+// Refused at the parameter, so none of the three even reached the consumer's
+// body, let alone the provider's frame slot. The messages above are what say
+// where; the slot being intact would also be true of a refusal one step
+// later, at the builtin.
 print('put_fn intact after the refusals: ' + (provider.get_fn() === h));
 consumer.put_fn(null);
 print('put_fn null: ' + (provider.get_fn() === null));

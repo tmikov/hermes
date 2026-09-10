@@ -12,9 +12,12 @@ var hbcPath = hermescli.getScriptArgs()[0];
 // Distinguishable identities: a bare object cannot be reconstructed from a
 // number, so `same=true` can only hold if the value itself survived.
 var token = {tag: 'host'};
-function seven() {
+// Refused by the trampoline: a funcref result takes null or a WebAssembly
+// Exported Function.
+function plain() {
   return 7;
 }
+var badCalls = 0;
 
 var inst = new WebAssembly.Instance(
   WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)),
@@ -24,7 +27,13 @@ var inst = new WebAssembly.Instance(
         return [11, token];
       },
       pairFunc: function () {
-        return [22, seven];
+        // The module's own Exported Function, sent back in. `inst` is
+        // assigned by the time anything calls this.
+        return [22, inst.exports.seven];
+      },
+      pairBad: function () {
+        badCalls++;
+        return [33, plain];
       },
     },
   });
@@ -33,5 +42,17 @@ print('importedExtern: same=' + (inst.exports.importedExtern() === token));
 print('importedNum: ' + inst.exports.importedNum());
 
 var f = inst.exports.importedFunc();
-print('importedFunc: ' + typeof f + ' same=' + (f === seven) +
+print('importedFunc: ' + typeof f + ' same=' + (f === inst.exports.seven) +
       ' calls -> ' + f());
+
+// The refusal, and the two counters that say where it happened: the import
+// itself ran, and the Wasm body after the call did not.
+var refusal;
+try {
+  refusal = String(inst.exports.importedBad());
+} catch (e) {
+  refusal = e.name + ': ' + e.message;
+}
+print('importedBad: ' + refusal);
+print('importedBad reached the import but not the body: ' + badCalls + ' ' +
+      inst.exports.count());

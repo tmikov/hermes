@@ -400,12 +400,12 @@ WASM_BUILTIN(wasmMakeGlobal)
 // wasmIsExportedFunction(value) -> boolean: is `value` a WebAssembly
 // Exported Function? This is the brand wasmSetFuncInfo stamps, asked as a
 // question rather than stamped.
-// It exists because generated IR has no way to ask. isWasmExportedFunction
-// is a C++ helper, reachable from the JS API and from other builtins but not
-// from compiled code; the funcref paths that need the answer -- a funcref raw
-// import, a funcref reference value -- are emitted IR; and wasmSetFuncInfo
-// only WRITES the brand. The implementation delegates to the C++ helper, so
-// the two notions of the brand cannot drift apart.
+// It exists because generated IR has no way to ask. isWasmExportedFunction is
+// a C++ helper, reachable from the JS API and from other builtins but not from
+// compiled code, and wasmSetFuncInfo only WRITES the brand; the funcref
+// admission tests the compiler emits are generated IR and need the question
+// asked. The implementation delegates to the C++ helper, so the two notions of
+// the brand cannot drift apart.
 // Answers rather than throws for every argument: anything that is not a
 // branded object, including a missing argument, is simply false.
 WASM_BUILTIN(wasmIsExportedFunction)

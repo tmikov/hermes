@@ -858,7 +858,11 @@ void WasmIRGen::createFunctions() {
         //
         // The JS->Wasm coercion itself did not disappear, it moved to where it
         // belongs: createExportWrapper does ToNumber (plus fround for f32) on
-        // the wrapper's parameters, which is the actual boundary.
+        // the wrapper's numeric parameters, which is the actual boundary. A
+        // funcref parameter is TESTED rather than coerced in the same place --
+        // null or an Exported Function, TypeError otherwise -- which is what
+        // makes the objectOrNull annotation wasmValTypeToIRType gives a
+        // funcref parameter true of the values that actually arrive.
         param->setType(wasmValTypeToIRType(funcType.params[p]));
         jsParamCount += 1;
       }
@@ -2704,8 +2708,26 @@ Function *WasmIRGen::createExportWrapper(
         callArgs.push_back(
             emitFround(builder_.createAsNumberInst(paramVal)));
         break;
+      case WasmValType::FuncRef:
+        // A funcref parameter of an EXPORTED function is a JS-to-Wasm
+        // conversion point that no setter covers: the body may do
+        // `local.get 0; global.set $g` into a funcref global it defines,
+        // which is a frame store with nothing in between. The test goes here,
+        // in argument order, so an earlier parameter's ToNumber still runs
+        // its valueOf before a later argument is refused.
+        callArgs.push_back(emitFuncRefCheck(
+            paramVal,
+            "Wasm call: funcref argument " + llvh::Twine(i) +
+                " requires null or a WebAssembly exported function"));
+        break;
+      case WasmValType::ExternRef:
+        // Any JS value is an externref. A test here would refuse a host
+        // reference the module is entitled to.
+        callArgs.push_back(paramVal);
+        break;
       default:
-        // FuncRef, ExternRef, etc: pass through for now.
+        // Whatever the arms above do not name -- V128 today -- is passed
+        // through as it always was.
         callArgs.push_back(paramVal);
         break;
     }
@@ -2949,7 +2971,29 @@ void WasmIRGen::createImportTrampoline(
             vals.emplace_back(coerced, nullptr);
             break;
           }
+          case WasmValType::FuncRef:
+            // Tested here, in the pass that LOADS the element, and the value
+            // recorded is the one that was tested -- reading the element
+            // again for the store would let an accessor-backed array answer
+            // the test with one value and the store with another. Results
+            // are stored at their offsets in the second pass, so a refusal
+            // here happens before any result of this call has landed. (The
+            // buffer is not untouched: the i64 arm above uses rbI[0]/[1] as
+            // scratch in this pass.)
+            vals.emplace_back(
+                emitFuncRefCheck(
+                    jsVal,
+                    "Wasm import: funcref result " + llvh::Twine(i) +
+                        " requires null or a WebAssembly exported function"),
+                nullptr);
+            break;
+          case WasmValType::ExternRef:
+            // Any JS value is an externref; nothing to test.
+            vals.emplace_back(jsVal, nullptr);
+            break;
           default:
+            // Whatever the arms above do not name -- V128 today -- is
+            // recorded as it always was.
             vals.emplace_back(jsVal, nullptr);
             break;
         }
@@ -3008,8 +3052,22 @@ void WasmIRGen::createImportTrampoline(
       case WasmValType::F64:
         builder_.createReturnInst(builder_.createAsNumberInst(callResult));
         break;
+      case WasmValType::FuncRef:
+        // The other JS-to-Wasm conversion point no setter covers: whatever
+        // the imported JS function returned becomes a funcref on the Wasm
+        // stack of the caller, which can store it anywhere a funcref goes.
+        builder_.createReturnInst(emitFuncRefCheck(
+            callResult,
+            "Wasm import: funcref result 0 requires null or a WebAssembly "
+            "exported function"));
+        break;
+      case WasmValType::ExternRef:
+        // Any JS value is an externref; nothing to test.
+        builder_.createReturnInst(callResult);
+        break;
       default:
-        // FuncRef, ExternRef, etc: pass through for now.
+        // Whatever the arms above do not name -- V128 today -- is passed
+        // through as it always was.
         builder_.createReturnInst(callResult);
         break;
     }
@@ -6104,6 +6162,48 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
   auto *call = builder_.createCallInst(
       constructor, constructor, thisArg, args);
   return builder_.createGetConstructedObjectInst(thisArg, call);
+}
+
+Value *WasmIRGen::emitFuncRefCheck(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  auto *func = builder_.getInsertionBlock()->getParent();
+#ifndef NDEBUG
+  // The nullptr catch target below is right only in a Function that builds no
+  // try: a ThrowTypeErrorInst inside one needs the catch block as a
+  // successor, which is what BCGen's fixupCatchTargets arranges elsewhere. A
+  // Wasm `try` is emitted into the body Function, never into a wrapper or a
+  // trampoline, so this holds for the callers there are -- and says so if one
+  // stops holding.
+  for (auto &bb : *func)
+    for (auto &inst : bb)
+      assert(
+          !llvh::isa<TryStartInst>(&inst) &&
+          "emitFuncRefCheck needs a catch target in a Function with a try");
+#endif
+  auto *checkBrandBB = builder_.createBasicBlock(func);
+  auto *throwBB = builder_.createBasicBlock(func);
+  auto *okBB = builder_.createBasicBlock(func);
+
+  // `null` first, because the predicate answers false for it and a null
+  // funcref is a legal value of the type.
+  auto *isNull = builder_.createBinaryOperatorInst(
+      value,
+      builder_.getLiteralNull(),
+      ValueKind::BinaryStrictlyEqualInstKind);
+  builder_.createCondBranchInst(isNull, okBB, checkBrandBB);
+
+  builder_.setInsertionBlock(checkBrandBB);
+  auto *branded = helpers_.emitIsExportedFunction(value);
+  builder_.createCondBranchInst(branded, okBB, throwBB);
+
+  // The catch target is nullptr; the assertion at the top of this function is
+  // what stands behind that.
+  builder_.setInsertionBlock(throwBB);
+  builder_.createThrowTypeErrorInst(builder_.getLiteralString(diagnostic));
+
+  builder_.setInsertionBlock(okBB);
+  return value;
 }
 
 void WasmIRGen::createMemoryViews(Instruction *tlScope) {

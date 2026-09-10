@@ -918,6 +918,21 @@ class WasmIRGen {
   /// Emit `new Constructor(args)` and return the constructed object.
   Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
 
+  /// Emit the funcref admission test on \p value: `null` passes, and so does
+  /// a WebAssembly Exported Function, asked through the
+  /// wasmIsExportedFunction builtin so that generated code and the JS API
+  /// share one notion of the brand. Anything else raises a TypeError whose
+  /// message is \p diagnostic.
+  ///
+  /// Emits into the current insertion block and leaves the insertion block
+  /// set to the block reached when the test passes, so the caller goes on
+  /// emitting straight after the call. \return \p value unchanged: this is a
+  /// test, not a conversion, and the value that reaches the consumer is the
+  /// one that was tested.
+  ///
+  /// The builtin ALLOCATES, so this is a safepoint like any other call.
+  Value *emitFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
   /// Store `initial` and `maximum` on a WebAssembly.Memory or
   /// WebAssembly.Table descriptor object from values that are only known at
   /// run time. \p actualMax uses -1 for "unbounded", which both constructors
@@ -1054,6 +1069,14 @@ class WasmIRGen {
   /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
   /// param, argument coercion, and return value marshaling.
   /// Called once per function index, not once per export name.
+  ///
+  /// The wrapper it builds can THROW: a numeric parameter's ToNumber runs
+  /// arbitrary JS, and a funcref parameter is tested rather than coerced --
+  /// null and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError before the Wasm body is entered. This is where a JS argument
+  /// becomes a Wasm parameter value; the body's entry stores its parameters
+  /// raw (see beginFunction). test/wasm/e2e-ref-conversion-points.wat asserts
+  /// the refusal with a counter the body would have incremented.
   /// \p funcIndex is the Wasm function index being wrapped.
   /// \p wrapperName names the wrapper IR Function (the first export name of
   ///   \p funcIndex if it has one, otherwise a synthesized name).
@@ -1101,6 +1124,16 @@ class WasmIRGen {
   /// The trampoline loads the imported JS function from the top-level scope,
   /// marshals Wasm-typed arguments to JS, calls the JS function, and
   /// converts the return value back to the expected Wasm type.
+  ///
+  /// The conversion back can THROW, beyond whatever the imported JS function
+  /// itself throws: a funcref result is tested rather than coerced -- null
+  /// and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError -- on the single-result arm and on the multi-value arm alike.
+  /// On the multi-value arm the test runs in the pass that LOADS the array
+  /// elements, which runs before the pass that stores them at their offsets,
+  /// so a refusal happens before any result of the call has landed.
+  /// test/wasm/e2e-ref-conversion-points.wat asserts both arms, at result 0
+  /// and at result 1.
   /// \p funcIndex is the Wasm function index of the imported function.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createImportTrampoline(
