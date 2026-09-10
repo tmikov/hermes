@@ -10,9 +10,13 @@
 #include "VMRuntimeTestHelpers.h"
 #include "gtest/gtest.h"
 
+#include <limits>
+
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/Support/UTF8.h"
+#include "hermes/VM/ArrayStorage.h"
 #include "hermes/VM/Callable.h"
+#include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSNativeFunctions.h"
 #include "hermes/VM/JSObject.h"
 #include "hermes/VM/JSWebAssemblyGlobal.h"
@@ -76,6 +80,41 @@ static std::string stringOf(HermesValue val) {
   hermes::convertUTF16ToUTF8WithReplacements(
       result, str->getStringRef<char16_t>());
   return result;
+}
+
+/// \return the `e.name + ': ' + e.message` describer the refusal checks use.
+/// Written in JS so that `e.name` is the engine's own answer rather than a C++
+/// reconstruction of it.
+static Handle<> makeDescriber(Runtime &runtime) {
+  return evalExpr(
+      runtime, "(function (e) { return e.name + ': ' + e.message; })");
+}
+
+/// Describe the exception \p runtime currently has pending, using \p describe,
+/// and clear it. \return "<name>: <message>".
+/// \pre an exception is pending.
+///
+/// The DESCRIPTION, not a bool. A helper that cleared the exception and
+/// answered "it refused" makes every refusal look alike: a guard changed to
+/// raise a RangeError, or the wrong guard firing for the wrong reason, still
+/// satisfies the check written to rule exactly that out. That cost a fix round
+/// earlier in this work, so nothing here asserts less than the message.
+static std::string describePendingException(
+    Runtime &runtime,
+    Handle<> describe) {
+  // Rooted before it is cleared: describing it runs JS.
+  auto thrown = runtime.makeHandle(runtime.getThrownValue());
+  runtime.clearThrownValue();
+  auto desc = Callable::executeCall1(
+      Handle<Callable>::vmcast(describe),
+      runtime,
+      Runtime::getUndefinedValue(),
+      thrown.getHermesValue());
+  if (desc == ExecutionStatus::EXCEPTION) {
+    runtime.clearThrownValue();
+    return "<undescribable>";
+  }
+  return stringOf(desc->get());
 }
 
 /// \return a REAL WebAssembly Exported Function: a module compiled and
@@ -771,6 +810,437 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
     ASSERT_EQ(ExecutionStatus::RETURNED, desc.getStatus());
     EXPECT_EQ(kMsgNotGlobal, stringOf(desc->get()));
   }
+}
+
+/// The exact diagnostics the reference-transport builtins raise. Asserted
+/// literally, so that a refusal is the specific one it is meant to be.
+static const char *const kMsgSlotCount =
+    "TypeError: Wasm reference transport: slot count must be a non-negative "
+    "integer";
+static const char *const kMsgBadBufOrIndex =
+    "TypeError: Wasm reference transport: bad container or index";
+
+/// wasmAllocRefBuf's argument guard and its fill.
+///
+/// Every branch below is reachable only from bytecode that is not the Wasm
+/// compiler's: the code WasmIRGen emits always passes a literal slot count
+/// that satisfies wasmRefBufIndexArg. A WASM_BUILTIN is a PRIVATE_BUILTIN,
+/// reachable from ANY bytecode emitting a CallBuiltin with its index, so the
+/// guard is the boundary of the untrusted-bytecode threat model rather than an
+/// assertion about the compiler -- the same model
+/// WasmIsExportedFunctionPredicate and the global.set tests above sit in. This
+/// is the side of that boundary those tests did not cover.
+TEST_F(WasmBuiltinTest, WasmAllocRefBufValidatesSlotCountAndFills) {
+  GCScope scope{runtime, "WasmAllocRefBufValidatesSlotCountAndFills"};
+
+  Callable *allocRaw = runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmAllocRefBuf);
+  Callable *getRaw = runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmRefBufGet);
+  ASSERT_NE(nullptr, allocRaw);
+  ASSERT_NE(nullptr, getRaw);
+  auto alloc = runtime.makeHandle(allocRaw);
+  auto get = runtime.makeHandle(getRaw);
+  auto describe = makeDescriber(runtime);
+
+  /// Call wasmAllocRefBuf(\p arg). \return "" if it allocated, or the
+  /// exception's "<name>: <message>".
+  auto allocFails = [&](HermesValue arg) -> std::string {
+    auto res = Callable::executeCall1(
+        alloc, runtime, Runtime::getUndefinedValue(), arg);
+    if (res != ExecutionStatus::EXCEPTION)
+      return "";
+    return describePendingException(runtime, describe);
+  };
+
+  /// Call wasmAllocRefBuf(\p slots) and \return the rooted container.
+  auto allocOk = [&](double slots) -> Handle<> {
+    auto res = Callable::executeCall1(
+        alloc,
+        runtime,
+        Runtime::getUndefinedValue(),
+        HermesValue::encodeTrustedNumberValue(slots));
+    EXPECT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    if (res == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return Runtime::getUndefinedValue();
+    }
+    return runtime.makeHandle(res->getHermesValue());
+  };
+
+  /// Call wasmRefBufGet(\p buf, \p index). \return "" and the value in \p out
+  /// if it read, or the exception's description.
+  auto getFails = [&](Handle<> buf, HermesValue index) -> std::string {
+    auto res = Callable::executeCall2(
+        get,
+        runtime,
+        Runtime::getUndefinedValue(),
+        buf.getHermesValue(),
+        index);
+    if (res != ExecutionStatus::EXCEPTION)
+      return "";
+    return describePendingException(runtime, describe);
+  };
+
+  // wasmRefBufIndexArg's three rejections, asked of the slot count.
+  //
+  // Not a Number at all -- a string that would coerce to a fine count is still
+  // refused, because the guard tests the type rather than coercing.
+  auto str2 = evalExpr(runtime, "'2'");
+  EXPECT_EQ(kMsgSlotCount, allocFails(str2.getHermesValue()));
+  EXPECT_EQ(kMsgSlotCount, allocFails(HermesValue::encodeNullValue()));
+  EXPECT_EQ(kMsgSlotCount, allocFails(HermesValue::encodeUndefinedValue()));
+  EXPECT_EQ(kMsgSlotCount, allocFails(HermesValue::encodeBoolValue(true)));
+  EXPECT_EQ(
+      kMsgSlotCount, allocFails(JSObject::create(runtime).getHermesValue()));
+  // A missing argument reads as undefined, so a zero-argument call is refused
+  // rather than reading a register that is not there.
+  {
+    auto res =
+        Callable::executeCall0(alloc, runtime, Runtime::getUndefinedValue());
+    ASSERT_EQ(ExecutionStatus::EXCEPTION, res.getStatus());
+    EXPECT_EQ(kMsgSlotCount, describePendingException(runtime, describe));
+  }
+
+  // Outside uint32. Negative, past the top, and the two non-finite values,
+  // all of which fail `d >= 0 && d <= 4294967295`.
+  EXPECT_EQ(
+      kMsgSlotCount, allocFails(HermesValue::encodeTrustedNumberValue(-1)));
+  EXPECT_EQ(
+      kMsgSlotCount,
+      allocFails(HermesValue::encodeTrustedNumberValue(4294967296.0)));
+  EXPECT_EQ(kMsgSlotCount, allocFails(HermesValue::encodeNaNValue()));
+  EXPECT_EQ(
+      kMsgSlotCount,
+      allocFails(HermesValue::encodeTrustedNumberValue(
+          std::numeric_limits<double>::infinity())));
+
+  // In range but not an integer.
+  EXPECT_EQ(
+      kMsgSlotCount, allocFails(HermesValue::encodeTrustedNumberValue(1.5)));
+  EXPECT_EQ(
+      kMsgSlotCount,
+      allocFails(HermesValue::encodeTrustedNumberValue(4294967295.5)));
+
+  // The accepted shape. -0 is an integer and is >= 0, so it is a count of
+  // zero rather than a rejection.
+  {
+    auto empty = allocOk(0);
+    ASSERT_TRUE(vmisa<ArrayStorage>(*empty));
+    // Size zero, so there is no readable element at all.
+    EXPECT_EQ(
+        kMsgBadBufOrIndex,
+        getFails(empty, HermesValue::encodeTrustedNumberValue(0)));
+  }
+  {
+    auto negZero = Callable::executeCall1(
+        alloc,
+        runtime,
+        Runtime::getUndefinedValue(),
+        HermesValue::encodeTrustedNumberValue(-0.0));
+    ASSERT_EQ(ExecutionStatus::RETURNED, negZero.getStatus());
+    EXPECT_TRUE(vmisa<ArrayStorage>(negZero->getHermesValue()));
+  }
+
+  // SIZE, not merely capacity: ArrayStorage's indexed accessors check size(),
+  // so a container created with capacity alone would have no readable element
+  // and every get below would refuse.
+  auto buf = allocOk(3);
+  ASSERT_TRUE(vmisa<ArrayStorage>(*buf));
+  EXPECT_EQ(3u, vmcast<ArrayStorage>(*buf)->size());
+
+  // The elements are filled, not merely grown. Read off the cell directly,
+  // because wasmRefBufGet normalizes empty to undefined and would hide a
+  // missing fill: this is what says the fill happened, and the reads below say
+  // what a caller sees.
+  for (uint32_t i = 0; i < 3; ++i) {
+    HermesValue hv = vmcast<ArrayStorage>(*buf)->at(i);
+    EXPECT_FALSE(hv.isEmpty()) << "slot " << i << " was never written";
+    EXPECT_TRUE(hv.isUndefined()) << "slot " << i;
+  }
+
+  // Every element reads back as undefined -- not empty, which is a poison
+  // value that must never reach a register.
+  for (uint32_t i = 0; i < 3; ++i) {
+    auto res = Callable::executeCall2(
+        get,
+        runtime,
+        Runtime::getUndefinedValue(),
+        buf.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(i));
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    EXPECT_TRUE(res->get().isUndefined()) << "slot " << i;
+  }
+  // And one past the end is refused, which is what makes the three above a
+  // statement about size rather than about capacity.
+  EXPECT_EQ(
+      kMsgBadBufOrIndex,
+      getFails(buf, HermesValue::encodeTrustedNumberValue(3)));
+}
+
+/// wasmRefBufGet's and wasmRefBufSet's two guards -- the container and the
+/// index -- plus the round trip they exist to protect.
+///
+/// Both builtins take arg0 on no trust: an ArrayStorage is a GC cell rather
+/// than a JSObject, so a forged container has to be REFUSED rather than cast,
+/// and a raw cast of a JSObject here would be a type confusion reachable from
+/// bytecode.
+TEST_F(WasmBuiltinTest, WasmRefBufGetSetRefuseForgedContainerAndBadIndex) {
+  GCScope scope{runtime, "WasmRefBufGetSetRefuseForgedContainerAndBadIndex"};
+
+  auto alloc = runtime.makeHandle(runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmAllocRefBuf));
+  auto get = runtime.makeHandle(runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmRefBufGet));
+  auto set = runtime.makeHandle(runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmRefBufSet));
+  ASSERT_TRUE(*alloc);
+  ASSERT_TRUE(*get);
+  ASSERT_TRUE(*set);
+  auto describe = makeDescriber(runtime);
+
+  auto allocRes = Callable::executeCall1(
+      alloc,
+      runtime,
+      Runtime::getUndefinedValue(),
+      HermesValue::encodeTrustedNumberValue(2));
+  ASSERT_EQ(ExecutionStatus::RETURNED, allocRes.getStatus());
+  auto buf = runtime.makeHandle(allocRes->getHermesValue());
+
+  /// wasmRefBufGet(\p container, \p index): "" if it read, else the
+  /// exception's "<name>: <message>".
+  auto callGet = [&](HermesValue container, HermesValue index) -> std::string {
+    auto res = Callable::executeCall2(
+        get, runtime, Runtime::getUndefinedValue(), container, index);
+    if (res != ExecutionStatus::EXCEPTION)
+      return "";
+    return describePendingException(runtime, describe);
+  };
+
+  /// wasmRefBufSet(\p container, \p index, undefined): "" if it stored, else
+  /// the exception's "<name>: <message>".
+  auto callSet = [&](HermesValue container, HermesValue index) -> std::string {
+    auto res = Callable::executeCall3(
+        set,
+        runtime,
+        Runtime::getUndefinedValue(),
+        container,
+        index,
+        HermesValue::encodeUndefinedValue());
+    if (res != ExecutionStatus::EXCEPTION)
+      return "";
+    return describePendingException(runtime, describe);
+  };
+
+  /// Both builtins must refuse \p container at a slot index that is valid for
+  /// the real container, so that the refusal is about arg0 and not the index.
+  auto bothRefuse = [&](HermesValue container, const char *what) {
+    auto zero = HermesValue::encodeTrustedNumberValue(0);
+    EXPECT_EQ(kMsgBadBufOrIndex, callGet(container, zero)) << what;
+    EXPECT_EQ(kMsgBadBufOrIndex, callSet(container, zero)) << what;
+  };
+
+  // A forged container: every one of these is a plausible thing for hostile
+  // bytecode to pass where the compiler passes an ArrayStorage.
+  bothRefuse(HermesValue::encodeUndefinedValue(), "undefined");
+  bothRefuse(HermesValue::encodeNullValue(), "null");
+  bothRefuse(HermesValue::encodeTrustedNumberValue(0), "a number");
+  bothRefuse(HermesValue::encodeBoolValue(true), "a bool");
+  bothRefuse(JSObject::create(runtime).getHermesValue(), "a plain object");
+  bothRefuse(evalExpr(runtime, "[1, 2]").getHermesValue(), "a JS array");
+  bothRefuse(evalExpr(runtime, "'ab'").getHermesValue(), "a string");
+  bothRefuse(makeJSClosure(runtime).getHermesValue(), "a closure");
+  bothRefuse(makeNativeFunction(runtime).getHermesValue(), "a native function");
+  // A DIFFERENT GC cell that is not an ArrayStorage would also be refused, but
+  // there is no way to hand one to a builtin from bytecode; the JSObject cases
+  // above are the reachable forgeries.
+
+  /// The index guard, against the real container.
+  auto badIndex = [&](HermesValue index, const char *what) {
+    EXPECT_EQ(kMsgBadBufOrIndex, callGet(buf.getHermesValue(), index)) << what;
+    EXPECT_EQ(kMsgBadBufOrIndex, callSet(buf.getHermesValue(), index)) << what;
+  };
+
+  auto str0 = evalExpr(runtime, "'0'");
+  badIndex(str0.getHermesValue(), "a numeric string");
+  badIndex(HermesValue::encodeUndefinedValue(), "undefined");
+  badIndex(HermesValue::encodeTrustedNumberValue(-1), "negative");
+  badIndex(HermesValue::encodeTrustedNumberValue(0.5), "non-integer");
+  badIndex(HermesValue::encodeTrustedNumberValue(4294967296.0), "past uint32");
+  // In uint32 range and an integer, but past this container's size. This is
+  // the guard that keeps a forged index from reading or writing off the end of
+  // a real container, which is the one with memory-safety consequences.
+  badIndex(HermesValue::encodeTrustedNumberValue(2), "one past the end");
+  badIndex(HermesValue::encodeTrustedNumberValue(1000), "far past the end");
+
+  // The round trip the guards protect, and the reason the refusals above are a
+  // property of the guards rather than of a container that never works: a
+  // reference goes in and the SAME reference comes back, by identity.
+  auto closure = makeJSClosure(runtime);
+  {
+    auto res = Callable::executeCall3(
+        set,
+        runtime,
+        Runtime::getUndefinedValue(),
+        buf.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(1),
+        closure.getHermesValue());
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus())
+        << "the real container at a valid index must be accepted";
+  }
+  {
+    auto res = Callable::executeCall2(
+        get,
+        runtime,
+        Runtime::getUndefinedValue(),
+        buf.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(1));
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    // Compared as a rooted handle, because a moving collection between the two
+    // reads would otherwise report unequal identities for storage that is
+    // correct.
+    auto got = runtime.makeHandle(res->getHermesValue());
+    EXPECT_EQ(closure->getRaw(), got->getRaw());
+  }
+  // Slot 0 is untouched by the write to slot 1.
+  {
+    auto res = Callable::executeCall2(
+        get,
+        runtime,
+        Runtime::getUndefinedValue(),
+        buf.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(0));
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    EXPECT_TRUE(res->get().isUndefined());
+  }
+}
+
+/// wasmRefBufGet normalizes the EMPTY HermesValue to undefined.
+///
+/// wasmAllocRefBuf leaves no empty element behind, so the only way to reach
+/// this branch is a container ArrayStorage code elsewhere produced -- which is
+/// exactly what bytecode outside the compiler could arrange, and what this
+/// builds directly. Empty is a poison value: returning one hands the caller a
+/// HermesValue that must never reach a register.
+TEST_F(WasmBuiltinTest, WasmRefBufGetNormalizesEmptyToUndefined) {
+  GCScope scope{runtime, "WasmRefBufGetNormalizesEmptyToUndefined"};
+
+  auto get = runtime.makeHandle(runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmRefBufGet));
+  ASSERT_TRUE(*get);
+
+  // Grown to size 2 without being filled: growWithinCapacity writes the empty
+  // HermesValue, which is the state wasmAllocRefBuf overwrites.
+  auto arrRes = ArrayStorage::create(runtime, 2, 2);
+  ASSERT_EQ(ExecutionStatus::RETURNED, arrRes.getStatus());
+  auto raw = runtime.makeHandle(*arrRes);
+  ASSERT_TRUE(vmcast<ArrayStorage>(*raw)->at(0).isEmpty())
+      << "the premise of this test is that these elements are empty";
+  ASSERT_TRUE(vmcast<ArrayStorage>(*raw)->at(1).isEmpty());
+
+  for (uint32_t i = 0; i < 2; ++i) {
+    auto res = Callable::executeCall2(
+        get,
+        runtime,
+        Runtime::getUndefinedValue(),
+        raw.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(i));
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    EXPECT_FALSE(res->get().isEmpty()) << "slot " << i;
+    EXPECT_TRUE(res->get().isUndefined()) << "slot " << i;
+  }
+}
+
+/// wasmMakeResultArray builds the public multi-value result array.
+///
+/// The claim it exists for is that nothing of script's choosing observes the
+/// array being built: it is created here and filled through
+/// JSArray::setElementAt, which writes the array's own indexed storage. The
+/// route it replaced was globalThis.Array followed by indexed property stores,
+/// where a replaced constructor or an inherited indexed setter saw each result
+/// on its way in.
+TEST_F(WasmBuiltinTest, WasmMakeResultArrayIgnoresScript) {
+  GCScope scope{runtime, "WasmMakeResultArrayIgnoresScript"};
+
+  auto make = runtime.makeHandle(runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmMakeResultArray));
+  ASSERT_TRUE(*make);
+
+  /// \return the length of \p arr, read as a JS property.
+  auto lengthOf = [&](Handle<JSObject> arr) -> double {
+    auto res = JSObject::getNamed_RJS(
+        arr, runtime, Predefined::getSymbolID(Predefined::length));
+    EXPECT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    if (res == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return -1;
+    }
+    return res->get().getNumber();
+  };
+
+  // Zero results: a real, empty Array rather than undefined or a refusal.
+  {
+    auto res =
+        Callable::executeCall0(make, runtime, Runtime::getUndefinedValue());
+    ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    ASSERT_TRUE(vmisa<JSArray>(res->getHermesValue()));
+    auto arr = runtime.makeHandle(vmcast<JSArray>(res->getHermesValue()));
+    EXPECT_EQ(0.0, lengthOf(arr));
+  }
+
+  // Poison every route the OLD implementation went through: the constructor it
+  // called and the inherited indexed setter its stores would have found. Both
+  // record a hit, and neither may fire.
+  evalExpr(runtime, R"JS(
+    globalThis.__hits = 0;
+    globalThis.Array = function () { globalThis.__hits += 1; return {}; };
+    Object.defineProperty(Object.prototype, '0', {
+      configurable: true,
+      set: function (v) { globalThis.__hits += 1; },
+      get: function () { return 'poisoned'; }
+    });
+  )JS");
+
+  auto closure = makeJSClosure(runtime);
+  auto res = Callable::executeCall3(
+      make,
+      runtime,
+      Runtime::getUndefinedValue(),
+      closure.getHermesValue(),
+      HermesValue::encodeNullValue(),
+      HermesValue::encodeTrustedNumberValue(7));
+  ASSERT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+  ASSERT_TRUE(vmisa<JSArray>(res->getHermesValue()))
+      << "the result must be a genuine Array, not whatever a replaced "
+         "constructor returned";
+  auto arr = runtime.makeHandle(vmcast<JSArray>(res->getHermesValue()));
+  EXPECT_EQ(3.0, lengthOf(arr));
+
+  EXPECT_EQ(0.0, evalExpr(runtime, "globalThis.__hits")->getNumber())
+      << "no constructor or setter of script's choosing may be consulted";
+
+  /// \return element \p i of the result array, rooted.
+  auto elem = [&](uint32_t i) -> Handle<> {
+    auto v = JSObject::getComputed_RJS(
+        arr,
+        runtime,
+        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(i)));
+    EXPECT_EQ(ExecutionStatus::RETURNED, v.getStatus());
+    if (v == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return Runtime::getUndefinedValue();
+    }
+    return runtime.makeHandle(std::move(*v));
+  };
+
+  // Own data properties holding exactly what was passed, by identity for the
+  // reference. Index 0 in particular must be the closure and not the
+  // 'poisoned' string the Object.prototype getter above hands out, which is
+  // what says the write landed in the array's OWN indexed storage.
+  auto e0 = elem(0);
+  EXPECT_EQ(closure->getRaw(), e0->getRaw());
+  EXPECT_TRUE(elem(1)->isNull());
+  EXPECT_EQ(7.0, elem(2)->getNumber());
 }
 
 } // namespace

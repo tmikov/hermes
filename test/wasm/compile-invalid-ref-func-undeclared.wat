@@ -22,7 +22,7 @@
 ;; REQUIRES: wasm
 
 ;; RUN: %wat2wasm --no-check %s -o %t.wasm
-;; RUN: (! %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>&1) | %FileCheck %s
+;; RUN: (! %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>&1) | %FileCheck --match-full-lines %s
 
 (module
   (func $g (result i32) (i32.const 1))
@@ -30,9 +30,19 @@
     ref.func $g
     drop))
 
-;; The message is checked, not just a non-zero exit: a refusal for the wrong
-;; reason would pass a check for "Error:" alone. In particular, the second
-;; line is what says this was the DECLARATION rule and not, say, an index out
-;; of range.
-;; CHECK: Error:
-;; CHECK-SAME: function 0 is not declared
+;; The WHOLE line is pinned, with --match-full-lines and a single CHECK, so
+;; that a refusal for the wrong reason cannot pass. The message is what says
+;; this was the DECLARATION rule and not, say, an index out of range.
+;;
+;; This used to be CHECK plus CHECK-SAME, which is barely stronger than
+;; "Error:" alone -- CHECK-SAME allows arbitrary text between and after its
+;; fragments, so a line reading `Error: parse failure at byte 27; unrelated:
+;; function 0 is not declared, BUT the real cause was something else` blames
+;; something else and still satisfies it. Measured, not reasoned: that line
+;; was run through both forms.
+;;
+;; The byte offset stays a regex. wabt reports the position in the module, so
+;; pinning it literally would tie this test to the encoding rather than to the
+;; diagnostic -- the same reason the v128 export tests skip wabt's preceding
+;; line.
+;; CHECK: Error: <validate>:{{[0-9a-f]+}}: error: function 0 is not declared in any elem sections

@@ -522,8 +522,11 @@ class WasmIRGen {
 
   /// \return the declared type of the global at module-wide global index
   ///   \p index, which may name either an imported or a defined global.
-  /// \pre \p index is in range for the module's global index space;
-  ///   validateExportIndices() establishes that for every exported index.
+  /// \pre \p index is in range for the module's global index space.
+  ///   validateExportIndices() establishes that for an exported index; for
+  ///   an index named by a function body, Wasm validation does, which
+  ///   compileWasmModule runs before any IR is built. Callers that walk the
+  ///   index space themselves are in range by construction.
   WasmGlobalType globalTypeAt(uint32_t index) const;
 
   /// Check that no exported global has a type the exports object cannot

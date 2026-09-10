@@ -791,6 +791,12 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
     // Record the entry rather than dropping it: a dropped entry does not
     // merely lose its own slot, it shifts every later entry of the segment
     // down by one.
+    //
+    // Pinned by test/wasm/irgen-table-init-reftype.wat's `CHECK-NOT:
+    // warning:` line, and by nothing else. EndElemExpr substitutes a null
+    // for any element expression whose callbacks recorded no entry, so
+    // deleting this arm emits byte-identical IR; the warning EndElemExpr
+    // then prints is the only observable difference.
     assert(
         currentInitExprIndex_ < moduleInfo_.elements.size() &&
         "elem index out of range");

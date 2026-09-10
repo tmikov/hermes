@@ -615,29 +615,14 @@ void WasmIRGen::createFunctions() {
     uint32_t slotIdx = 0;
     for (uint32_t i = 0; i < numGlobals; ++i) {
       globalSlotIndex_[i] = slotIdx;
-      // Get the global's type.
-      WasmValType gType;
-      if (i < numImportedGlobals) {
-        // Imported global: find the i-th global import.
-        uint32_t importGlobalIdx = 0;
-        for (const auto &imp : moduleInfo_.imports) {
-          if (imp.kind != WasmExternalKind::Global)
-            continue;
-          if (importGlobalIdx == i) {
-            gType = imp.globalType.type;
-            // A mutable imported global is shared state: it is read and
-            // written through the host's WebAssembly.Global, not through
-            // the frame slot allocated below.
-            if (imp.globalType.mutable_)
-              importedMutableGlobals_.insert(i);
-            break;
-          }
-          ++importGlobalIdx;
-        }
-      } else {
-        // Defined global.
-        gType = moduleInfo_.globals[i - numImportedGlobals].type.type;
-      }
+      // The global's declared type, through the single derivation of it.
+      WasmGlobalType gt = globalTypeAt(i);
+      WasmValType gType = gt.type;
+      // A mutable imported global is shared state: it is read and written
+      // through the host's WebAssembly.Global, not through the frame slot
+      // allocated below.
+      if (i < numImportedGlobals && gt.mutable_)
+        importedMutableGlobals_.insert(i);
 
       globalVars_.push_back(builder_.createVariable(
           topLevelVS_,
@@ -880,7 +865,7 @@ void WasmIRGen::createFunctions() {
         //
         // That is finding J4, and the claim is not asserted here: it is
         // enumerated and executed by test/wasm/e2e-no-closure-escape.wat,
-        // which walks all twenty routes and brand-checks what each one yields.
+        // which walks every route and brand-checks what each one yields.
         // The interim fix -- typing float params of "escapable" functions
         // `:any` and coercing at function entry -- is gone with the routes it
         // defended against. ANY NEW ROUTE OUT (ref.func in a function body,
@@ -2835,14 +2820,20 @@ Function *WasmIRGen::createExportWrapper(
     } else {
       // Multi-value: return a JS Array of results.
       //
-      // Every result is read into an SSA value first and the array is built
-      // from all of them at the end, by a builtin that runs no script. The
-      // array used to come from globalThis.Array, called AFTER the internal
-      // call, with the buffer reads interleaved with indexed stores into
-      // whatever that constructor returned -- so a replacement constructor, or
-      // an indexed setter inherited from Array.prototype, saw each result and
-      // could substitute it, drop it, or re-enter an export between two of
-      // them.
+      // Each result is read into an SSA value before the array is built, and
+      // the array is built from all of them at the end by a builtin that runs
+      // no script. The array used to come from globalThis.Array, called AFTER
+      // the internal call, with the buffer reads interleaved with indexed
+      // stores into whatever that constructor returned -- so a replacement
+      // constructor, or an indexed setter inherited from Array.prototype, saw
+      // each result and could substitute it, drop it, or re-enter an export
+      // between two of them.
+      //
+      // That is a claim about the ARRAY, not about the reads that fill it.
+      // The numeric reads below are ordinary indexed property loads on
+      // rbI/rbF, which are built from replaceable globals -- see the retBuf
+      // view creation in createFunctions(), where that is written out in
+      // full. It is filed as 01a0821a-1093 and is not fixed here.
       auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
       llvh::SmallVector<Value *, 8> resultVals;
       resultVals.reserve(funcType.results.size());
@@ -8143,18 +8134,7 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     uint32_t slotIdx = globalSlotIndex_[i];
 
-    // Find the i-th global import to determine its type.
-    WasmValType gType = WasmValType::I32;
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == i) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
+    WasmValType gType = globalTypeAt(i).type;
 
     if (importedMutableGlobals_.count(i)) {
       // A mutable import's frame slot is never read as a snapshot: Wasm
@@ -8363,22 +8343,7 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
   uint32_t slotIdx = globalSlotIndex_[globalIndex];
 
   // Determine the global's type.
-  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-  WasmValType gType = WasmValType::I32;
-  if (globalIndex < numImportedGlobals) {
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == globalIndex) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
-  } else {
-    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
-  }
+  WasmValType gType = globalTypeAt(globalIndex).type;
 
   // An imported mutable global is shared state: its value lives in the
   // host's WebAssembly.Global, which the host can write at any time. Read it
@@ -8449,22 +8414,7 @@ void WasmIRGen::onGlobalSet(uint32_t globalIndex) {
   uint32_t slotIdx = globalSlotIndex_[globalIndex];
 
   // Determine the global's type.
-  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-  WasmValType gType = WasmValType::I32;
-  if (globalIndex < numImportedGlobals) {
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == globalIndex) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
-  } else {
-    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
-  }
+  WasmValType gType = globalTypeAt(globalIndex).type;
 
   // An imported mutable global is shared state: write through the host's
   // WebAssembly.Global, which is what makes the write visible to the host
