@@ -2980,6 +2980,10 @@ void WasmIRGen::createImportTrampoline(
             // here happens before any result of this call has landed. (The
             // buffer is not untouched: the i64 arm above uses rbI[0]/[1] as
             // scratch in this pass.)
+            //
+            // A refusal at result i also abandons this loop, so the elements
+            // after i are never read. An accessor-backed array therefore sees
+            // fewer property reads than it did when nothing was tested.
             vals.emplace_back(
                 emitFuncRefCheck(
                     jsVal,
@@ -6168,19 +6172,22 @@ Value *WasmIRGen::emitFuncRefCheck(
     Value *value,
     const llvh::Twine &diagnostic) {
   auto *func = builder_.getInsertionBlock()->getParent();
-#ifndef NDEBUG
-  // The nullptr catch target below is right only in a Function that builds no
-  // try: a ThrowTypeErrorInst inside one needs the catch block as a
-  // successor, which is what BCGen's fixupCatchTargets arranges elsewhere. A
-  // Wasm `try` is emitted into the body Function, never into a wrapper or a
-  // trampoline, so this holds for the callers there are -- and says so if one
-  // stops holding.
-  for (auto &bb : *func)
-    for (auto &inst : bb)
-      assert(
-          !llvh::isa<TryStartInst>(&inst) &&
-          "emitFuncRefCheck needs a catch target in a Function with a try");
-#endif
+  // This helper is written for the two Functions built outside
+  // begin/endFunction -- the export wrapper and the import trampoline. The
+  // ThrowTypeErrorInst below keeps the nullptr catch target it is given:
+  // hermes::fixupCatchTargets (lib/IR/Analysis.cpp) is what supplies a real
+  // one to a BaseThrowInst inside a `try`, and endFunction() runs it over
+  // currentFunc_ when a body is finished, which neither of these reaches.
+  // Their nullptr is therefore final, and right while they build no `try`.
+  //
+  // A body Function WOULD get that repair, so a body caller would not be
+  // broken by the catch target. It would still be a use this helper has not
+  // been designed for -- it splits the current block, which the value and
+  // control stacks are not told about -- so it is asserted rather than left
+  // to pass silently.
+  assert(
+      func != currentFunc_ &&
+      "emitFuncRefCheck is for wrappers and trampolines, not function bodies");
   auto *checkBrandBB = builder_.createBasicBlock(func);
   auto *throwBB = builder_.createBasicBlock(func);
   auto *okBB = builder_.createBasicBlock(func);
@@ -6197,8 +6204,7 @@ Value *WasmIRGen::emitFuncRefCheck(
   auto *branded = helpers_.emitIsExportedFunction(value);
   builder_.createCondBranchInst(branded, okBB, throwBB);
 
-  // The catch target is nullptr; the assertion at the top of this function is
-  // what stands behind that.
+  // Catch target nullptr: see the assertion at the top of this function.
   builder_.setInsertionBlock(throwBB);
   builder_.createThrowTypeErrorInst(builder_.getLiteralString(diagnostic));
 

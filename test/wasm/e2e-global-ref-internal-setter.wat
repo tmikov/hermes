@@ -46,7 +46,11 @@
 ;; the entry and both stores, and it runs for an accepted Exported Function
 ;; too, not only for a refused value; the parameter conversion in the export
 ;; wrapper asks the same question through the wasmIsExportedFunction builtin,
-;; so put_fn(h) now allocates twice on its way to the slot. The loop at the
+;; so put_fn(h) now performs two potentially allocating brand checks on its
+;; way to the slot. (Whether either one actually allocates depends on the
+;; property map already being there -- HiddenClass::findPropertyNoMap builds
+;; one only when it is missing -- which is why the requirement is rooting
+;; across the call rather than a count.) The loop at the
 ;; end allocates between writes. In a build without HERMESVM_SANITIZE_HANDLES
 ;; the flag is ignored and this is an ordinary behavioural test.
 

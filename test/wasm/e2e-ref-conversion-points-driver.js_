@@ -183,6 +183,9 @@ print('call_pair(null): ' + String(r) + ' ' + (r === null) + ' ' + E.count() +
 pairVal = E.target;
 print('call_pair(target): ' + (E.call_pair() === E.target) + ' ' + E.count() +
       ' ' + pairCalls);
+pairVal = impWrapper;
+print('call_pair(ref_import()): ' + (E.call_pair() === impWrapper) + ' ' +
+      E.count() + ' ' + pairCalls);
 pairVal = plain;
 print('call_pair(plain function): ' + attempt(function () {
   return E.call_pair();
@@ -212,5 +215,7 @@ print('call_extpair(plain function): ' + (E.call_extpair() === plain) + ' ' +
 extpairVal = undefined;
 print('call_extpair(undefined): ' + (E.call_extpair() === undefined) + ' ' +
       E.count());
+extpairVal = null;
+print('call_extpair(null): ' + (E.call_extpair() === null) + ' ' + E.count());
 
 print('done');

@@ -47,7 +47,8 @@
   (import "e" "extpair" (func $extpair (result i32 externref)))
 
   ;; $one is named by `ref.func` below, which requires a declaration site.
-  ;; An imported function has no other one.
+  ;; It is not exported and appears in no other segment here, so this is the
+  ;; one it has.
   (elem declare func $one)
 
   ;; The "was the body entered" counter.
@@ -165,15 +166,17 @@
 ;; --- multi-value funcref import, at result index 1 ---
 ;; CHECK-NEXT: call_pair(null): null true 17 1
 ;; CHECK-NEXT: call_pair(target): true 18 2
-;; CHECK-NEXT: call_pair(plain function): TypeError: Wasm import: funcref result 1 requires null or a WebAssembly exported function 18 3
-;; CHECK-NEXT: call_pair(undefined): TypeError: Wasm import: funcref result 1 requires null or a WebAssembly exported function 18 4
-;; CHECK-NEXT: call_pair(target again): true 19 5
+;; CHECK-NEXT: call_pair(ref_import()): true 19 3
+;; CHECK-NEXT: call_pair(plain function): TypeError: Wasm import: funcref result 1 requires null or a WebAssembly exported function 19 4
+;; CHECK-NEXT: call_pair(undefined): TypeError: Wasm import: funcref result 1 requires null or a WebAssembly exported function 19 5
+;; CHECK-NEXT: call_pair(target again): true 20 6
 ;;
 ;; --- externref results: every JS value passes, both arms ---
-;; CHECK-NEXT: call_ext(plain function): true 20
-;; CHECK-NEXT: call_ext(5): true 21
-;; CHECK-NEXT: call_ext(undefined): true 22
-;; CHECK-NEXT: call_ext(null): true 23
-;; CHECK-NEXT: call_extpair(plain function): true 24
-;; CHECK-NEXT: call_extpair(undefined): true 25
+;; CHECK-NEXT: call_ext(plain function): true 21
+;; CHECK-NEXT: call_ext(5): true 22
+;; CHECK-NEXT: call_ext(undefined): true 23
+;; CHECK-NEXT: call_ext(null): true 24
+;; CHECK-NEXT: call_extpair(plain function): true 25
+;; CHECK-NEXT: call_extpair(undefined): true 26
+;; CHECK-NEXT: call_extpair(null): true 27
 ;; CHECK-NEXT: done
