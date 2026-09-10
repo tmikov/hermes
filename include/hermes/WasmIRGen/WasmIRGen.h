@@ -654,9 +654,9 @@ class WasmIRGen {
   /// slots in globalVars_: global.get/global.set for these go through the
   /// object's `.value` property so that the module and the host see the same
   /// global. The frame slots still hold the link-time snapshot, which only
-  /// constant expressions (data/element offsets, defined-global
-  /// initializers) read, and Wasm validation restricts those to immutable
-  /// imported globals.
+  /// constant expressions (data/element offsets, element segment entries,
+  /// defined-global initializers) read, and Wasm validation restricts those
+  /// to immutable imported globals.
   llvh::DenseSet<uint32_t> importedMutableGlobals_;
 
   /// Maps raw type section indices to canonical indices. Structurally

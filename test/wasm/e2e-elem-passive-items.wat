@@ -31,7 +31,8 @@
 ;;
 ;; Element expressions name globals by INDEX rather than by $name: wabt
 ;; 1.0.39's WAT parser hits an `is_index()` assertion on a named global
-;; inside an element expression (dz 01a089a2-2a19). Index 0 is $gf and index 1 is $ge, in import order.
+;; inside an element expression (dz 01a089a2-2a19). Index 0 is $gf and
+;; index 1 is $ge, in import order.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-elem-passive-items-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s

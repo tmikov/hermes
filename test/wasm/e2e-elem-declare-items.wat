@@ -24,11 +24,14 @@
 ;;    EXPRESSION form is flags 7, and the reader used to test `flags == 3`,
 ;;    so it filed the expression form under Passive. A passive segment keeps
 ;;    its contents for table.init while a declarative one is dropped before
-;;    the module starts, and wabt's validator lets `table.init` name a
-;;    declared segment, so the misfiling is reachable. The first refusal
-;;    below is the one it changed -- that table.init used to succeed and
-;;    populate the table; the second is the funcidx form, which was already
-;;    right, and is here so that the two encodings are seen to agree.
+;;    the module starts, and a `table.init` naming a declared segment is
+;;    VALID -- the spec testsuite's elem.wast has exactly that module, expects
+;;    it to validate, and expects the call to trap because the segment is
+;;    already dropped -- so the misfiling broke working modules rather than
+;;    tolerating broken ones. The first refusal below is the one it changed:
+;;    that table.init used to succeed and populate the table. The second is
+;;    the funcidx form, which was already right, and is here so that the two
+;;    encodings are seen to agree.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-elem-declare-items-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s

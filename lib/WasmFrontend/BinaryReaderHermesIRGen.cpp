@@ -376,11 +376,16 @@ wabt::Result BinaryReaderHermesIRGen::BeginElemSegment(
   WasmElemSegment seg;
   // A declarative segment sets both the passive bit and the explicit-index
   // bit; the elemexpr bit is independent of the mode, so the funcidx form
-  // (flags 3) and the expression form (flags 7) are both declarative. Testing
-  // `flags == SegDeclared` instead classified the expression form as passive,
-  // which kept its entries for table.init instead of dropping them before the
-  // module starts. wabt's own reader makes the same distinction with the same
-  // two bits, in ReadElemSection.
+  // (flags 3) and the expression form (flags 7) are both declarative. wabt's
+  // own reader makes the mode decision with the same two bits, in
+  // BinaryReaderIR::BeginElemSegment (binary-reader-ir.cc).
+  //
+  // Testing `flags == SegDeclared` instead classified the expression form as
+  // passive, which kept its entries for table.init instead of dropping them
+  // before the module starts. That broke VALID modules: the spec testsuite's
+  // elem.wast has a module that names a declared segment in a table.init,
+  // expects it to validate, and expects the call to trap because the segment
+  // is already dropped.
   if ((flags & (SegPassive | SegExplicitIndex)) == SegDeclared) {
     seg.mode = WasmElemSegment::Mode::Declarative;
   } else if (flags & SegPassive) {

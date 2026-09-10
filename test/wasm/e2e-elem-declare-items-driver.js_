@@ -15,7 +15,8 @@ print('g starts null: ' + (ex.g.value === null));
 
 ex.stash();
 var first = ex.g.value;
-print('after stash, g is an object: ' + (first !== null && first !== undefined));
+print('after stash, g is an object: ' +
+      (first !== null && first !== undefined));
 
 // Through the table slot funnel, which takes null or an Exported Function and
 // derives the closure and the interned type id from it. A value that were

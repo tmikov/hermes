@@ -2154,12 +2154,16 @@ CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
 }
 
 /// Wasm table.init: copy entries from element segment into a table.
-/// Args: (funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count).
-/// elemSegs is a JSArray where each element is either a JSArray of Exported
-/// Functions (one per entry, null where the function index is unknown) or null
-/// for a dropped segment. The segment carries only the wrapper because the
-/// closure and the type id are derived from it, which is what keeps a
-/// table.init'ed slot's three arrays in agreement.
+/// Args: (funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count,
+/// isFuncRef).
+/// elemSegs is a JSArray where each element is either a JSArray holding one
+/// reference value per segment entry, or null for a dropped segment. What an
+/// entry may be follows the destination table's type, which \p isFuncRef
+/// carries: for a FUNCREF table an entry is null or an Exported Function, and
+/// the segment carries only that wrapper because the closure and the type id
+/// are derived from it, which is what keeps a table.init'ed slot's three
+/// arrays in agreement; for an EXTERNREF table an entry is any JS value and
+/// there is no wrapper to derive anything from.
 /// Traps on out-of-bounds or if the segment has been dropped (with n>0).
 CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   struct : public Locals {
@@ -2211,7 +2215,7 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
     if (LLVM_UNLIKELY(!segArr))
       return ExecutionStatus::EXCEPTION;
     lv.segArr = segArr;
-    // One slot per entry: the Exported Function.
+    // One slot per entry: the reference value that entry lowered to.
     segLen = JSArray::getLength(segArr, runtime);
   }
 
