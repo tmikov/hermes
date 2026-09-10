@@ -1597,11 +1597,13 @@ CallResult<HermesValue> wasmMakeResultArray(void *, Runtime &runtime) {
   lv.out = std::move(*arrRes);
 
   // setElementAt discards the bool that says whether the write was REFUSED,
-  // which wasmStoreTableElement below exists to complain about. A refusal
-  // needs a sealed, frozen or non-extendable array, or an index outside the
-  // storage; this array was created above with length == count and has been
-  // handed to nothing since, so neither is reachable here. The only status
-  // worth checking is the exception one.
+  // which wasmStoreTableElement below exists to complain about. On this path
+  // there is one way to be refused: ArrayImpl::_setOwnIndexedImpl returns
+  // false for a FROZEN array and returns true otherwise (JSArray.cpp) -- an
+  // index past the storage grows it or becomes a named property rather than
+  // failing. This array was created above and handed to nothing since, so
+  // nothing has frozen it, and the exception status is the only one worth
+  // checking.
   for (uint32_t i = 0; i < count; ++i) {
     lv.elem = args.getArg(i);
     if (LLVM_UNLIKELY(

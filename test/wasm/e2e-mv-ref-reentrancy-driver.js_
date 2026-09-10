@@ -147,12 +147,13 @@ control = null;
 // The call runs from a HOST TASK rather than here, and that is load-bearing.
 // Constructing a WeakRef calls Runtime::addToKeptObjects, which inserts the
 // target into keptObjects_ -- a STRONG JSSet (Runtime.cpp) -- and `gc()` is
-// only runtime.collect("forced"), which does not empty it. The single caller
-// of clearKeptObjects in this tree is the host's microtask checkpoint
-// (ConsoleHost.h), which the CLI performs after the script and before the
-// task queue. So a target whose WeakRef was made here is strongly held for
-// the rest of this synchronous run, and every liveness question asked inside
-// it would answer "alive" whatever the transport did.
+// only runtime.collect("forced"), which does not empty it. Emptying it is the
+// HOST's job: several hosts call clearKeptObjects, and nothing reachable from
+// inside a synchronous script run does. In this one it is the microtask
+// checkpoint (ConsoleHost.h), which the CLI performs after the script and
+// before it drains the task queue. So a target whose WeakRef was made here is
+// strongly held for the rest of this synchronous run, and every liveness
+// question asked inside it would answer "alive" whatever the transport did.
 setTimeout(function () {
   var r2 = inst2.exports.mixed();
 
