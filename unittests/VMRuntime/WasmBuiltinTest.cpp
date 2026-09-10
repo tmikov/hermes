@@ -915,9 +915,13 @@ TEST_F(WasmBuiltinTest, WasmAllocRefBufValidatesSlotCountAndFills) {
       allocFails(HermesValue::encodeTrustedNumberValue(
           std::numeric_limits<double>::infinity())));
 
-  // In range but not an integer.
+  // In range but not an integer, which is what `d != std::floor(d)` refuses.
   EXPECT_EQ(
       kMsgSlotCount, allocFails(HermesValue::encodeTrustedNumberValue(1.5)));
+  // Just past the top and not an integer either. This one never reaches the
+  // integer check: 4294967295.5 > 4294967295.0, so the range test refuses it
+  // first. It is here for the boundary, and the assertion holds either way
+  // because both guards raise the same diagnostic.
   EXPECT_EQ(
       kMsgSlotCount,
       allocFails(HermesValue::encodeTrustedNumberValue(4294967295.5)));
