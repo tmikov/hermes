@@ -27,7 +27,11 @@
 ;; The reference-load gap is also where the driver forces a GC. By then the
 ;; producing frame has returned and its globals are cleared, and the driver has
 ;; dropped its own references, so the second externref is still sitting in the
-;; container waiting to be read.
+;; container waiting to be read. The driver runs that call from a HOST TASK,
+;; because constructing a WeakRef strongly keeps its target until the host's
+;; microtask checkpoint clears keptObjects_, and it collects an unrooted
+;; CONTROL object at the same instant: without the control, "the reference
+;; survived" and "nothing was collected" look alike.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-mv-ref-reentrancy-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
@@ -87,6 +91,10 @@
 ;; CHECK-NEXT: shape 2: typed-array getter fired: true
 ;; CHECK-NEXT: shape 2: reentered from both the store gap and the load gap: true
 ;; CHECK-NEXT: shape 2: collected once while the results were outstanding: true
+
+;; The collection at that instant really collects: an object created alongside
+;; the two transported ones, and handed to nobody, is gone.
+;; CHECK-NEXT: shape 2: the unrooted control was collected there: true
 
 ;; Both externrefs are the outer activation's, and neither is the reentrant
 ;; one's.

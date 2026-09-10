@@ -10,10 +10,10 @@
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/FrontEndDefs/Typeof.h"
 #include "hermes/Support/Base64vlq.h"
+#include "hermes/VM/ArrayStorage.h"
 #include "hermes/VM/BigIntPrimitive.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/FastArray.h"
-#include "hermes/VM/ArrayStorage.h"
 #include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
@@ -1596,6 +1596,12 @@ CallResult<HermesValue> wasmMakeResultArray(void *, Runtime &runtime) {
     return ExecutionStatus::EXCEPTION;
   lv.out = std::move(*arrRes);
 
+  // setElementAt discards the bool that says whether the write was REFUSED,
+  // which wasmStoreTableElement below exists to complain about. A refusal
+  // needs a sealed, frozen or non-extendable array, or an index outside the
+  // storage; this array was created above with length == count and has been
+  // handed to nothing since, so neither is reachable here. The only status
+  // worth checking is the exception one.
   for (uint32_t i = 0; i < count; ++i) {
     lv.elem = args.getArg(i);
     if (LLVM_UNLIKELY(

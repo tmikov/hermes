@@ -786,8 +786,9 @@ class WasmIRGen {
 
   /// The reference transport container THIS function RECEIVED, as a
   /// LoadParamInst of its retbuf_R parameter; null when the signature has no
-  /// reference result travelling through the buffer. Its only reader is
-  /// emitRetBufStores, which writes this function's own results into it.
+  /// reference result travelling through the buffer. emitRetBufStores reads
+  /// it, to write this function's own results into it; `git grep refBuf_`
+  /// settles whether anything else has since.
   ///
   /// It is deliberately NOT what a nested call's results are read from: each
   /// call site allocates its own container and reads back the very value it
@@ -1212,6 +1213,15 @@ class WasmIRGen {
   /// Callee: pop results, store to buffer, return 0. Called from onReturn()
   /// and endFunction() when the function uses a return buffer.
   void emitRetBufStores(const WasmFuncType &funcType);
+
+  /// Allocate the reference container for one nested call with signature
+  /// \p funcType and append it to \p args, after the two numeric views that
+  /// the caller has already pushed. \return that container, which the caller
+  /// must hand to emitRetBufLoads for THAT call, or nullptr when the callee
+  /// has no reference result travelling through the buffer.
+  Value *emitNestedCallRefBuf(
+      const WasmFuncType &funcType,
+      llvh::SmallVectorImpl<Value *> &args);
 
   /// Caller: read results from buffer, push onto value stack.
   /// Called from onCall/onCallIndirect after a call to a function that

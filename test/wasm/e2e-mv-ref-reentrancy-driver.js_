@@ -61,6 +61,7 @@ var taGets = 0;
 var storeGapReentries = 0;
 var loadGapReentries = 0;
 var collections = 0;
+var controlCollected = false;
 var taDepth = 0;
 var reentrantA = {tag: 'reentrantA'};
 var reentrantB = {tag: 'reentrantB'};
@@ -89,14 +90,17 @@ function onTypedArrayGet(i) {
   taGets++;
   if (i === 1 && inst2 !== null && taDepth === 0) {
     taDepth++;
-    // The producing frame has returned and cleared its globals, and the driver
-    // dropped its own references below, so the second externref is reachable
-    // only through the container the wrapper is still reading. If the
-    // container did not trace its elements this collection would free it, and
-    // under a heap-moving build the slot would be left pointing at the old
-    // address.
+    // The producing frame has returned and cleared its globals, and the
+    // driver dropped its own references, so the second externref is still
+    // sitting in the container waiting to be read.
     collections++;
     gc();
+    // The control was created next to the two transported objects, handed to
+    // nobody, and its WeakRef was made in the same place theirs were. If it
+    // is gone here, a collection at this point really does collect -- which
+    // is what makes the survival of the transported reference mean something
+    // rather than meaning that nothing was collected at all.
+    controlCollected = controlWeak.deref() === undefined;
     loadGapReentries++;
     reenter();
     taDepth--;
@@ -130,40 +134,56 @@ inst2 = new WebAssembly.Instance(
 
 var outer0 = {tag: 'outer0'};
 var outer1 = {tag: 'outer1'};
+var control = {tag: 'control'};
 var weak0 = new WeakRef(outer0);
 var weak1 = new WeakRef(outer1);
+var controlWeak = new WeakRef(control);
 inst2.exports.setE0(outer0);
 inst2.exports.setE1(outer1);
 outer0 = null;
 outer1 = null;
+control = null;
 
-var r2 = inst2.exports.mixed();
+// The call runs from a HOST TASK rather than here, and that is load-bearing.
+// Constructing a WeakRef calls Runtime::addToKeptObjects, which inserts the
+// target into keptObjects_ -- a STRONG JSSet (Runtime.cpp) -- and `gc()` is
+// only runtime.collect("forced"), which does not empty it. The single caller
+// of clearKeptObjects in this tree is the host's microtask checkpoint
+// (ConsoleHost.h), which the CLI performs after the script and before the
+// task queue. So a target whose WeakRef was made here is strongly held for
+// the rest of this synchronous run, and every liveness question asked inside
+// it would answer "alive" whatever the transport did.
+setTimeout(function () {
+  var r2 = inst2.exports.mixed();
 
-globalThis.Uint32Array = realUint32Array;
-globalThis.Float64Array = realFloat64Array;
+  globalThis.Uint32Array = realUint32Array;
+  globalThis.Float64Array = realFloat64Array;
 
-print('shape 2: typed-array setter fired: ' + (taSets > 0));
-print('shape 2: typed-array getter fired: ' + (taGets > 0));
-print(
-  'shape 2: reentered from both the store gap and the load gap: ' +
-    (storeGapReentries === 1 && loadGapReentries === 1));
-print(
-  'shape 2: collected once while the results were outstanding: ' +
-    (collections === 1));
+  print('shape 2: typed-array setter fired: ' + (taSets > 0));
+  print('shape 2: typed-array getter fired: ' + (taGets > 0));
+  print(
+    'shape 2: reentered from both the store gap and the load gap: ' +
+      (storeGapReentries === 1 && loadGapReentries === 1));
+  print(
+    'shape 2: collected once while the results were outstanding: ' +
+      (collections === 1));
+  print(
+    'shape 2: the unrooted control was collected there: ' + controlCollected);
 
-// Only the reference halves are asserted. The i32 between them travels in a
-// replaced Uint32Array through ordinary property operations, so a reentrant
-// activation can still overwrite it and a replacement getter can still
-// substitute it outright. That is 01a0821a-1093, it is not a reference-type
-// defect, and this change does not close it -- so r2[1] is deliberately not
-// checked here, and the silence must not be read as evidence that it is safe.
-print(
-  "shape 2: result 0 is the outer activation's reference: " +
-    (r2[0] === weak0.deref() && r2[0] !== undefined));
-print(
-  "shape 2: result 2 is the outer activation's reference: " +
-    (r2[2] === weak1.deref() && r2[2] !== undefined));
-print(
-  "shape 2: neither is the reentrant activation's: " +
-    (r2[0] !== reentrantA && r2[2] !== reentrantB));
-print('done');
+  // Only the reference halves are asserted. The i32 between them travels in a
+  // replaced Uint32Array through ordinary property operations, so a reentrant
+  // activation can still overwrite it and a replacement getter can still
+  // substitute it outright. That is 01a0821a-1093, it is not a reference-type
+  // defect, and this change does not close it -- so r2[1] is deliberately not
+  // checked here, and the silence must not be read as evidence it is safe.
+  print(
+    "shape 2: result 0 is the outer activation's reference: " +
+      (r2[0] === weak0.deref() && r2[0] !== undefined));
+  print(
+    "shape 2: result 2 is the outer activation's reference: " +
+      (r2[2] === weak1.deref() && r2[2] !== undefined));
+  print(
+    "shape 2: neither is the reentrant activation's: " +
+      (r2[0] !== reentrantA && r2[2] !== reentrantB));
+  print('done');
+}, 0);

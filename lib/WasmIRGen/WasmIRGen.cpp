@@ -304,8 +304,8 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
         // R[byteOff / 4] = val. A funcref is a JS closure and an externref an
         // arbitrary JS value; neither survives a store into the Uint32Array
         // view, which coerces it to NaN and then to 0. The write goes through
-        // a builtin rather than a property store because the container has no
-        // JS identity at all: no property operation can reach it.
+        // a builtin rather than a property store because script cannot name
+        // the container, and a property operation is not valid on one.
         uint32_t idx = byteOff / 4;
         helpers_.emitRefBufSet(
             getRbR(),
@@ -825,9 +825,11 @@ void WasmIRGen::createFunctions() {
     }
     // And, when a reference travels through the buffer, the container that
     // carries it, immediately after the two numeric views. It is typed `any`
-    // rather than `object`: an ArrayStorage is a GC cell with no JS identity,
-    // and nothing in this function applies an IR operation to it -- it is
-    // read by wasmRefBufGet and written by wasmRefBufSet and by nothing else.
+    // rather than `object`: an ArrayStorage is a GC cell, not a JSObject, so
+    // `object` would be a claim the value does not satisfy. The code this
+    // compiler emits for the parameter passes it to wasmRefBufGet and
+    // wasmRefBufSet and applies no other operation to it; nothing enforces
+    // that, which is dz 01a08953-c401.
     if (needsRefBuffer(funcType)) {
       auto *rbR = builder_.createJSDynamicParam(func, "retbuf_R");
       rbR->setType(Type::createAnyType());
@@ -4418,6 +4420,22 @@ void WasmIRGen::onSelect() {
 
 // --- Function calls (D.12) ---
 
+Value *WasmIRGen::emitNestedCallRefBuf(
+    const WasmFuncType &funcType,
+    llvh::SmallVectorImpl<Value *> &args) {
+  if (!needsRefBuffer(funcType))
+    return nullptr;
+  // A container allocated for THIS call, sized for the CALLEE's signature,
+  // and read back by the caller out of the value returned here. Forwarding
+  // the container this function received would be too small whenever the
+  // nested signature has more results, and reaching for one through module
+  // scope is what let a caller read a slot a cross-module callee never wrote.
+  auto *refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+      static_cast<double>(refBufSlotCount(funcType))));
+  args.push_back(refBuf);
+  return refBuf;
+}
+
 void WasmIRGen::onCall(uint32_t funcIndex) {
   if (unreachable_)
     return;
@@ -4455,17 +4473,7 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     args.push_back(rbI);
     args.push_back(rbF);
   }
-  // A container allocated for THIS call, sized for the CALLEE's signature,
-  // and read back below out of this same SSA value. Forwarding the container
-  // this function received would be too small whenever the nested signature
-  // has more results, and reaching for one through module scope is what let a
-  // caller read a slot a cross-module callee never wrote.
-  Value *refBuf = nullptr;
-  if (needsRefBuffer(funcType)) {
-    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
-        static_cast<double>(refBufSlotCount(funcType))));
-    args.push_back(refBuf);
-  }
+  Value *refBuf = emitNestedCallRefBuf(funcType, args);
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -4543,17 +4551,7 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
     args.push_back(rbI);
     args.push_back(rbF);
   }
-  // A container allocated for THIS call, sized for the CALLEE's signature,
-  // and read back below out of this same SSA value. Forwarding the container
-  // this function received would be too small whenever the nested signature
-  // has more results, and reaching for one through module scope is what let a
-  // caller read a slot a cross-module callee never wrote.
-  Value *refBuf = nullptr;
-  if (needsRefBuffer(funcType)) {
-    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
-        static_cast<double>(refBufSlotCount(funcType))));
-    args.push_back(refBuf);
-  }
+  Value *refBuf = emitNestedCallRefBuf(funcType, args);
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo

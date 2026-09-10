@@ -593,10 +593,17 @@ Instruction *WasmHelpers::emitIsExportedFunction(Value *value) {
 Instruction *WasmHelpers::emitAllocRefBuf(Value *slots) {
   auto *inst = builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmAllocRefBuf, {slots});
-  // An ArrayStorage is a GC cell, not a JSObject, and no IR operation is ever
-  // applied to this value: it is passed to a call and handed back to
-  // wasmRefBufGet/wasmRefBufSet. `any` says exactly that and lets no pass
-  // assume anything else about it.
+  // An ArrayStorage is a GC cell, not a JSObject. This function emits no
+  // operation on the result: it becomes a call argument and an argument to
+  // wasmRefBufGet/wasmRefBufSet.
+  //
+  // `any` buys less than it looks like it buys. TypeContext.h defines it as
+  // the union of JS-OBSERVABLE types, so it neither describes an opaque
+  // internal cell nor forbids a consumer from applying a property operation;
+  // what it does is stop a pass from NARROWING the value to something it is
+  // not. That the representation rests on an unenforced boundary -- and that
+  // HermesValue::isObject() answers true for a cell that is not a JSObject --
+  // is dz 01a08953-c401, which carries two alternative representations.
   inst->setType(Type::createAnyType());
   return inst;
 }

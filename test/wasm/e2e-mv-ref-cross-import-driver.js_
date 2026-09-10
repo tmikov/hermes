@@ -27,8 +27,11 @@ var importer = new WebAssembly.Instance(
   WebAssembly.Module.fromHermesBytecode(importerBytes),
   {a: exporter.exports});
 
-// Installed after both instances exist, because the wrapper looks the
-// constructor up when it runs, not when the module is built.
+// Installed after both instances exist. That still reached the pre-change
+// wrapper, which looked the constructor up each time it RAN: the red run
+// against a binary built before this change shows three calls, one per export
+// call below. This wrapper does not look it up at all -- createExportWrapper
+// ends in wasmMakeResultArray -- which is what the zero below reports.
 var arrayCtorCalls = 0;
 globalThis.Array = function (n) {
   arrayCtorCalls++;
