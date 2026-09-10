@@ -1,0 +1,169 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-reentrancy.wat.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+var realArray = Array;
+var realUint32Array = Uint32Array;
+var realFloat64Array = Float64Array;
+
+// ---------------------------------------------------------------- shape 1 --
+
+var inst1 = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+
+var outerFunc = inst1.exports.f7;
+var innerFunc = inst1.exports.f9;
+var outerObject = {tag: 'outer'};
+var innerObject = {tag: 'inner'};
+
+inst1.exports.setF(outerFunc);
+inst1.exports.setE(outerObject);
+
+var arrayCtorCalls = 0;
+var ctorReentries = 0;
+var ctorDepth = 0;
+globalThis.Array = function (n) {
+  arrayCtorCalls++;
+  if (ctorDepth === 0) {
+    ctorDepth++;
+    ctorReentries++;
+    // A second activation, with deliberately different identities. If the two
+    // activations shared storage, these are the values the outer call would
+    // come back with.
+    inst1.exports.setF(innerFunc);
+    inst1.exports.setE(innerObject);
+    inst1.exports.both();
+    ctorDepth--;
+  }
+  return {};
+};
+
+var r1 = inst1.exports.both();
+globalThis.Array = realArray;
+
+print('shape 1: replacement Array constructor calls: ' + arrayCtorCalls);
+print('shape 1: reentries from the constructor: ' + ctorReentries);
+print("shape 1: funcref is the outer activation's: " + (r1[0] === outerFunc));
+print(
+  "shape 1: externref is the outer activation's: " + (r1[1] === outerObject));
+
+// ---------------------------------------------------------------- shape 2 --
+
+var inst2 = null;
+var taSets = 0;
+var taGets = 0;
+var storeGapReentries = 0;
+var loadGapReentries = 0;
+var collections = 0;
+var taDepth = 0;
+var reentrantA = {tag: 'reentrantA'};
+var reentrantB = {tag: 'reentrantB'};
+
+// Runs a whole second activation of `mixed`, from inside the outer one.
+function reenter() {
+  inst2.exports.setE0(reentrantA);
+  inst2.exports.setE1(reentrantB);
+  inst2.exports.mixed();
+}
+
+// `mixed` lays out externref, i32, externref, so slot index 1 is the i32 and
+// its accessors are the gap between the two reference stores and, later,
+// between the two reference loads.
+function onTypedArraySet(i) {
+  taSets++;
+  if (i === 1 && inst2 !== null && taDepth === 0) {
+    taDepth++;
+    storeGapReentries++;
+    reenter();
+    taDepth--;
+  }
+}
+
+function onTypedArrayGet(i) {
+  taGets++;
+  if (i === 1 && inst2 !== null && taDepth === 0) {
+    taDepth++;
+    // The producing frame has returned and cleared its globals, and the driver
+    // dropped its own references below, so the second externref is reachable
+    // only through the container the wrapper is still reading. If the
+    // container did not trace its elements this collection would free it, and
+    // under a heap-moving build the slot would be left pointing at the old
+    // address.
+    collections++;
+    gc();
+    loadGapReentries++;
+    reenter();
+    taDepth--;
+  }
+}
+
+function makeFakeTypedArray() {
+  var store = [0, 0, 0, 0, 0, 0, 0, 0];
+  var view = {};
+  for (var i = 0; i < store.length; i++) {
+    (function (i) {
+      Object.defineProperty(view, String(i), {
+        get: function () { onTypedArrayGet(i); return store[i]; },
+        set: function (v) { store[i] = v; onTypedArraySet(i); },
+        configurable: true,
+        enumerable: true,
+      });
+    })(i);
+  }
+  return view;
+}
+
+// Installed BEFORE instantiation: the buffers are built during instantiation
+// and kept in the module's frame, so a replacement installed afterwards would
+// never be reached.
+globalThis.Uint32Array = function (buf) { return makeFakeTypedArray(); };
+globalThis.Float64Array = function (buf) { return makeFakeTypedArray(); };
+
+inst2 = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+
+var outer0 = {tag: 'outer0'};
+var outer1 = {tag: 'outer1'};
+var weak0 = new WeakRef(outer0);
+var weak1 = new WeakRef(outer1);
+inst2.exports.setE0(outer0);
+inst2.exports.setE1(outer1);
+outer0 = null;
+outer1 = null;
+
+var r2 = inst2.exports.mixed();
+
+globalThis.Uint32Array = realUint32Array;
+globalThis.Float64Array = realFloat64Array;
+
+print('shape 2: typed-array setter fired: ' + (taSets > 0));
+print('shape 2: typed-array getter fired: ' + (taGets > 0));
+print(
+  'shape 2: reentered from both the store gap and the load gap: ' +
+    (storeGapReentries === 1 && loadGapReentries === 1));
+print(
+  'shape 2: collected once while the results were outstanding: ' +
+    (collections === 1));
+
+// Only the reference halves are asserted. The i32 between them travels in a
+// replaced Uint32Array through ordinary property operations, so a reentrant
+// activation can still overwrite it and a replacement getter can still
+// substitute it outright. That is 01a0821a-1093, it is not a reference-type
+// defect, and this change does not close it -- so r2[1] is deliberately not
+// checked here, and the silence must not be read as evidence that it is safe.
+print(
+  "shape 2: result 0 is the outer activation's reference: " +
+    (r2[0] === weak0.deref() && r2[0] !== undefined));
+print(
+  "shape 2: result 2 is the outer activation's reference: " +
+    (r2[2] === weak1.deref() && r2[2] !== undefined));
+print(
+  "shape 2: neither is the reentrant activation's: " +
+    (r2[0] !== reentrantA && r2[2] !== reentrantB));
+print('done');

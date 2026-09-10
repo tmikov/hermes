@@ -1,0 +1,94 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-public-array.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)));
+
+// Captured before globalThis.Array is replaced, so the checks below still have
+// a genuine Array.isArray and a genuine constructor to build the control with.
+var realArray = Array;
+var realIsArray = Array.isArray;
+
+var setterHits = 0;
+var getterHits = 0;
+function installIndexedAccessors() {
+  for (var i = 0; i < 5; i++) {
+    (function (i) {
+      Object.defineProperty(Array.prototype, String(i), {
+        get: function () { getterHits++; return 'PROTO'; },
+        set: function (v) { setterHits++; },
+        configurable: true,
+      });
+    })(i);
+  }
+}
+installIndexedAccessors();
+
+// The control. An ordinary array of length 2 has HOLES at 0 and 1, so a store
+// walks the prototype chain and finds the accessor, and a read finds its
+// getter. This is the same shape `new Array(n)` gave the wrapper before the
+// fix, and it is what makes the zero counts printed at the end meaningful.
+var probe = new realArray(2);
+probe[0] = 1;
+print(
+  'control: ordinary array hit the inherited setter: ' + (setterHits === 1));
+print(
+  'control: ordinary array hole read the inherited getter: ' +
+    (probe[1] === 'PROTO' && getterHits === 1));
+
+// A replacement constructor that would decide what an export returns. Counted
+// rather than merely installed: the point is that nothing calls it.
+var arrayCtorCalls = 0;
+globalThis.Array = function (n) {
+  arrayCtorCalls++;
+  return {hostile: true};
+};
+
+setterHits = 0;
+getterHits = 0;
+
+function ownDataElement(arr, i) {
+  var d = Object.getOwnPropertyDescriptor(arr, i);
+  return !!(
+    d &&
+    'value' in d &&
+    d.writable === true &&
+    d.enumerable === true &&
+    d.configurable === true);
+}
+
+var oracle = inst.exports.svGet();
+
+var p = inst.exports.pair();
+print('pair: isArray=' + realIsArray(p) + ' length=' + p.length);
+print('pair[0]: ' + p[0]);
+print(
+  'pair[1]: ' + typeof p[1] + ' calls -> ' + p[1]() +
+    ' same=' + (p[1] === oracle));
+print(
+  'pair: own data elements: ' + ownDataElement(p, 0) + ' ' +
+    ownDataElement(p, 1));
+
+var host = {tag: 'host'};
+var e = inst.exports.epair(host);
+print('epair: isArray=' + realIsArray(e) + ' length=' + e.length);
+print('epair[0] is the host object: ' + (e[0] === host));
+print('epair[1]: ' + e[1]);
+print(
+  'epair: own data elements: ' + ownDataElement(e, 0) + ' ' +
+    ownDataElement(e, 1));
+
+var n = inst.exports.nested(host);
+print('nested: [5, host object]: ' + (n[0] === 5) + ' ' + (n[1] === host));
+
+print('replacement Array constructor calls: ' + arrayCtorCalls);
+print('inherited setter hits during the exports: ' + setterHits);
+print('inherited getter hits during the exports: ' + getterHits);
+print('done');

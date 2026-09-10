@@ -12,9 +12,10 @@
 ;; export wrapper could only choose between handing the caller a bogus 0 and
 ;; warning that the result type was unsupported.
 ;;
-;; The buffer now has a parallel reference array, indexed identically to the
-;; Uint32Array view (a reference reserves the same 4 bytes an i32 does, and
-;; uses the same byteOff/4 slot index), so references survive the round trip
+;; References now travel in a container of their own, allocated per call and
+;; passed to the callee alongside the two numeric views, indexed identically to
+;; the Uint32Array view (a reference reserves the same 4 bytes an i32 does, and
+;; uses the same byteOff/4 slot index). So references survive the round trip
 ;; and the export wrapper returns the real value. The diagnostic this test
 ;; used to pin is therefore gone for funcref and externref; V128 keeps it.
 
@@ -46,7 +47,7 @@
     (local.get 0))
 
   ;; Two references and an i32 in one result list, to pin the slot indexing:
-  ;; the funcref takes slot 0 and the externref slot 1 of the reference array,
+  ;; the funcref takes slot 0 and the externref slot 1 of the container,
   ;; while the i32 takes slot 2 of the integer view. Neither view's writes may
   ;; disturb the other's.
   (func (export "mvTwo") (param externref) (result funcref externref i32)

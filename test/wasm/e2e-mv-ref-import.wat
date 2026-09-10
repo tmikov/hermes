@@ -3,12 +3,13 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; The return buffer's reference slots on the import side. An imported JS
-;; function with a multi-value result list is called through a trampoline: the
-;; trampoline reads the elements of the JS array the import returned and
-;; stores each one into the buffer at its offset, and the Wasm caller reads
-;; them back out. Before the fix the trampoline's `default:` store arm used
-;; the Uint32Array view, so a funcref or externref element was coerced to 0
+;; The reference slots of a multi-value result on the import side. An imported
+;; JS function with a multi-value result list is called through a trampoline:
+;; the trampoline reads the elements of the JS array the import returned and
+;; stores each one at its offset -- numeric results into the buffer views,
+;; references into the container its caller passed it -- and the Wasm caller
+;; reads them back out. Before the fix the trampoline's `default:` store arm
+;; used the Uint32Array view, so a funcref or externref element was coerced to 0
 ;; on the way in -- the same destruction as on the wasm->wasm path, one
 ;; boundary earlier.
 ;;

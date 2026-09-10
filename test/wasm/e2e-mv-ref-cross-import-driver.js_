@@ -1,0 +1,61 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-cross-import.wat.
+
+var args = hermescli.getScriptArgs();
+var exporter = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0])));
+var importerBytes = hermescli.loadFile(args[1]);
+
+var oracle = exporter.exports.svGet();
+var host = {tag: 'host'};
+exporter.exports.put(host);
+
+// The substitutes. The funcref one is a genuine Exported Function of the
+// exporter, so it satisfies the importer's funcref admission test and would
+// reach the importer's Wasm stack unremarked; the externref one is an ordinary
+// object, which is a perfectly valid externref and has nothing to refuse it.
+var otherFunc = exporter.exports.mkext;
+var otherObject = {tag: 'substitute'};
+
+var importer = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(importerBytes),
+  {a: exporter.exports});
+
+// Installed after both instances exist, because the wrapper looks the
+// constructor up when it runs, not when the module is built.
+var arrayCtorCalls = 0;
+globalThis.Array = function (n) {
+  arrayCtorCalls++;
+  var o = {};
+  Object.defineProperty(o, '0', {
+    get: function () { return otherObject; },
+    set: function (v) {},
+    configurable: true,
+  });
+  Object.defineProperty(o, '1', {
+    get: function () { return otherFunc; },
+    set: function (v) {},
+    configurable: true,
+  });
+  return o;
+};
+
+var num = importer.exports.viaImportNum();
+var f = importer.exports.viaImportFunc();
+var e = importer.exports.viaImportExt();
+
+print('replacement Array constructor calls: ' + arrayCtorCalls);
+print('viaImportNum: ' + num);
+print(
+  'viaImportFunc: ' + typeof f + ' calls -> ' + f() +
+    ' same as exporter\'s svGet=' + (f === oracle));
+print('viaImportExt: is the host object=' + (e === host));
+print('substituted funcref did not come through: ' + (f !== otherFunc));
+print('substituted externref did not come through: ' + (e !== otherObject));
+print('done');
