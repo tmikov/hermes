@@ -520,6 +520,17 @@ class WasmIRGen {
   /// \return false, having set errorMsg_, for the first one that does not.
   bool validateExportIndices();
 
+  /// \return the declared type of the global at module-wide global index
+  ///   \p index, which may name either an imported or a defined global.
+  /// \pre \p index is in range for the module's global index space;
+  ///   validateExportIndices() establishes that for every exported index.
+  WasmGlobalType globalTypeAt(uint32_t index) const;
+
+  /// Check that no exported global has a type the exports object cannot
+  /// represent, which today means v128.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateGlobalExportTypes();
+
   /// Whether to enable strict Wasm memory bounds checking (from --test262).
   bool test262_ = false;
 

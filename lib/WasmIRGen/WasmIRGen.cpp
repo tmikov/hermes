@@ -74,17 +74,21 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
 /// silently wrong type check.
 /// 0xFF remains "a Wasm type no Global can have", which is now only v128. It
 /// matches nothing, so a v128 import satisfied by a WebAssembly.Global
-/// reports a mismatch, and a v128 global export is refused by wasmMakeGlobal
-/// as an unknown value type.
+/// reports a mismatch.
 ///
-/// That is the Global-OBJECT route only, and it is NOT comprehensive
-/// rejection of v128. An immutable global import may also be satisfied by a
-/// RAW JS value, and the raw branch at the import loop has an arm per
+/// The EXPORT side no longer reaches this function with a v128 type at all:
+/// validateGlobalExportTypes() refuses such a module during finalizeModule()
+/// with a message naming SIMD, before the export loop runs. See
+/// test/wasm/compile-invalid-v128-global-export.wat and
+/// test/wasm/compile-invalid-v128-global-reexport.wat.
+///
+/// The IMPORT side is not comprehensively screened. An immutable global
+/// import may be satisfied by a RAW JS value instead of a
+/// WebAssembly.Global, and the raw branch at the import loop has an arm per
 /// declared type: a BigInt for i64, any JS value for externref, `null` or an
 /// Exported Function for funcref, and a Number for what is left -- which is
 /// where v128 lands, so a raw Number satisfies a v128 immutable import today.
-/// Diagnosing v128 properly, with a message naming SIMD, is Task 12 of the
-/// reference-types plan. Do not read this code as a v128 guard.
+/// Do not read this code as a v128 guard.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32
@@ -1869,6 +1873,37 @@ bool WasmIRGen::validateExportIndices() {
   return true;
 }
 
+WasmGlobalType WasmIRGen::globalTypeAt(uint32_t index) const {
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  if (index >= numImportedGlobals)
+    return moduleInfo_.globals[index - numImportedGlobals].type;
+  uint32_t idx = 0;
+  for (const auto &imp : moduleInfo_.imports) {
+    if (imp.kind != WasmExternalKind::Global)
+      continue;
+    if (idx == index)
+      return imp.globalType;
+    ++idx;
+  }
+  // Only an out-of-range index reaches here, which the precondition excludes.
+  // Returning the default keeps the caller on a defined path in a release
+  // build rather than reading past the end of a vector.
+  return WasmGlobalType{};
+}
+
+bool WasmIRGen::validateGlobalExportTypes() {
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Global)
+      continue;
+    if (LLVM_UNLIKELY(globalTypeAt(exp.index).type == WasmValType::V128)) {
+      errorMsg_ = "exported global \"" + exp.name +
+          "\" has type v128, and SIMD is not supported";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool WasmIRGen::finalizeModule() {
   // onRefFunc() can refuse the module from inside a function body; it records
   // why in errorMsg_ and translation carries on. Report that here, before
@@ -1895,6 +1930,22 @@ bool WasmIRGen::finalizeModule() {
   // module is invalid, and the answer is to reject the module, not to skip
   // the export and compile the rest of it.
   if (LLVM_UNLIKELY(!validateExportIndices()))
+    return false;
+
+  // A v128 global export is refused rather than compiled. The JS API says the
+  // exports object should carry a WebAssembly.Global whose `.value` throws,
+  // but JSWebAssemblyGlobal::ValType has no v128 member to build one from, and
+  // BinaryReaderHermesIRGen has no v128.const initializer handler, so the
+  // module's slot for such a global holds the number 0. Compiling it would
+  // publish a Global that reports a type the engine cannot represent, over a
+  // value that was never read from the module. dz 01a07d4b-01bc tracks
+  // building the real shell; this diagnostic is what that work removes.
+  //
+  // Run after validateExportIndices(), because it indexes the global index
+  // space with an export's index and relies on that check for the bound. Run
+  // before the export loops below, so that no half-populated exports object
+  // is built for a module that is about to be refused.
+  if (LLVM_UNLIKELY(!validateGlobalExportTypes()))
     return false;
 
   // Ensure insertion is at the instantiate function's entry block.
@@ -2265,21 +2316,7 @@ bool WasmIRGen::finalizeModule() {
 
     // Determine the global's type and mutability.
     uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-    WasmGlobalType gType{WasmValType::I32, false};
-    if (exp.index < numImportedGlobals) {
-      uint32_t idx = 0;
-      for (const auto &imp : moduleInfo_.imports) {
-        if (imp.kind != WasmExternalKind::Global)
-          continue;
-        if (idx == exp.index) {
-          gType = imp.globalType;
-          break;
-        }
-        ++idx;
-      }
-    } else {
-      gType = moduleInfo_.globals[exp.index - numImportedGlobals].type;
-    }
+    WasmGlobalType gType = globalTypeAt(exp.index);
 
     // Only a MUTABLE global this module DEFINES is published live. An
     // immutable one cannot go stale, and an imported mutable one is

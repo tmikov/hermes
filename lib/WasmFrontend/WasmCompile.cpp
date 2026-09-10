@@ -79,10 +79,12 @@ bool compileWasmModule(
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
-    // The IRGen refuses some malformed modules that wabt's structural read
-    // accepts (an export naming an index that does not exist, for one), and
-    // it says which. Prefer that over the generic message, which would send
-    // the reader looking for a truncated file.
+    // The IRGen refuses some modules that wabt's structural read accepts,
+    // and it says which. Those include modules that are malformed but
+    // structurally readable -- an export naming an index that does not exist
+    // -- and modules that are valid Wasm the engine cannot represent, such as
+    // one exporting a v128 global. Prefer the IRGen's message over the
+    // generic one, which would send the reader looking for a truncated file.
     errorMsg = irgen.getErrorMessage().empty()
         ? "Failed to parse Wasm binary"
         : irgen.getErrorMessage().str();

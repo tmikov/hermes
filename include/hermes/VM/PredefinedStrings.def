@@ -479,10 +479,20 @@ STR(checkedTypeCast, "checkedTypeCast")
 STR(setFunctionName, "setFunctionName")
 STR(fastArrayPop, "fastArrayPop")
 STR(fastArraySlice, "fastArraySlice")
-// The 73 wasm builtin names. These are PRIVATE_BUILTINs: not properties of
-// any object, never looked up by name, and unreachable without Wasm, where
-// every one of their ids resolves to a single shared body instead. So with
-// Wasm off they need no predefined string at all.
+// The wasm builtin names. These are PRIVATE_BUILTINs: not properties of any
+// object, never looked up by name, and unreachable without Wasm, where their
+// ids resolve to a single shared body instead. So with Wasm off they need no
+// predefined string at all.
+//
+// A name missing from this block is a build error rather than a silent gap:
+// HermesBuiltin.cpp registers each wasm builtin as
+// defineInternMethod(B::HermesBuiltin_N, P::N, ...), which does not compile
+// without P::N, and a wasm builtin left unregistered trips the
+// "native builtin not initialized" assertion in Runtime::initNativeBuiltins
+// at startup -- in a Debug build; it is compiled out under NDEBUG.
+//
+// (This block used to open with a count of the names below it. Nothing
+// checked the count, and it was wrong by the time anyone read it.)
 #ifdef HERMES_ENABLE_WASM
 STR(wasmTrap, "wasmTrap")
 STR(wasmI32DivS, "wasmI32DivS")
