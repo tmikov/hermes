@@ -491,6 +491,10 @@ NATIVE_FUNCTION(wasmSetFuncInfo)
 NATIVE_FUNCTION(wasmBigIntToI64)
 NATIVE_FUNCTION(wasmI64ToBigInt)
 NATIVE_FUNCTION(wasmIsExportedFunction)
+NATIVE_FUNCTION(wasmAllocRefBuf)
+NATIVE_FUNCTION(wasmRefBufGet)
+NATIVE_FUNCTION(wasmRefBufSet)
+NATIVE_FUNCTION(wasmMakeResultArray)
 #endif // HERMES_ENABLE_WASM
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)

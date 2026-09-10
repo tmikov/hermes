@@ -356,6 +356,27 @@ class WasmHelpers {
   /// throwing, `null` and `undefined` included.
   Instruction *emitIsExportedFunction(Value *value);
 
+  /// Emit wasmAllocRefBuf: allocate the private container that carries the
+  /// REFERENCE results of one multi-value call, \p slots elements long. The
+  /// caller passes the result to the callee as a hidden argument and reads the
+  /// references back out of that same value. A nested or reentrant call runs
+  /// this again and gets a different container, so it writes different
+  /// storage than the activation whose results are still outstanding.
+  Instruction *emitAllocRefBuf(Value *slots);
+
+  /// Emit wasmRefBufGet: read element \p index of the container \p buf.
+  Instruction *emitRefBufGet(Value *buf, Value *index);
+
+  /// Emit wasmRefBufSet: write \p value to element \p index of \p buf.
+  Instruction *emitRefBufSet(Value *buf, Value *index, Value *value);
+
+  /// Emit wasmMakeResultArray: build the JS Array a multi-value export
+  /// returns, out of \p values, without running script. The array is fresh and
+  /// its elements are own data properties, so neither a replaced Array
+  /// constructor nor an indexed setter inherited from Array.prototype sees a
+  /// result on its way out.
+  Instruction *emitMakeResultArray(llvh::ArrayRef<Value *> values);
+
   /// Emit wasmGlobalGet / wasmGlobalSet: read or write the shared value of an
   /// imported MUTABLE global, \p globalObj, in its internal field. That is
   /// what `.value` used to be used for, and `value` is a CONFIGURABLE accessor

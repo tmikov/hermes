@@ -590,6 +590,37 @@ Instruction *WasmHelpers::emitIsExportedFunction(Value *value) {
       BuiltinMethod::HermesBuiltin_wasmIsExportedFunction, {value});
 }
 
+Instruction *WasmHelpers::emitAllocRefBuf(Value *slots) {
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmAllocRefBuf, {slots});
+  // An ArrayStorage is a GC cell, not a JSObject, and no IR operation is ever
+  // applied to this value: it is passed to a call and handed back to
+  // wasmRefBufGet/wasmRefBufSet. `any` says exactly that and lets no pass
+  // assume anything else about it.
+  inst->setType(Type::createAnyType());
+  return inst;
+}
+
+Instruction *WasmHelpers::emitRefBufGet(Value *buf, Value *index) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmRefBufGet, {buf, index});
+}
+
+Instruction *WasmHelpers::emitRefBufSet(
+    Value *buf,
+    Value *index,
+    Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmRefBufSet, {buf, index, value});
+}
+
+Instruction *WasmHelpers::emitMakeResultArray(llvh::ArrayRef<Value *> values) {
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMakeResultArray, values);
+  inst->setType(Type::createObject());
+  return inst;
+}
+
 Instruction *WasmHelpers::emitGlobalGet(Value *globalObj) {
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmGlobalGet, {globalObj});

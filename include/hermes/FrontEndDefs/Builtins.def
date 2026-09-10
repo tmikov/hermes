@@ -410,6 +410,40 @@ WASM_BUILTIN(wasmMakeGlobal)
 // branded object, including a missing argument, is simply false.
 WASM_BUILTIN(wasmIsExportedFunction)
 
+// The transport for the REFERENCE results of one multi-value call.
+//
+// A funcref is a JS closure and an externref is an arbitrary JS value, so
+// neither fits in the numeric return buffer's ArrayBuffer views. They travel
+// in a container allocated by wasmAllocRefBuf, which the caller passes to the
+// callee as a hidden argument and then reads back itself.
+//
+// The container is an ArrayStorage: a GC cell holding traced HermesValue
+// elements. It is not a JSObject, so it is not a property container, and the
+// generated code reaches it through these builtins rather than through
+// indexed property operations. That is what the reference contract asks for --
+// the earlier transport was built through globalThis.Array and read and
+// written with ordinary indexed property operations, so a replacement
+// constructor could discard or substitute a reference on its way through.
+//
+// wasmAllocRefBuf(slots) -> a container of `slots` elements, all undefined.
+// One per multi-value call that has a reference result, sized for the
+// CALLEE's signature.
+WASM_BUILTIN(wasmAllocRefBuf)
+// wasmRefBufGet(buf, index) -> the element at `index`.
+WASM_BUILTIN(wasmRefBufGet)
+// wasmRefBufSet(buf, index, value) -> undefined.
+WASM_BUILTIN(wasmRefBufSet)
+// wasmMakeResultArray(v0, v1, ...) -> a fresh JS Array of the arguments.
+//
+// The public result array of a multi-value export. Built here rather than in
+// generated IR because the IR route was globalThis.Array followed by indexed
+// property stores: a replaced constructor, or an indexed setter inherited from
+// Array.prototype, saw each result on its way into the array and could
+// substitute it, drop it, or re-enter an export between two stores. Here the
+// array is created and filled through JSArray::setElementAt, which writes the
+// array's own indexed storage without consulting a prototype or an accessor.
+WASM_BUILTIN(wasmMakeResultArray)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

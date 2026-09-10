@@ -159,6 +159,33 @@ bool WasmIRGen::needsReturnBuffer(const WasmFuncType &funcType) {
   return false;
 }
 
+bool WasmIRGen::needsRefBuffer(const WasmFuncType &funcType) {
+  if (!needsReturnBuffer(funcType))
+    return false;
+  for (auto vt : funcType.results)
+    if (vt == WasmValType::FuncRef || vt == WasmValType::ExternRef)
+      return true;
+  return false;
+}
+
+uint32_t WasmIRGen::refBufSlotCount(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+  (void)offsets;
+  // Every result reserves at least four bytes at a four-aligned offset, so the
+  // largest slot index a reference can take is (totalSize - 4) / 4, and
+  // totalSize / 4 slots cover it.
+  return totalSize / 4;
+}
+
+uint32_t WasmIRGen::firstWasmParamIndex(const WasmFuncType &funcType) {
+  uint32_t idx = 1; // 0 = "this"
+  if (needsReturnBuffer(funcType))
+    idx += 2; // retbuf_I, retbuf_F
+  if (needsRefBuffer(funcType))
+    idx += 1; // retbuf_R
+  return idx;
+}
+
 std::pair<std::vector<uint32_t>, uint32_t> WasmIRGen::computeRetBufLayout(
     const std::vector<WasmValType> &results) {
   std::vector<uint32_t> offsets;
@@ -228,17 +255,12 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
     }
   }
 
-  // The reference array is not a parameter -- the calling convention passes
-  // only the two typed-array views -- so reach it through the top-level scope
-  // on demand. There is one buffer per module, so the top-level array is the
-  // same object the caller will read from (the same aliasing the float view
-  // already relies on; see emitRetBufLoads).
-  Value *rbR = nullptr;
+  // Reference results go into the container this function RECEIVED, which is
+  // the one its caller allocated for this call and will read back from. It is
+  // a parameter, so there is nothing to look up.
   auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
-    return rbR;
+    assert(refBuf_ && "reference result but no reference container parameter");
+    return refBuf_;
   };
 
   // Store each result into the buffer at its computed offset.
@@ -281,12 +303,14 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
       case WasmValType::ExternRef: {
         // R[byteOff / 4] = val. A funcref is a JS closure and an externref an
         // arbitrary JS value; neither survives a store into the Uint32Array
-        // view, which coerces it to NaN and then to 0.
+        // view, which coerces it to NaN and then to 0. The write goes through
+        // a builtin rather than a property store because the container has no
+        // JS identity at all: no property operation can reach it.
         uint32_t idx = byteOff / 4;
-        builder_.createStorePropertyStrictInst(
-            poppedResults[i].first,
+        helpers_.emitRefBufSet(
             getRbR(),
-            builder_.getLiteralNumber(idx));
+            builder_.getLiteralNumber(idx),
+            poppedResults[i].first);
         break;
       }
       default: {
@@ -304,8 +328,13 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
   builder_.createReturnInst(builder_.getLiteralNumber(0));
 }
 
-void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
+void WasmIRGen::emitRetBufLoads(
+    const WasmFuncType &funcType,
+    Value *refBuf) {
   auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+  assert(
+      (refBuf != nullptr) == needsRefBuffer(funcType) &&
+      "the reference container must be the one passed to this very call");
 
   // retBufF_ is the *current* function's float view, and it is set only when
   // this function itself returns through the buffer. These loads read the
@@ -320,16 +349,11 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
     return rbF;
   };
 
-  // The reference array is never a parameter, so it is always loaded from the
-  // top-level scope, for the same reason and under the same one-buffer-per-
-  // module assumption as getRbF() above.
-  Value *rbR = nullptr;
-  auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
-    return rbR;
-  };
+  // References are read out of \p refBuf, which is the container this call
+  // site allocated and handed to this very call -- not a container reached
+  // through module scope, and not this function's own incoming one. Those
+  // differ after a cross-module call_indirect, which is what let a caller read
+  // a slot its callee never wrote.
 
   for (size_t i = 0; i < funcType.results.size(); ++i) {
     uint32_t byteOff = offsets[i];
@@ -364,12 +388,11 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
       }
       case WasmValType::FuncRef:
       case WasmValType::ExternRef: {
-        // Read the reference back from the parallel array. No AsInt32Inst
-        // here: that narrowing exists to undo the Uint32Array's unsigned
-        // reads, and a reference is not a number.
+        // Read the reference back out of the container. No AsInt32Inst here:
+        // that narrowing exists to undo the Uint32Array's unsigned reads, and
+        // a reference is not a number.
         uint32_t idx = byteOff / 4;
-        push(builder_.createLoadPropertyInst(
-            getRbR(), builder_.getLiteralNumber(idx)));
+        push(helpers_.emitRefBufGet(refBuf, builder_.getLiteralNumber(idx)));
         break;
       }
       default: {
@@ -703,16 +726,6 @@ void WasmIRGen::createFunctions() {
       if (needsReturnBuffer(ft)) {
         auto [offsets, size] = computeRetBufLayout(ft.results);
         maxRetBufSize = std::max(maxRetBufSize, size);
-        // A reference result cannot be stored in the ArrayBuffer views, so
-        // such a module also needs the parallel reference array. Gate it:
-        // creating the array unconditionally would add an allocation to every
-        // module that merely does i64 arithmetic, and would churn the golden
-        // IR of every Wasm test. V128 is deliberately excluded -- it stays
-        // unsupported and keeps its diagnostic.
-        for (auto vt : ft.results) {
-          if (vt == WasmValType::FuncRef || vt == WasmValType::ExternRef)
-            retBufHasRefResult_ = true;
-        }
       }
     }
 
@@ -730,13 +743,6 @@ void WasmIRGen::createFunctions() {
         "retBufF",
         Type::createAnyType(),
         /* hidden */ true);
-    if (retBufHasRefResult_) {
-      retBufRVar_ = builder_.createVariable(
-          topLevelVS_,
-          "retBufR",
-          Type::createAnyType(),
-          /* hidden */ true);
-    }
     retBufSize_ = maxRetBufSize;
   }
 
@@ -816,6 +822,16 @@ void WasmIRGen::createFunctions() {
       auto *rbF = builder_.createJSDynamicParam(func, "retbuf_F");
       rbF->setType(Type::createObject());
       jsParamCount += 2;
+    }
+    // And, when a reference travels through the buffer, the container that
+    // carries it, immediately after the two numeric views. It is typed `any`
+    // rather than `object`: an ArrayStorage is a GC cell with no JS identity,
+    // and nothing in this function applies an IR operation to it -- it is
+    // read by wasmRefBufGet and written by wasmRefBufSet and by nothing else.
+    if (needsRefBuffer(funcType)) {
+      auto *rbR = builder_.createJSDynamicParam(func, "retbuf_R");
+      rbR->setType(Type::createAnyType());
+      jsParamCount += 1;
     }
 
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
@@ -1592,23 +1608,31 @@ void WasmIRGen::createFunctions() {
     createMemoryViews(tlScope);
   }
 
-  // Create the per-module return buffer if needed.
+  // Create the per-module NUMERIC return buffer if needed. Reference results
+  // do not travel here: they go in a container allocated per call by
+  // wasmAllocRefBuf, because neither a closure nor an arbitrary JS value fits
+  // in an ArrayBuffer view.
   //
-  // REENTRANCY INVARIANT: there is exactly one return buffer per module
-  // instance, shared by every function that returns an i64 or a multi-value
-  // result. A function marshals its results into the buffer and its caller
-  // reads them straight back out, so the buffer must not be written again
-  // between those two points. Any operation that could re-enter Wasm --
-  // calling back into an export, or running arbitrary JS such as a property
-  // getter, valueOf, or a Proxy trap -- while a result sits unread in the
-  // buffer will overwrite it. The marshalling code therefore computes every
-  // result into an SSA value first and only then stores them (see
-  // emitRetBufLoads / the multi-value trampoline), so no user code runs
-  // between the write and the read.
+  // These two views are one object per module instance, shared by every
+  // function that returns an i64 or a multi-value result. A function marshals
+  // its numeric results into them and its caller reads them straight back
+  // out, so a write in between corrupts the result. Any operation that could
+  // re-enter Wasm -- calling back into an export, or running arbitrary JS such
+  // as a property getter, valueOf, or a Proxy trap -- while a result sits
+  // unread in the buffer will overwrite it. The import trampoline's two-pass
+  // marshalling converts each result into an SSA value in the first pass and
+  // stores them in the second, which keeps script from running between one
+  // result's conversion and another's store.
   //
-  // The buffer is built from globalThis.ArrayBuffer / Uint32Array /
-  // Float64Array, which a script can replace, so the native builtins that
-  // read it (writeI64ToRetBuf and friends) treat arg0 as untrusted and
+  // It does NOT make the numeric path safe: the buffer is built from
+  // globalThis.ArrayBuffer / Uint32Array / Float64Array, which a script can
+  // replace, and the stores and loads are ordinary indexed property
+  // operations, so a replacement's accessor can substitute a numeric result or
+  // re-enter Wasm between two of them. That is filed as 01a0821a-1093, along
+  // with 01a0820d-5190 for a nested call reading a different buffer than the
+  // one it passed; both are out of scope here and neither is inherited by the
+  // reference container. The native builtins that read these views
+  // (writeI64ToRetBuf and friends) do at least treat arg0 as untrusted and
   // reject a non-typed-array rather than casting it blindly.
   if (retBufSize_ > 0) {
     auto *ArrayBufferCtor =
@@ -1624,17 +1648,6 @@ void WasmIRGen::createFunctions() {
     auto *retBufF = emitNew(Float64ArrayCtor, {buf});
     builder_.createStoreFrameInst(tlScope, retBufI, retBufIVar_);
     builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
-    if (retBufRVar_) {
-      // Parallel reference slots, indexed like the Uint32Array view. This
-      // array holds the last reference written to each slot until it is
-      // overwritten -- bounded by retBufSize_/4 entries per instance, so it
-      // retains a little longer than strictly necessary but does not grow.
-      auto *ArrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
-      auto *retBufR = emitNew(
-          ArrayCtor,
-          {builder_.getLiteralNumber(static_cast<double>(retBufSize_ / 4))});
-      builder_.createStoreFrameInst(tlScope, retBufR, retBufRVar_);
-    }
   }
 
   // Tag identity is needed by throw/catch whether or not the module has any
@@ -2642,21 +2655,25 @@ Function *WasmIRGen::createExportWrapper(
   if (retBufFVar_ && needsReturnBuffer(funcType)) {
     rbF = builder_.createLoadFrameInst(parentScope, retBufFVar_);
   }
-  // The reference array is not part of the calling convention; it is reached
-  // through the top-level scope like every other per-module object.
-  Value *rbR = nullptr;
-  auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
-    return rbR;
-  };
+  // The reference container is allocated HERE, for this one call, and read
+  // back below out of this same SSA value. Allocating it per call is what
+  // stops a reentrant call -- one started by a numeric accessor, or by a JS
+  // import this call reaches -- from writing the slots this activation is
+  // about to read.
+  Value *refBuf = nullptr;
+  if (needsRefBuffer(funcType)) {
+    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+        static_cast<double>(refBufSlotCount(funcType))));
+  }
 
-  // If the internal function needs a return buffer, prepend retBufI/retBufF.
+  // If the internal function needs a return buffer, prepend retBufI/retBufF,
+  // then the reference container.
   if (needsReturnBuffer(funcType)) {
     callArgs.push_back(rbI);
     callArgs.push_back(rbF);
   }
+  if (refBuf)
+    callArgs.push_back(refBuf);
 
   for (uint32_t i = 0; i < numParams; ++i) {
     // JS param index: 0=this, 1..N=user params. getJSDynamicParam(1+i).
@@ -2765,13 +2782,18 @@ Function *WasmIRGen::createExportWrapper(
       builder_.createReturnInst(bigint);
     } else {
       // Multi-value: return a JS Array of results.
+      //
+      // Every result is read into an SSA value first and the array is built
+      // from all of them at the end, by a builtin that runs no script. The
+      // array used to come from globalThis.Array, called AFTER the internal
+      // call, with the buffer reads interleaved with indexed stores into
+      // whatever that constructor returned -- so a replacement constructor, or
+      // an indexed setter inherited from Array.prototype, saw each result and
+      // could substitute it, drop it, or re-enter an export between two of
+      // them.
       auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
-      auto *ArrayCtor =
-          builder_.createTryLoadGlobalPropertyInst("Array");
-      auto *resultArr = emitNew(
-          ArrayCtor,
-          {builder_.getLiteralNumber(
-              static_cast<double>(funcType.results.size()))});
+      llvh::SmallVector<Value *, 8> resultVals;
+      resultVals.reserve(funcType.results.size());
       for (size_t i = 0; i < funcType.results.size(); ++i) {
         uint32_t byteOff = offsets[i];
         Value *val;
@@ -2805,12 +2827,12 @@ Function *WasmIRGen::createExportWrapper(
           }
           case WasmValType::FuncRef:
           case WasmValType::ExternRef: {
-            // The reference was stored into the parallel reference array, not
-            // into the Uint32Array view, so the real value is still here.
-            // No AsInt32Inst: a reference is not a number.
+            // The reference was stored into the container this wrapper passed
+            // to the call, not into the Uint32Array view, so the real value is
+            // still here. No AsInt32Inst: a reference is not a number.
             uint32_t idx = byteOff / 4;
-            val = builder_.createLoadPropertyInst(
-                getRbR(), builder_.getLiteralNumber(idx));
+            val = helpers_.emitRefBufGet(
+                refBuf, builder_.getLiteralNumber(idx));
             break;
           }
           default: {
@@ -2826,11 +2848,9 @@ Function *WasmIRGen::createExportWrapper(
             break;
           }
         }
-        builder_.createStorePropertyStrictInst(
-            val, resultArr,
-            builder_.getLiteralNumber(static_cast<double>(i)));
+        resultVals.push_back(val);
       }
-      builder_.createReturnInst(resultArr);
+      builder_.createReturnInst(helpers_.emitMakeResultArray(resultVals));
     }
   } else {
     // i32/f32/f64: return the call result directly.
@@ -2871,8 +2891,8 @@ void WasmIRGen::createImportTrampoline(
   // i32/f32/f64 → pass through (already JS Numbers).
   // i64 → convert split (lo, hi) to BigInt for JS.
   llvh::SmallVector<Value *, 8> jsArgs;
-  // Skip retBuf params if present.
-  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+  // Skip the hidden buffer params if present.
+  uint32_t jsParamIdx = firstWasmParamIndex(funcType);
 
   // Load retBuf params if this function uses them.
   Value *rbI = nullptr;
@@ -2883,13 +2903,15 @@ void WasmIRGen::createImportTrampoline(
     rbI = builder_.createLoadParamInst(paramI);
     rbF = builder_.createLoadParamInst(paramF);
   }
-  // The reference array is not a parameter; reach it through the top-level
-  // scope on demand, as the other reference-array users do.
+  // The reference container this trampoline RECEIVED. Its results are the
+  // caller's to read, so they go where the caller said, not into anything
+  // this module owns. It is never appended to the imported JS function's
+  // argument list below.
   Value *rbR = nullptr;
+  if (needsRefBuffer(funcType))
+    rbR = builder_.createLoadParamInst(func->getJSDynamicParam(3));
   auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
+    assert(rbR && "reference result but no reference container parameter");
     return rbR;
   };
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
@@ -3023,11 +3045,12 @@ void WasmIRGen::createImportTrampoline(
           case WasmValType::ExternRef:
             // The JS value passes through untouched on the way in (see the
             // parameter loop above); on the way out it must go to the
-            // reference array, since the Uint32Array view would coerce it
+            // reference container, since the Uint32Array view would coerce it
             // to 0.
-            builder_.createStorePropertyStrictInst(
-                vals[i].first, getRbR(),
-                builder_.getLiteralNumber(byteOff / 4));
+            helpers_.emitRefBufSet(
+                getRbR(),
+                builder_.getLiteralNumber(byteOff / 4),
+                vals[i].first);
             break;
           default:
             // V128: still unsupported. Keep the existing behavior.
@@ -3116,12 +3139,20 @@ void WasmIRGen::beginFunction(
   // Load return buffer views for this function.
   retBufI_ = nullptr;
   retBufF_ = nullptr;
+  refBuf_ = nullptr;
   if (needsReturnBuffer(funcType)) {
     // Function receives retBufI and retBufF as its first two params.
     auto *paramI = currentFunc_->getJSDynamicParam(1);
     auto *paramF = currentFunc_->getJSDynamicParam(2);
     retBufI_ = builder_.createLoadParamInst(paramI);
     retBufF_ = builder_.createLoadParamInst(paramF);
+    // And, for a signature with a reference result, the container that
+    // carries it, at param 3. This is the container this function's own
+    // returns write to; a nested call gets a freshly allocated one instead
+    // (see onCall).
+    if (needsRefBuffer(funcType))
+      refBuf_ =
+          builder_.createLoadParamInst(currentFunc_->getJSDynamicParam(3));
   } else if (retBufIVar_) {
     // Function doesn't receive buffer params but may do i64 arithmetic.
     // Load retBufI from the top-level scope.
@@ -3140,8 +3171,8 @@ void WasmIRGen::beginFunction(
 
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
-  // Skip retBuf params (indices 1,2) if this function has them.
-  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+  // Skip the hidden buffer params if this function has them.
+  uint32_t jsParamIdx = firstWasmParamIndex(funcType);
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
     if (funcType.params[i] == WasmValType::I64) {
@@ -3316,6 +3347,7 @@ void WasmIRGen::endFunction() {
   parentScopeInst_ = nullptr;
   retBufI_ = nullptr;
   retBufF_ = nullptr;
+  refBuf_ = nullptr;
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
@@ -4413,7 +4445,8 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     }
   }
   // Build the JS arg list in forward order.
-  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  // If the callee needs a return buffer, prepend retBufI and retBufF, then the
+  // reference container.
   if (needsReturnBuffer(funcType)) {
     auto *rbI = builder_.createLoadFrameInst(
         parentScopeInst_, retBufIVar_);
@@ -4421,6 +4454,17 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
         parentScopeInst_, retBufFVar_);
     args.push_back(rbI);
     args.push_back(rbF);
+  }
+  // A container allocated for THIS call, sized for the CALLEE's signature,
+  // and read back below out of this same SSA value. Forwarding the container
+  // this function received would be too small whenever the nested signature
+  // has more results, and reaching for one through module scope is what let a
+  // caller read a slot a cross-module callee never wrote.
+  Value *refBuf = nullptr;
+  if (needsRefBuffer(funcType)) {
+    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+        static_cast<double>(refBufSlotCount(funcType))));
+    args.push_back(refBuf);
   }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
@@ -4454,7 +4498,7 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
-    emitRetBufLoads(funcType);
+    emitRetBufLoads(funcType, refBuf);
   } else if (!funcType.results.empty()) {
     // Single non-buffer result: push the JS return value.
     push(call);
@@ -4489,7 +4533,8 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
     }
   }
   // Build the JS arg list in forward order.
-  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  // If the callee needs a return buffer, prepend retBufI and retBufF, then the
+  // reference container.
   if (needsReturnBuffer(funcType)) {
     auto *rbI = builder_.createLoadFrameInst(
         parentScopeInst_, retBufIVar_);
@@ -4497,6 +4542,17 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
         parentScopeInst_, retBufFVar_);
     args.push_back(rbI);
     args.push_back(rbF);
+  }
+  // A container allocated for THIS call, sized for the CALLEE's signature,
+  // and read back below out of this same SSA value. Forwarding the container
+  // this function received would be too small whenever the nested signature
+  // has more results, and reaching for one through module scope is what let a
+  // caller read a slot a cross-module callee never wrote.
+  Value *refBuf = nullptr;
+  if (needsRefBuffer(funcType)) {
+    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+        static_cast<double>(refBufSlotCount(funcType))));
+    args.push_back(refBuf);
   }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
@@ -4540,7 +4596,7 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
-    emitRetBufLoads(funcType);
+    emitRetBufLoads(funcType, refBuf);
   } else if (!funcType.results.empty()) {
     // Single non-buffer result: push the JS return value.
     push(call);

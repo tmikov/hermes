@@ -13,6 +13,7 @@
 #include "hermes/VM/BigIntPrimitive.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/FastArray.h"
+#include "hermes/VM/ArrayStorage.h"
 #include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
@@ -1491,6 +1492,118 @@ CallResult<HermesValue> wasmIsExportedFunction(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   return HermesValue::encodeBoolValue(
       isWasmExportedFunction(runtime, args.getArgHandle(0)));
+}
+
+/// Read \p arg as a slot count or slot index: a Number that is a non-negative
+/// integer and fits in uint32. A PRIVATE_BUILTIN is reachable from any
+/// bytecode that emits a CallBuiltin with its index, so the three reference-
+/// transport builtins below cannot take their arguments on trust; the code the
+/// Wasm compiler emits always passes a literal that satisfies this.
+static llvh::Optional<uint32_t> wasmRefBufIndexArg(HermesValue arg) {
+  if (LLVM_UNLIKELY(!arg.isNumber()))
+    return llvh::None;
+  double d = arg.getNumber();
+  if (LLVM_UNLIKELY(!(d >= 0 && d <= 4294967295.0)))
+    return llvh::None;
+  if (LLVM_UNLIKELY(d != std::floor(d)))
+    return llvh::None;
+  return static_cast<uint32_t>(d);
+}
+
+/// wasmAllocRefBuf(slots) -> the reference transport container for ONE
+/// multi-value call, `slots` elements long, every element `undefined`.
+///
+/// Size as well as capacity: ArrayStorage's indexed accessors check size(),
+/// not capacity, so a container created with capacity alone has no readable
+/// or writable element at all.
+///
+/// The elements are overwritten with `undefined` because ArrayStorage fills a
+/// grown range with the EMPTY HermesValue, and empty is a poison value that
+/// must never reach a register. A caller that reads a slot its callee did not
+/// write -- which the compiler does not emit, but which arbitrary bytecode
+/// calling wasmRefBufGet can ask for -- gets undefined instead.
+CallResult<HermesValue> wasmAllocRefBuf(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto slots = wasmRefBufIndexArg(args.getArg(0));
+  if (LLVM_UNLIKELY(!slots))
+    return runtime.raiseTypeError(
+        "Wasm reference transport: slot count must be a non-negative integer");
+
+  auto res = ArrayStorage::create(runtime, *slots, *slots);
+  if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  auto *storage = vmcast<ArrayStorage>(*res);
+  // No allocation between create() and the fill, so the raw pointer holds.
+  for (uint32_t i = 0; i < *slots; ++i)
+    storage->setNonPtr(
+        i, HermesValue::encodeUndefinedValue(), runtime.getHeap());
+  return *res;
+}
+
+/// wasmRefBufGet(buf, index) -> the element at \p index.
+CallResult<HermesValue> wasmRefBufGet(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto index = wasmRefBufIndexArg(args.getArg(1));
+  // The argument must be the container the compiler passed. An ArrayStorage is
+  // a GC cell rather than a JSObject, so this refuses rather than casts.
+  auto *storage = dyn_vmcast<ArrayStorage>(args.getArg(0));
+  if (LLVM_UNLIKELY(!storage || !index || *index >= storage->size()))
+    return runtime.raiseTypeError(
+        "Wasm reference transport: bad container or index");
+  HermesValue hv = storage->at(*index);
+  // See wasmAllocRefBuf: a fresh container holds no empty values, and this
+  // keeps that true of a container ArrayStorage code elsewhere produced.
+  return hv.isEmpty() ? HermesValue::encodeUndefinedValue() : hv;
+}
+
+/// wasmRefBufSet(buf, index, value) -> undefined.
+///
+/// A barriered write of a full HermesValue. The value is read out of the
+/// native argument registers, which the GC scans and updates in place, and
+/// nothing between the read and the store allocates.
+CallResult<HermesValue> wasmRefBufSet(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto index = wasmRefBufIndexArg(args.getArg(1));
+  // The argument must be the container the compiler passed. An ArrayStorage is
+  // a GC cell rather than a JSObject, so this refuses rather than casts.
+  auto *storage = dyn_vmcast<ArrayStorage>(args.getArg(0));
+  if (LLVM_UNLIKELY(!storage || !index || *index >= storage->size()))
+    return runtime.raiseTypeError(
+        "Wasm reference transport: bad container or index");
+  storage->set(*index, args.getArg(2), runtime.getHeap());
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// wasmMakeResultArray(v0, v1, ...) -> a fresh JS Array of the arguments.
+///
+/// The public result array of a multi-value export. Its elements are own data
+/// properties written through JSArray::setElementAt, which stores into the
+/// array's own indexed storage; the array is created here and returned without
+/// being handed to anything, so no getter, setter or constructor of script's
+/// choosing observes it being built.
+CallResult<HermesValue> wasmMakeResultArray(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t count = args.getArgCount();
+
+  struct : public Locals {
+    PinnedValue<JSArray> out;
+    PinnedValue<> elem;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto arrRes = JSArray::create(runtime, count, count);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  lv.out = std::move(*arrRes);
+
+  for (uint32_t i = 0; i < count; ++i) {
+    lv.elem = args.getArg(i);
+    if (LLVM_UNLIKELY(
+            JSArray::setElementAt(lv.out, runtime, i, lv.elem) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  }
+  return lv.out.getHermesValue();
 }
 
 /// Store one element of one table array, and REPORT A REFUSED WRITE.
@@ -4258,17 +4371,29 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmIsExportedFunction,
       wasmIsExportedFunction,
       1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmAllocRefBuf, P::wasmAllocRefBuf, wasmAllocRefBuf, 1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmRefBufGet, P::wasmRefBufGet, wasmRefBufGet, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmRefBufSet, P::wasmRefBufSet, wasmRefBufSet, 3);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMakeResultArray,
+      P::wasmMakeResultArray,
+      wasmMakeResultArray,
+      0);
 #else
   // Without Wasm the bodies above are not compiled and the names are not even
   // predefined strings, but Builtins.def numbering stays independent of
   // HERMES_ENABLE_WASM -- builtin ids are encoded as CallBuiltin operands in
   // bytecode -- so every wasm id must still resolve to something.
   //
-  // It need not resolve to 73 different somethings, and none of them needs a
-  // name: these are private builtins, so they are not properties of any object
-  // and nothing looks them up by name (assertBuiltinsUnmodified walks only the
-  // public builtins). The ids are the last contiguous run of private builtins,
-  // so one loop over that range registers them all against the shared body.
+  // It need not resolve to a distinct something per id, and none of them needs
+  // a name: these are private builtins, so they are not properties of any
+  // object and nothing looks them up by name (assertBuiltinsUnmodified walks
+  // only the public builtins). The ids are the last contiguous run of private
+  // builtins, so one loop over that range registers them all against the
+  // shared body.
   //
   // The endpoint is the LAST wasm builtin in Builtins.def, so appending one
   // there means moving it here as well: a builtin outside this range is never
@@ -4276,7 +4401,7 @@ void createHermesBuiltins(Runtime &runtime) {
   // the "native builtin not initialized" assertion at startup -- after
   // compiling and linking cleanly.
   for (unsigned i = B::HermesBuiltin_wasmTrap;
-       i <= B::HermesBuiltin_wasmIsExportedFunction;
+       i <= B::HermesBuiltin_wasmMakeResultArray;
        ++i) {
     defineInternMethod(
         static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);

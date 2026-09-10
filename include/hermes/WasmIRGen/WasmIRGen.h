@@ -710,22 +710,6 @@ class WasmIRGen {
   Variable *retBufIVar_ = nullptr;
   Variable *retBufFVar_ = nullptr;
 
-  /// Parallel reference slots for the return buffer: a plain JS Array of
-  /// retBufSize_/4 elements, indexed identically to the Uint32Array view.
-  /// A funcref is a JS closure and an externref is an arbitrary JS value;
-  /// neither can live in an ArrayBuffer, so storing one through retBufIVar_
-  /// coerces it to NaN and then to 0, destroying it at the store. Reference
-  /// results reserve their 4 bytes in computeRetBufLayout() exactly like an
-  /// i32 and use the same byteOff/4 slot index here, so no layout arithmetic
-  /// changes. Only created when some function type that needs a return buffer
-  /// actually has a reference result (see retBufHasRefResult_).
-  Variable *retBufRVar_ = nullptr;
-
-  /// True when some function type that needsReturnBuffer() has a FuncRef or
-  /// ExternRef result, i.e. when retBufRVar_ must exist. V128 does not count:
-  /// it remains unsupported and keeps its diagnostic.
-  bool retBufHasRefResult_ = false;
-
   /// Size of the return buffer in bytes. Set during createFunctions().
   uint32_t retBufSize_ = 0;
 
@@ -799,6 +783,17 @@ class WasmIRGen {
   /// scope. nullptr if the module has no i64 at all.
   Value *retBufI_ = nullptr;
   Value *retBufF_ = nullptr;
+
+  /// The reference transport container THIS function RECEIVED, as a
+  /// LoadParamInst of its retbuf_R parameter; null when the signature has no
+  /// reference result travelling through the buffer. Its only reader is
+  /// emitRetBufStores, which writes this function's own results into it.
+  ///
+  /// It is deliberately NOT what a nested call's results are read from: each
+  /// call site allocates its own container and reads back the very value it
+  /// passed. Sharing one representation for both is defect 01a0820d-5190's
+  /// shape, which the numeric views still have.
+  Value *refBuf_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,
   /// or unreachable). In unreachable mode, instructions are no-ops until
@@ -1164,6 +1159,30 @@ class WasmIRGen {
   /// i64 or has multiple results).
   static bool needsReturnBuffer(const WasmFuncType &funcType);
 
+  /// Returns true if \p funcType returns a funcref or externref THROUGH the
+  /// return buffer, i.e. as one of several results. Such a call carries a
+  /// third hidden argument, the reference transport container. A lone
+  /// reference result is returned directly and needs no container.
+  ///
+  /// Caller and callee decide this from the same WasmFuncType, and
+  /// call_indirect matches signatures by interned type id -- which encodes
+  /// params and results -- so two modules agree about it.
+  static bool needsRefBuffer(const WasmFuncType &funcType);
+
+  /// The number of slots the reference container of \p funcType needs: the
+  /// TOTAL size of computeRetBufLayout()'s layout divided by four, not the
+  /// number of reference results. Reference slots are indexed by byte offset
+  /// over four, the same index an i32 at that offset would use, so the layout
+  /// is sparse -- an f64 result consumes two slot indices and stores nothing
+  /// in either.
+  static uint32_t refBufSlotCount(const WasmFuncType &funcType);
+
+  /// The JSDynamicParam index of the FIRST Wasm parameter of an internal
+  /// function or import trampoline with signature \p funcType. Index 0 is
+  /// `this`; a needsReturnBuffer() signature then takes retbuf_I and retbuf_F
+  /// at 1 and 2, and a needsRefBuffer() one takes retbuf_R at 3.
+  static uint32_t firstWasmParamIndex(const WasmFuncType &funcType);
+
   /// Compute byte layout for results in the return buffer.
   /// \return {vector of byte offsets per result, total buffer size}.
   static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
@@ -1197,7 +1216,14 @@ class WasmIRGen {
   /// Caller: read results from buffer, push onto value stack.
   /// Called from onCall/onCallIndirect after a call to a function that
   /// uses a return buffer.
-  void emitRetBufLoads(const WasmFuncType &funcType);
+  ///
+  /// \p refBuf is the reference container THIS call site passed to THAT call,
+  /// and must be null exactly when !needsRefBuffer(funcType). Passing a
+  /// container obtained any other way -- from the module frame, or from this
+  /// function's own incoming parameter -- is the cross-module defect the
+  /// per-activation transport exists to close: after a cross-module
+  /// call_indirect the two are different objects.
+  void emitRetBufLoads(const WasmFuncType &funcType, Value *refBuf);
 
   /// Read i64 from retBufI_[0] and retBufI_[1]. Used after i64 arithmetic
   /// builtins that write their result to the return buffer.
