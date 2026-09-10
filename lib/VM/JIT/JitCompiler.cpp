@@ -621,7 +621,6 @@ JITCompiledFunctionPtr JITContext::Compiler::compileCodeBlockImpl() {
   }
 
 EMIT_UNIMPLEMENTED(AsyncBreakCheck)
-EMIT_UNIMPLEMENTED(Imul)
 
 #undef EMIT_UNIMPLEMENTED
 
@@ -762,6 +761,7 @@ EMIT_BINARY_OP(BitXor, bitXor)
 EMIT_BINARY_OP(LShift, lShift)
 EMIT_BINARY_OP(RShift, rShift)
 EMIT_BINARY_OP(URshift, urShift)
+EMIT_BINARY_OP(Imul, imul)
 
 #undef EMIT_BINARY_OP
 inline void JITContext::Compiler::emitMod(const inst::ModInst *inst) {
