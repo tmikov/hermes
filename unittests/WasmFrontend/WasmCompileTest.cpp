@@ -321,7 +321,7 @@ TEST(WasmTypesTest, ElemSegmentActiveDefaults) {
   EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::I32Const);
   EXPECT_EQ(seg.offsetValue, 0);
   EXPECT_EQ(seg.offsetGlobalIdx, 0u);
-  EXPECT_TRUE(seg.funcIndices.empty());
+  EXPECT_TRUE(seg.items.empty());
 }
 
 TEST(WasmTypesTest, ElemSegmentActive) {
@@ -330,13 +330,19 @@ TEST(WasmTypesTest, ElemSegmentActive) {
   seg.tableIndex = 0;
   seg.offsetKind = WasmGlobal::InitKind::I32Const;
   seg.offsetValue = 10;
-  seg.funcIndices = {0, 1, 2, 3};
+  seg.items = {
+      WasmElemItem::makeFuncIndex(0),
+      WasmElemItem::makeFuncIndex(1),
+      WasmElemItem::makeFuncIndex(2),
+      WasmElemItem::makeFuncIndex(3)};
 
   EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Active);
   EXPECT_EQ(seg.offsetValue, 10);
-  EXPECT_EQ(seg.funcIndices.size(), 4u);
-  EXPECT_EQ(seg.funcIndices[0], 0u);
-  EXPECT_EQ(seg.funcIndices[3], 3u);
+  EXPECT_EQ(seg.items.size(), 4u);
+  EXPECT_EQ(seg.items[0].kind, WasmElemItem::Kind::FuncIndex);
+  EXPECT_EQ(seg.items[0].index, 0u);
+  EXPECT_EQ(seg.items[3].kind, WasmElemItem::Kind::FuncIndex);
+  EXPECT_EQ(seg.items[3].index, 3u);
 }
 
 TEST(WasmTypesTest, ElemSegmentGlobalGetOffset) {
@@ -344,20 +350,20 @@ TEST(WasmTypesTest, ElemSegmentGlobalGetOffset) {
   seg.mode = WasmElemSegment::Mode::Active;
   seg.offsetKind = WasmGlobal::InitKind::GlobalGet;
   seg.offsetGlobalIdx = 2;
-  seg.funcIndices = {5};
+  seg.items = {WasmElemItem::makeFuncIndex(5)};
 
   EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::GlobalGet);
   EXPECT_EQ(seg.offsetGlobalIdx, 2u);
-  EXPECT_EQ(seg.funcIndices.size(), 1u);
+  EXPECT_EQ(seg.items.size(), 1u);
 }
 
 TEST(WasmTypesTest, ElemSegmentPassive) {
   WasmElemSegment seg;
   seg.mode = WasmElemSegment::Mode::Passive;
-  seg.funcIndices = {7, 8};
+  seg.items = {WasmElemItem::makeFuncIndex(7), WasmElemItem::makeFuncIndex(8)};
 
   EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Passive);
-  EXPECT_EQ(seg.funcIndices.size(), 2u);
+  EXPECT_EQ(seg.items.size(), 2u);
 }
 
 TEST(WasmTypesTest, ElemSegmentDeclarative) {
@@ -1023,8 +1029,10 @@ TEST(BinaryReaderTest, SegmentsModule) {
   EXPECT_EQ(
       moduleInfo.elements[0].offsetKind, WasmGlobal::InitKind::I32Const);
   EXPECT_EQ(moduleInfo.elements[0].offsetValue, 0);
-  ASSERT_EQ(moduleInfo.elements[0].funcIndices.size(), 1u);
-  EXPECT_EQ(moduleInfo.elements[0].funcIndices[0], 0u);
+  ASSERT_EQ(moduleInfo.elements[0].items.size(), 1u);
+  EXPECT_EQ(
+      moduleInfo.elements[0].items[0].kind, WasmElemItem::Kind::FuncIndex);
+  EXPECT_EQ(moduleInfo.elements[0].items[0].index, 0u);
 
   // Data segments
   ASSERT_EQ(moduleInfo.dataSegments.size(), 1u);

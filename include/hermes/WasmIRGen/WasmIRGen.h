@@ -967,11 +967,28 @@ class WasmIRGen {
   /// splits the instantiate body and advances tlEntry_.
   void createMemoryViews(Instruction *tlScope);
 
-  /// Create and initialize tables in the top-level function.
-  /// Allocates JS Array pairs (functions + type indices) for each table,
-  /// initializes them to null/-1, and applies active element segments.
+  /// Create and initialize tables in the top-level function, then apply the
+  /// module's active element segments to them. Each table is three parallel
+  /// arrays -- closures, interned type ids and Exported Functions -- built
+  /// either by the WebAssembly.Table constructor (funcref) or directly
+  /// (externref); see the body.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createTables(Instruction *tlScope);
+
+  /// Lower one element-segment entry to the JS value a table slot holds:
+  /// null, the canonical Exported Function of a function index, or the
+  /// current value of a global. This is the single rule shared by the two
+  /// places that materialize a segment's entries -- the active-segment loop
+  /// in createTables() and the passive-segment array built by
+  /// finalizeModule() -- so the two cannot describe the same segment
+  /// differently.
+  /// \p tlScope is the scope the frame loads read from.
+  /// A function index with no canonical wrapper, and a global index past the
+  /// end of the module's global space, both lower to null rather than to
+  /// nothing at all. A validated module has neither; the point of answering
+  /// with a value anyway is that both callers write one slot per entry, and a
+  /// caller made to skip an entry would leave whatever that slot held before.
+  Value *emitElemItem(const WasmElemItem &item, Instruction *tlScope);
 
   /// Build the canonical type index map. Structurally identical types
   /// (same params and results) get the same canonical index.

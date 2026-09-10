@@ -485,9 +485,18 @@ void WasmIRGen::computeEscapableFuncs() {
   // Function and refuses anything else, so the initializer's function index
   // needs the canonical wrapper this set gives it.
   // Enforced by e2e-global-ref-export.wat, which goes red if that loop goes.
+  //
+  // The loop below does not filter by mode, and a DECLARATIVE segment is the
+  // reason: it puts nothing in a table, but declaring an index is what makes
+  // a body `ref.func` on it legal, and that reference needs the canonical
+  // wrapper -- onRefFunc() refuses the module without one.
+  // e2e-ref-func-body.wat and e2e-elem-declare-items.wat both go red if the
+  // filter is added, the latter with a ref.null ahead of the declared index.
+  // A ref.null or global.get entry names no function, so it adds nothing.
   for (const auto &seg : moduleInfo_.elements)
-    for (uint32_t fi : seg.funcIndices)
-      escapableFuncs_.insert(fi);
+    for (const auto &item : seg.items)
+      if (item.kind == WasmElemItem::Kind::FuncIndex)
+        escapableFuncs_.insert(item.index);
   for (const auto &g : moduleInfo_.globals)
     if (g.initKind == WasmGlobal::InitKind::RefFunc)
       escapableFuncs_.insert(g.initValue.funcIndex);
@@ -1677,9 +1686,12 @@ void WasmIRGen::createFunctions() {
   createExportedFunctions(tlScope);
 
   // Initialize Wasm globals (both imported and defined) BEFORE createTables():
-  // an active element segment's offset may be a `global.get`, which
-  // createTables() loads from globalVars_. Initializing globals first ensures
-  // that load sees the real value instead of the slot's undefined placeholder.
+  // an active element segment's offset may be a `global.get`, and so may any
+  // of its entries, both of which createTables() loads from globalVars_.
+  // Initializing globals first ensures those loads see the real value instead
+  // of the slot's undefined placeholder. The passive segment arrays built by
+  // finalizeModule() read globalVars_ for the same reason, and finalizeModule()
+  // runs after this.
   if (numGlobals > 0) {
     initializeGlobals(tlScope);
   }
@@ -2112,10 +2124,13 @@ bool WasmIRGen::finalizeModule() {
   }
 
   // Initialize the element segments array (for table.init/elem.drop).
-  // Each element is a JS Array of Exported Functions, one per entry, or null
-  // for segments that have been dropped. Only the wrapper is stored: table.init
-  // writes through the slot funnel, which derives the closure and the interned
-  // type id from it, so a segment cannot describe a slot inconsistently.
+  // Each element is a JS Array holding one value per segment entry, or null
+  // for a segment that has been dropped. An entry's value is what
+  // emitElemItem() lowers it to: null, an Exported Function, or a global's
+  // value. For a funcref table that is the wrapper and nothing else --
+  // table.init writes through the slot funnel, which derives the closure and
+  // the interned type id from the wrapper, so a segment cannot describe a
+  // slot inconsistently.
   if (elemSegVar_) {
     uint32_t numElemSegs = moduleInfo_.elements.size();
     auto *elemsArr = emitNew(
@@ -2135,7 +2150,7 @@ bool WasmIRGen::finalizeModule() {
         continue;
       }
 
-      if (seg.funcIndices.empty()) {
+      if (seg.items.empty()) {
         // Empty segment: store null (same as dropped).
         builder_.createStorePropertyStrictInst(
             builder_.getLiteralNull(),
@@ -2144,23 +2159,15 @@ bool WasmIRGen::finalizeModule() {
         continue;
       }
 
-      // Create the segment array: [exportedFunc0, exportedFunc1, ...]
-      uint32_t numEntries = seg.funcIndices.size();
+      // Create the segment array, one slot per entry, in segment order.
+      uint32_t numEntries = seg.items.size();
       auto *segArr = emitNew(
           builder_.createTryLoadGlobalPropertyInst("Array"),
           {builder_.getLiteralNumber(static_cast<double>(numEntries))});
 
       for (uint32_t i = 0; i < numEntries; ++i) {
-        uint32_t funcIdx = seg.funcIndices[i];
-        // Every function index named by an element segment is in
-        // escapableFuncs_, so it has a canonical Exported Function; the null
-        // is for a segment naming an index this module does not have.
-        bool known =
-            funcIdx < exportedFuncVars_.size() && exportedFuncVars_[funcIdx];
         builder_.createStorePropertyStrictInst(
-            known ? static_cast<Value *>(builder_.createLoadFrameInst(
-                        tlScope, exportedFuncVars_[funcIdx]))
-                  : builder_.getLiteralNull(),
+            emitElemItem(seg.items[i], tlScope),
             segArr,
             builder_.getLiteralNumber(static_cast<double>(i)));
       }
@@ -7449,6 +7456,35 @@ void WasmIRGen::internTypeIds(Instruction *tlScope) {
   }
 }
 
+Value *WasmIRGen::emitElemItem(const WasmElemItem &item, Instruction *tlScope) {
+  switch (item.kind) {
+    case WasmElemItem::Kind::Null:
+      return builder_.getLiteralNull();
+
+    case WasmElemItem::Kind::FuncIndex:
+      // A function index reachable from an element segment is in
+      // escapableFuncs_ (see computeEscapableFuncs), so it has a canonical
+      // Exported Function. The fallback is for an index this module does not
+      // have, which a validated module cannot name.
+      if (item.index < exportedFuncVars_.size() &&
+          exportedFuncVars_[item.index])
+        return builder_.createLoadFrameInst(
+            tlScope, exportedFuncVars_[item.index]);
+      return builder_.getLiteralNull();
+
+    case WasmElemItem::Kind::GlobalGet:
+      // One frame slot, not two: globalSlotIndex_ gives a global a second
+      // slot when and only when it is i64 (see its declaration), and a
+      // validated element expression is reference-typed, so a global.get
+      // entry names a reference-typed global.
+      if (item.index < globalSlotIndex_.size())
+        return builder_.createLoadFrameInst(
+            tlScope, globalVars_[globalSlotIndex_[item.index]]);
+      return builder_.getLiteralNull();
+  }
+  llvm_unreachable("invalid element item kind");
+}
+
 void WasmIRGen::createTables(Instruction *tlScope) {
   // Determine initial size for each table. Tables may be defined in the
   // table section or imported.
@@ -7667,11 +7703,22 @@ void WasmIRGen::createTables(Instruction *tlScope) {
     auto *exportedArr = builder_.createLoadFrameInst(
         tlScope, tableExportVars_[seg.tableIndex]);
 
-    // Write each entry through the slot funnel. Only the Exported Function is
-    // handed over: the funnel derives the closure and the interned type id
-    // from it, so the three arrays cannot disagree about what this slot holds.
-    for (uint32_t i = 0; i < seg.funcIndices.size(); ++i) {
-      uint32_t funcIdx = seg.funcIndices[i];
+    // Whether the funnel brand-checks each value is a property of the TABLE,
+    // not of the segment: an element segment of externref type carries
+    // ref.null and global.get entries, and a global.get entry can be any JS
+    // value at all.
+    Value *isFuncRef = tableIsFuncRefLiteral(seg.tableIndex);
+
+    // Write each entry through the slot funnel: for a funcref table it takes
+    // null or an Exported Function and derives the closure and the interned
+    // type id from what it is given, so the three arrays cannot disagree
+    // about what this slot holds.
+    //
+    // A null entry is written like any other. A segment overwrites what the
+    // table already holds at its offset, so skipping the null store would
+    // leave the previous occupant in the slot -- the case
+    // e2e-elem-mixed-items.wat aims a ref.null at an occupied slot for.
+    for (uint32_t i = 0; i < seg.items.size(); ++i) {
       // Compute the table index: offset + i.
       Value *idx;
       if (i == 0 && firstIdxIsZero) {
@@ -7683,19 +7730,13 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             ValueKind::BinaryAddInstKind);
       }
 
-      // Every function index named by an element segment is in
-      // escapableFuncs_, so it has a canonical Exported Function.
-      if (funcIdx < exportedFuncVars_.size() && exportedFuncVars_[funcIdx]) {
-        helpers_.emitTableSetSlot(
-            funcsArr,
-            typesArr,
-            exportedArr,
-            idx,
-            builder_.createLoadFrameInst(
-                tlScope, exportedFuncVars_[funcIdx]),
-            // An element segment names functions, so this is a funcref table.
-            builder_.getLiteralNumber(1));
-      }
+      helpers_.emitTableSetSlot(
+          funcsArr,
+          typesArr,
+          exportedArr,
+          idx,
+          emitElemItem(seg.items[i], tlScope),
+          isFuncRef);
     }
   }
 }
@@ -7934,7 +7975,15 @@ void WasmIRGen::onTableInit(
   auto *segIdx =
       builder_.getLiteralNumber(static_cast<double>(segmentIndex));
   helpers_.emitTableInit(
-      funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count);
+      funcsArr,
+      typesArr,
+      exportedArr,
+      elemSegs,
+      segIdx,
+      dst,
+      src,
+      count,
+      tableIsFuncRefLiteral(tableIndex));
 }
 
 void WasmIRGen::onRefNull() {

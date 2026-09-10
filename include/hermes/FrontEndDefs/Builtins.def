@@ -297,13 +297,15 @@ WASM_BUILTIN(wasmTableSetSlot)
 // arrays, handling overlap.
 WASM_BUILTIN(wasmTableCopySlots)
 
-// Bulk table operations (N.2). All of these write slots through
-// wasmTableSetSlot's implementation.
-// wasmTableFill(funcsArr, typesArr, exportedArr, idx, val, count): fill table
-// entries with val.
+// Bulk table operations (N.2). The three that write table slots --
+// wasmTableFill, wasmTableInit and wasmTableGrow -- do it through
+// wasmTableSetSlot's implementation, so the slot triple stays consistent;
+// wasmElemDrop writes the element-segment array rather than a table.
+// wasmTableFill(funcsArr, typesArr, exportedArr, idx, val, count, isFuncRef):
+// fill table entries with val.
 WASM_BUILTIN(wasmTableFill)
 // wasmTableInit(funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src,
-// count): copy from element segment into a table.
+// count, isFuncRef): copy from element segment into a table.
 WASM_BUILTIN(wasmTableInit)
 // wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
 WASM_BUILTIN(wasmElemDrop)

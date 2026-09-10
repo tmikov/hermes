@@ -279,6 +279,9 @@ class WasmHelpers {
   /// Emit table.init: copies \p count entries from element segment to table.
   /// The first three arguments are the table's three parallel arrays.
   /// \p elemSegs is the element segments array, \p segIdx is the segment index.
+  /// \p isFuncRef is a literal 1 for a funcref destination table and 0 for an
+  /// externref one, as for emitTableSetSlot: an externref segment's entries
+  /// are arbitrary JS values, which the funcref brand check would refuse.
   Instruction *emitTableInit(
       Value *funcsArr,
       Value *typesArr,
@@ -287,7 +290,8 @@ class WasmHelpers {
       Value *segIdx,
       Value *dst,
       Value *src,
-      Value *count);
+      Value *count,
+      Value *isFuncRef);
 
   /// Emit elem.drop: marks element segment \p segIdx as dropped.
   /// \p elemSegs is the element segments array.

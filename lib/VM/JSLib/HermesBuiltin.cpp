@@ -2189,6 +2189,11 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
       static_cast<uint32_t>(truncateToInt32(args.getArg(6).getNumber()));
   uint32_t count =
       static_cast<uint32_t>(truncateToInt32(args.getArg(7).getNumber()));
+  // Whether the destination table brand-checks what it is given. It is a
+  // property of the TABLE the module declared, not of the segment: an
+  // element segment of externref type carries ref.null and global.get
+  // entries, and a global.get entry can be any JS value at all.
+  bool isFuncRef = args.getArg(8).getNumber() != 0;
 
   // Look up the element segment.
   auto segVal = lv.elemSegs->at(runtime, segIdx);
@@ -2235,7 +2240,7 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
                 lv.exportedArr,
                 dst + i,
                 lv.tmpVal,
-                /* isFuncRef */ true) == ExecutionStatus::EXCEPTION))
+                isFuncRef) == ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
   }
 
@@ -4345,7 +4350,7 @@ void createHermesBuiltins(Runtime &runtime) {
   defineInternMethod(
       B::HermesBuiltin_wasmTableFill, P::wasmTableFill, wasmTableFill, 7);
   defineInternMethod(
-      B::HermesBuiltin_wasmTableInit, P::wasmTableInit, wasmTableInit, 8);
+      B::HermesBuiltin_wasmTableInit, P::wasmTableInit, wasmTableInit, 9);
   defineInternMethod(
       B::HermesBuiltin_wasmElemDrop, P::wasmElemDrop, wasmElemDrop, 2);
   defineInternMethod(

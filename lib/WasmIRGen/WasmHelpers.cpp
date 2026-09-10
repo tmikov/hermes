@@ -506,11 +506,20 @@ Instruction *WasmHelpers::emitTableInit(
     Value *segIdx,
     Value *dst,
     Value *src,
-    Value *count) {
+    Value *count,
+    Value *isFuncRef) {
   // No meaningful return value.
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmTableInit,
-      {funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count});
+      {funcsArr,
+       typesArr,
+       exportedArr,
+       elemSegs,
+       segIdx,
+       dst,
+       src,
+       count,
+       isFuncRef});
 }
 
 Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {

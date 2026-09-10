@@ -1,0 +1,56 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-elem-declare-items.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var ex = new WebAssembly.Instance(mod, {}).exports;
+
+print('g starts null: ' + (ex.g.value === null));
+
+ex.stash();
+var first = ex.g.value;
+print('after stash, g is an object: ' + (first !== null && first !== undefined));
+
+// Through the table slot funnel, which takes null or an Exported Function and
+// derives the closure and the interned type id from it. A value that were
+// merely callable would be refused here, and one with the wrong interned type
+// would make call_indirect report a type mismatch.
+ex.put(0);
+try {
+  print('call(0): ' + ex.call(0));
+} catch (e) {
+  print('call(0): ' + e.message);
+}
+
+// The route hands out one object rather than a fresh wrapper per execution.
+ex.stash();
+print('stash hands out the same object twice: ' + (ex.g.value === first));
+
+ex.stash2();
+ex.put(1);
+try {
+  print('call(1): ' + ex.call(1));
+} catch (e) {
+  print('call(1): ' + e.message);
+}
+
+function attempt(label, fn) {
+  try {
+    fn();
+    print(label + ': no error');
+  } catch (e) {
+    print(label + ': ' + e.message);
+  }
+}
+
+attempt('init_expr_form', function () { ex.init_expr_form(); });
+attempt('init_funcidx_form', function () { ex.init_funcidx_form(); });
+print('slots 2 and 3 are still null: ' +
+      (ex.tbl.get(2) === null) + ' ' + (ex.tbl.get(3) === null));
+print('done');

@@ -16,6 +16,7 @@
 // wabt segment flags from wabt/common.h.
 namespace {
 constexpr uint8_t SegPassive = 1;
+constexpr uint8_t SegExplicitIndex = 2;
 constexpr uint8_t SegDeclared = 3;
 
 /// Normalize a UTF-8 string to Hermes's internal representation.
@@ -373,7 +374,14 @@ wabt::Result BinaryReaderHermesIRGen::BeginElemSegment(
     wabt::Index tableIndex,
     uint8_t flags) {
   WasmElemSegment seg;
-  if (flags == SegDeclared) {
+  // A declarative segment sets both the passive bit and the explicit-index
+  // bit; the elemexpr bit is independent of the mode, so the funcidx form
+  // (flags 3) and the expression form (flags 7) are both declarative. Testing
+  // `flags == SegDeclared` instead classified the expression form as passive,
+  // which kept its entries for table.init instead of dropping them before the
+  // module starts. wabt's own reader makes the same distinction with the same
+  // two bits, in ReadElemSection.
+  if ((flags & (SegPassive | SegExplicitIndex)) == SegDeclared) {
     seg.mode = WasmElemSegment::Mode::Declarative;
   } else if (flags & SegPassive) {
     seg.mode = WasmElemSegment::Mode::Passive;
@@ -402,7 +410,7 @@ wabt::Result BinaryReaderHermesIRGen::OnElemSegmentElemExprCount(
     wabt::Index index,
     wabt::Index count) {
   assert(index < moduleInfo_.elements.size());
-  moduleInfo_.elements[index].funcIndices.reserve(count);
+  moduleInfo_.elements[index].items.reserve(count);
   return wabt::Result::Ok;
 }
 
@@ -411,6 +419,8 @@ wabt::Result BinaryReaderHermesIRGen::BeginElemExpr(
     wabt::Index exprIndex) {
   initExprContext_ = InitExprContext::ElemExpr;
   currentInitExprIndex_ = elemIndex;
+  assert(elemIndex < moduleInfo_.elements.size() && "elem index out of range");
+  elemExprItemBase_ = moduleInfo_.elements[elemIndex].items.size();
   return wabt::Result::Ok;
 }
 
@@ -418,6 +428,21 @@ wabt::Result BinaryReaderHermesIRGen::EndElemExpr(
     wabt::Index elemIndex,
     wabt::Index exprIndex) {
   initExprContext_ = InitExprContext::None;
+  assert(elemIndex < moduleInfo_.elements.size() && "elem index out of range");
+  auto &items = moduleInfo_.elements[elemIndex].items;
+  if (LLVM_UNLIKELY(items.size() != elemExprItemBase_ + 1)) {
+    // An element expression yields one reference value, so the callbacks
+    // between BeginElemExpr and here must have recorded one entry for it. A
+    // constant form this reader does not know would record none, and that is
+    // not a local loss: it moves every later entry of the segment down by
+    // one, which is the defect this item model exists to fix. Substitute a
+    // null so the positions still line up, and say so.
+    llvh::errs() << "warning: unsupported element expression; entry "
+                 << exprIndex << " of element segment " << elemIndex
+                 << " is null\n";
+    items.resize(elemExprItemBase_);
+    items.push_back(WasmElemItem::makeNull());
+  }
   return wabt::Result::Ok;
 }
 
@@ -721,7 +746,17 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
       seg.offsetExpr.push_back(InitExprOp::makeGlobalGet(globalIndex));
       break;
     }
-    case InitExprContext::ElemExpr:
+    case InitExprContext::ElemExpr: {
+      // The entry takes the global's value as of instantiation. Reading it is
+      // safe here because initializeGlobals() runs before createTables() and
+      // before the passive segment arrays are built (see WasmIRGen).
+      assert(
+          currentInitExprIndex_ < moduleInfo_.elements.size() &&
+          "elem index out of range");
+      moduleInfo_.elements[currentInitExprIndex_].items.push_back(
+          WasmElemItem::makeGlobalGet(globalIndex));
+      break;
+    }
     case InitExprContext::None:
       break;
   }
@@ -747,6 +782,15 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
         "global index out of range");
     auto &g = moduleInfo_.globals[currentInitExprIndex_];
     g.initKind = WasmGlobal::InitKind::RefNull;
+  } else if (initExprContext_ == InitExprContext::ElemExpr) {
+    // Record the entry rather than dropping it: a dropped entry does not
+    // merely lose its own slot, it shifts every later entry of the segment
+    // down by one.
+    assert(
+        currentInitExprIndex_ < moduleInfo_.elements.size() &&
+        "elem index out of range");
+    moduleInfo_.elements[currentInitExprIndex_].items.push_back(
+        WasmElemItem::makeNull());
   }
   return wabt::Result::Ok;
 }
@@ -781,12 +825,15 @@ wabt::Result BinaryReaderHermesIRGen::OnRefFuncExpr(wabt::Index funcIndex) {
       break;
     }
     case InitExprContext::ElemExpr: {
-      // ref.func in an element expression adds the func index.
+      // Both segment forms arrive here: wabt synthesizes an OnRefFuncExpr for
+      // each index of a funcidx-form segment, between BeginElemExpr and
+      // EndElemExpr, so keying on the context rather than on the opcode is
+      // what keeps ordinary function-index segments working.
       assert(
           currentInitExprIndex_ < moduleInfo_.elements.size() &&
           "elem index out of range");
-      moduleInfo_.elements[currentInitExprIndex_].funcIndices.push_back(
-          funcIndex);
+      moduleInfo_.elements[currentInitExprIndex_].items.push_back(
+          WasmElemItem::makeFuncIndex(funcIndex));
       break;
     }
     case InitExprContext::ElemSegmentOffset:
