@@ -6180,11 +6180,10 @@ Value *WasmIRGen::emitFuncRefCheck(
   // currentFunc_ when a body is finished, which neither of these reaches.
   // Their nullptr is therefore final, and right while they build no `try`.
   //
-  // A body Function WOULD get that repair, so a body caller would not be
-  // broken by the catch target. It would still be a use this helper has not
-  // been designed for -- it splits the current block, which the value and
-  // control stacks are not told about -- so it is asserted rather than left
-  // to pass silently.
+  // A body Function WOULD get that repair, so the catch target is not what
+  // would make a body caller wrong. Nothing here establishes that one IS
+  // wrong -- only that it is outside what this helper was written for and
+  // reasoned about. The assertion says that and no more.
   assert(
       func != currentFunc_ &&
       "emitFuncRefCheck is for wrappers and trampolines, not function bodies");
