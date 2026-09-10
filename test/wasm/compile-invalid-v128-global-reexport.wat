@@ -22,17 +22,19 @@
 ;; REQUIRES: wasm
 
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: (! %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>&1) | %FileCheck %s
+;; RUN: (! %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>&1) | %FileCheck --match-full-lines %s
 
 (module
   (import "e" "g" (global $g (mut v128)))
   (export "g" (global $g)))
 
-;; The message is checked, not just a non-zero exit. Measured: with
-;; validateGlobalExportTypes() made to return true unconditionally -- the
-;; state of the tree before this diagnostic -- hermesc compiles this module
-;; and exits 0, and this test goes red on empty FileCheck input. And a
-;; refusal for some other reason would pass a check for "Error:" alone.
-;; CHECK: Error:
-;; CHECK-SAME: exported global "g" has type v128
-;; CHECK-SAME: SIMD is not supported
+;; The WHOLE line is pinned, with --match-full-lines and a single CHECK, for
+;; the reason spelled out in compile-invalid-v128-global-export.wat: neither a
+;; bare "Error:" check nor a CHECK plus CHECK-SAME fragments distinguishes
+;; this refusal from one that blames something else on the same line.
+;;
+;; Measured: with validateGlobalExportTypes() made to return true
+;; unconditionally -- the state of the tree before this diagnostic -- hermesc
+;; compiles this module and exits 0, and this test goes red on empty FileCheck
+;; input.
+;; CHECK: Error: exported global "g" has type v128, and SIMD is not supported

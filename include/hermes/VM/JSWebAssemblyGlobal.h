@@ -47,12 +47,19 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// every global import accept the wrong type. The static_asserts below turn
   /// that into a build error.
   ///
-  /// There is deliberately no V128. A v128 global is not diagnosed today --
-  /// that is Task 12 of the reference-types plan. What keeps v128 out of THIS
-  /// enum meanwhile is globalValTypeCode, which maps it to a code no Global
-  /// can hold, so no Global object ever matches a v128 declaration and no
-  /// v128 export can be wrapped in one. That covers the Global-object routes
-  /// only; see the note on globalValTypeCode for what it does not cover.
+  /// There is deliberately no V128, and a module that EXPORTS a v128 global
+  /// is refused at compile time because of it: WasmIRGen's
+  /// validateGlobalExportTypes() rejects such a module during finalizeModule()
+  /// with a message naming SIMD, so no wrapping is attempted and this enum
+  /// never has to describe one. dz 01a07d4b-01bc tracks building the shell the
+  /// JS API asks for -- a Global whose `.value` throws -- which is the work
+  /// that would add a V128 member here and delete that diagnostic.
+  ///
+  /// The IMPORT direction is separate and is not comprehensively screened.
+  /// globalValTypeCode maps v128 to a code no Global can hold, so a v128
+  /// import offered a WebAssembly.Global reports a mismatch; but an immutable
+  /// import may also be satisfied by a raw JS value, and that path has no v128
+  /// arm. See the note on globalValTypeCode for the detail.
   enum class ValType : uint8_t { I32, I64, F32, F64, ExternRef, FuncRef };
   static_assert(
       static_cast<uint8_t>(ValType::I32) == 0 &&

@@ -1936,10 +1936,16 @@ bool WasmIRGen::finalizeModule() {
   // exports object should carry a WebAssembly.Global whose `.value` throws,
   // but JSWebAssemblyGlobal::ValType has no v128 member to build one from, and
   // BinaryReaderHermesIRGen has no v128.const initializer handler, so the
-  // module's slot for such a global holds the number 0. Compiling it would
-  // publish a Global that reports a type the engine cannot represent, over a
-  // value that was never read from the module. dz 01a07d4b-01bc tracks
-  // building the real shell; this diagnostic is what that work removes.
+  // module's slot for such a global holds the number 0.
+  //
+  // What this MOVES, rather than what it prevents: no such Global was ever
+  // built. globalValTypeCode maps v128 to 0xFF, and wasmMakeGlobal already
+  // range-checks that and raises "wasmMakeGlobal: unknown value type". The
+  // change is that the refusal now happens at compile time and says why --
+  // a CompileError from `new WebAssembly.Module` naming SIMD and the export,
+  // instead of a TypeError from `new WebAssembly.Instance` naming an internal
+  // builtin. dz 01a07d4b-01bc tracks building the real shell; this diagnostic
+  // is what that work removes.
   //
   // Run after validateExportIndices(), because it indexes the global index
   // space with an export's index and relies on that check for the bound. Run

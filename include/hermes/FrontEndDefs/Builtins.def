@@ -58,9 +58,10 @@
 #define PRIVATE_BUILTIN(name)
 #endif
 /// A private builtin that exists only to serve Wasm. It is spelled differently
-/// only so a consumer can treat the 73 of them as a group; by default it IS a
+/// only so a consumer can treat them as a group; by default it IS a
 /// PRIVATE_BUILTIN, and the ids it produces are identical either way, so this
 /// spelling does not touch the bytecode ABI.
+/// (This used to name a count. Nothing checked it, and it went stale.)
 #ifndef WASM_BUILTIN
 #define WASM_BUILTIN(name) PRIVATE_BUILTIN(name)
 #endif

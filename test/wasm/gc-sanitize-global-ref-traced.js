@@ -50,12 +50,15 @@
 // with the route that filled it; the constructor is used because it is the
 // route on which the caller can be left holding the Global and nothing else.
 //
-// It must run with -gc-sanitize-handles=1 EXPLICITLY: a
+// It should run with -gc-sanitize-handles=1 EXPLICITLY: a
 // HERMESVM_SANITIZE_HANDLES=ON build samples at 1% by default, so without the
 // flag the heap mostly does not move and the identity check would compare a
-// pointer against itself. In a build without HERMESVM_SANITIZE_HANDLES the
-// flag is ignored, gc() still collects, and this is a weaker but still
-// meaningful test of the marking half.
+// pointer against itself. That is an argument about the PASSING direction --
+// what the flag buys is that a green result means something. It is not a
+// claim that the test cannot go red without it; a reviewer measured the abort
+// firing at the default sampling rate too. In a build without
+// HERMESVM_SANITIZE_HANDLES the flag is ignored, gc() still collects, and this
+// is a weaker but still meaningful test of the marking half.
 
 // RUN: %hermes -Xhermes-internal-test-methods -gc-sanitize-handles=1 %s | %FileCheck --match-full-lines %s
 // REQUIRES: wasm

@@ -246,13 +246,15 @@ CallResult<HermesValue> hermesBuiltinThrowReferenceError(
 ///
 /// Builtins.def numbering is deliberately independent of HERMES_ENABLE_WASM,
 /// so every wasm builtin id must still resolve to something (see the note
-/// above wasmLinkErrorProto). It need not resolve to 73 DIFFERENT somethings:
-/// the ids are distinct, the behaviour is not. So the whole block of wasm
+/// above wasmLinkErrorProto). It need not resolve to a DIFFERENT something per
+/// id: the ids are distinct, the behaviour is not. So the whole block of wasm
 /// implementations below is compiled out and every id points here instead.
 ///
 /// Which builtin was called arrives as the context pointer, so one format
-/// string serves all of them; 73 distinct messages would put a good part of
-/// the saving straight back into .rodata.
+/// string serves all of them; a distinct message per id would put a good part
+/// of the saving straight back into .rodata.
+/// (Both sentences used to name a count. Nothing checked it, and it went
+/// stale.)
 ///
 /// Nothing can reach here. Without Wasm there is no WebAssembly object to call
 /// these through and no compiled Wasm module to emit calls to them, so arriving
