@@ -30,11 +30,21 @@ var E = new WebAssembly.Instance(
     },
   }).exports;
 
-// The brand oracle: WebAssembly.Table.prototype.set takes null or a genuine
-// Exported Function and refuses everything else, testing an internal property
-// script can neither name nor write. It is printed refusing a plain JS
-// function and accepting an export, so a broken oracle cannot make the
-// assertions below pass by accident.
+// The brand probe -- called `oracle` in the rows it prints.
+// WebAssembly.Table.prototype.set takes null or a genuine Exported Function
+// and refuses everything else, testing an internal property script can
+// neither name nor write.
+//
+// It is a second ROUTE to the brand rather than an independent oracle: `set`
+// calls isWasmExportedFunction (WebAssembly.cpp:2038), and the
+// wasmIsExportedFunction builtin that the generated check goes through calls
+// the same function (HermesBuiltin.cpp:1493). One notion of the brand for the
+// JS API and for generated code is deliberate -- it is why the builtin exists
+// rather than a separate IRGen-side test -- so this probe cannot catch a
+// brand that is wrong in the same way for both. What it does
+// establish is that `plain` and `E.target` sit on opposite sides of that one
+// notion; both verdicts are printed, so a probe that stopped discriminating
+// changes a line here instead of quietly letting the rows below pass.
 var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
 function brand(v) {
   if (typeof v !== 'function')

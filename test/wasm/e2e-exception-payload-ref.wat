@@ -29,9 +29,15 @@
 ;; a refusal is a TypeError that leaves the function. The driver drives both,
 ;; so 2 is a value this test has seen produced.
 ;;
-;; `catch_nested` asks the same question one level in, where the inner
-;; handler chain sits inside the outer try's body: a mismatch is still 2, and
-;; anything the outer `catch_all` sees is 3.
+;; `catch_nested` asks the same question one level in, where the inner handler
+;; chain sits inside the outer try's body: a mismatch is still 2, and anything
+;; the outer `catch_all` sees is 3. A refusal answers 3, which pins a tradeoff
+;; rather than a plainly right answer -- a module that wraps its work in
+;; `catch_all` swallows the refusal instead of surfacing it to JS, the same
+;; way it already swallows a Wasm trap (see onCatchAll's "catches everything
+;; including traps" deviation). Changing that answer to "no handler can
+;; intercept a refusal" is a compiler-wide change, not a local one; the
+;; comment on emitBodyFuncRefCheck says what it would cost.
 ;;
 ;; The i64 rows are here for the two-index payload layout. An i64 occupies
 ;; array indices n and n+1, so in `(i64 funcref)` the funcref is at index 3,

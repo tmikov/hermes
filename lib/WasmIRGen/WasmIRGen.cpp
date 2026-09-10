@@ -6222,9 +6222,24 @@ Value *WasmIRGen::emitBodyFuncRefCheck(
   // hermes::fixupCatchTargets(currentFunc_), which walks every block with its
   // enclosing TryStartInst and rewrites the catch target of any BaseThrowInst
   // terminator -- ThrowTypeErrorInst is one. So a throw emitted here inside a
-  // Wasm `try` ends up targeting that try's catch dispatch, so an enclosing
-  // Wasm `catch_all` sees it. `catch_nested` in
-  // test/wasm/e2e-exception-payload-ref.wat is that case end to end.
+  // Wasm `try` ends up targeting that try's catch dispatch.
+  //
+  // That has a consequence worth stating rather than discovering: a module
+  // that wraps its work in `catch_all` SWALLOWS a refusal raised by this
+  // helper instead of surfacing it to JS. `catch_nested` in
+  // test/wasm/e2e-exception-payload-ref.wat is that case end to end, and
+  // answers 3 -- the outer handler -- rather than throwing out.
+  //
+  // It is a tradeoff, not a plainly right answer. What recommends it is that
+  // it matches what `catch_all` already does here: see onCatchAll's "Phase 1:
+  // catches everything including traps (known spec deviation)". A refusal
+  // that escaped `catch_all` while a Wasm trap did not would give one handler
+  // two swallowing rules. The alternative -- a refusal no handler in the
+  // module can intercept -- means a BaseThrowInst that deliberately keeps a
+  // catch target its enclosing try disagrees with, which fixupCatchTargets
+  // has no way to express: it rewrites every BaseThrowInst it walks. Buying
+  // it would cost a flag on the instruction or a carve-out in an IR analysis
+  // the whole compiler shares.
   assert(
       builder_.getInsertionBlock()->getParent() == currentFunc_ &&
       "emitBodyFuncRefCheck emits into the body being compiled");
