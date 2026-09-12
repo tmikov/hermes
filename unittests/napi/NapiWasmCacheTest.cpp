@@ -18,15 +18,6 @@ namespace {
 
 using hermes::napi::NapiTestFixture;
 
-/// wat2wasm output for:
-///   (module (func (export "add") (param i32 i32) (result i32)
-///     (i32.add (local.get 0) (local.get 1))))
-static const uint8_t kAdd[] = {
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
-    0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
-    0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20,
-    0x00, 0x20, 0x01, 0x6a, 0x0b};
-
 /// A recording cache. Serves whatever it was last told to store.
 struct FakeCache {
   int lookups = 0;
@@ -82,6 +73,23 @@ struct FakeCache {
     return cbs;
   }
 };
+
+// Everything below drives a real WebAssembly.Module compile, so it needs a
+// build that has the Wasm frontend. HERMES_ENABLE_WASM defaults to OFF while
+// this file is compiled either way, so without this guard a default build
+// runs eight tests whose WebAssembly global does not exist and fails all
+// eight. The lit suite has had the equivalent since the beginning, as the
+// `wasm` feature in test/lit.cfg.
+#ifdef HERMES_ENABLE_WASM
+
+/// wat2wasm output for:
+///   (module (func (export "add") (param i32 i32) (result i32)
+///     (i32.add (local.get 0) (local.get 1))))
+static const uint8_t kAdd[] = {
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
+    0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
+    0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20,
+    0x00, 0x20, 0x01, 0x6a, 0x0b};
 
 /// Compile kAdd through the JS API and return whether it succeeded.
 static bool compileAdd(napi_env env) {
@@ -262,5 +270,20 @@ TEST_F(NapiTestFixture, WasmCache_LargerStructIsAccepted) {
   EXPECT_TRUE(compileAdd(env_));
   EXPECT_EQ(1, cache.lookups);
 }
+
+#else
+
+// With no Wasm support there is nothing to install hooks into, and
+// hermes_set_wasm_cache says so rather than reporting a success it cannot
+// deliver. Worth pinning precisely because it is the branch nobody runs: an
+// embedder that got napi_ok here would wire up a cache, see no callback ever
+// fire, and have nothing to explain why.
+TEST_F(NapiTestFixture, WasmCache_RefusedWithoutWasmSupport) {
+  FakeCache cache;
+  auto cbs = cache.callbacks();
+  EXPECT_EQ(napi_generic_failure, hermes_set_wasm_cache(env_, &cbs));
+}
+
+#endif
 
 } // namespace
