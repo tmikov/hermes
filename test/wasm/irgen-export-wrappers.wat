@@ -48,45 +48,47 @@
 
 ;; --- Wrapper for id_i64: BigInt param converted to lo/hi, result back to BigInt ---
 
-;; CHECK: scope %VS0 [wasm_type_id_0: any, wasm_type_id_1: any, wasm_type_id_2: any, wasm_type_id_3: any, wasm_type_id_4: any, retBufI: any, retBufF: any, closure_0: any, exported_func_0: any, closure_1: any, exported_func_1: any, closure_2: any, exported_func_2: any, closure_3: any, exported_func_3: any, closure_4: any, exported_func_4: any]
+;; CHECK: scope %VS0 [wasm_type_id_0: any, wasm_type_id_1: any, wasm_type_id_2: any, wasm_type_id_3: any, wasm_type_id_4: any, retBufI: any, retBufF: any, closure_0: any, exported_func_0: any, closure_1: any, exported_func_1: any, closure_2: any, exported_func_2: any, closure_3: any, exported_func_3: any, closure_4: any, exported_func_4: any, intrinsics: any]
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
-;; CHECK-NEXT:   %2 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Array": string
-;; CHECK-NEXT:   %3 = CreateThisInst (:any) %2: any, %2: any, empty: any
-;; CHECK-NEXT:   %4 = CallInst (:any) %2: any, empty: any, false: boolean, empty: any, %2: any, %3: any, 5: number
-;; CHECK-NEXT:   %5 = GetConstructedObjectInst (:object) %3: any, %4: any
-;; CHECK-NEXT:   %6 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:        StorePropertyStrictInst "add_i32": string, %6: object, "name": string
-;; CHECK-NEXT:        StorePropertyStrictInst "function": string, %6: object, "kind": string
-;; CHECK-NEXT:        StorePropertyStrictInst %6: object, %5: object, 0: number
-;; CHECK-NEXT:   %10 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "void_func": string, %10: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %10: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %10: object, %5: object, 1: number
-;; CHECK-NEXT:   %14 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "add_f64": string, %14: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %14: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %14: object, %5: object, 2: number
-;; CHECK-NEXT:   %18 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "mixed": string, %18: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %18: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %18: object, %5: object, 3: number
-;; CHECK-NEXT:   %22 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "id_i64": string, %22: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %22: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %22: object, %5: object, 4: number
-;; CHECK-NEXT:   %26 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Array": string
-;; CHECK-NEXT:   %27 = CreateThisInst (:any) %26: any, %26: any, empty: any
-;; CHECK-NEXT:   %28 = CallInst (:any) %26: any, empty: any, false: boolean, empty: any, %26: any, %27: any, 0: number
-;; CHECK-NEXT:   %29 = GetConstructedObjectInst (:object) %27: any, %28: any
-;; CHECK-NEXT:   %30 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %30: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %5: object, %30: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %29: object, %30: object, "importDescs": string
-;; CHECK-NEXT:         ReturnInst %30: object
+;; CHECK-NEXT:   %2 = TryLoadGlobalPropertyInst (:any) globalObject: object, "HermesInternal": string
+;; CHECK-NEXT:   %3 = LoadPropertyInst (:any) %2: any, "intrinsics": string
+;; CHECK-NEXT:   %4 = LoadPropertyInst (:any) %3: any, "Array": string
+;; CHECK-NEXT:   %5 = CreateThisInst (:any) %4: any, %4: any, empty: any
+;; CHECK-NEXT:   %6 = CallInst (:any) %4: any, empty: any, false: boolean, empty: any, %4: any, %5: any, 5: number
+;; CHECK-NEXT:   %7 = GetConstructedObjectInst (:object) %5: any, %6: any
+;; CHECK-NEXT:   %8 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:        StorePropertyStrictInst "add_i32": string, %8: object, "name": string
+;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %8: object, "kind": string
+;; CHECK-NEXT:         StorePropertyStrictInst %8: object, %7: object, 0: number
+;; CHECK-NEXT:   %12 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst "void_func": string, %12: object, "name": string
+;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %12: object, "kind": string
+;; CHECK-NEXT:         StorePropertyStrictInst %12: object, %7: object, 1: number
+;; CHECK-NEXT:   %16 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst "add_f64": string, %16: object, "name": string
+;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %16: object, "kind": string
+;; CHECK-NEXT:         StorePropertyStrictInst %16: object, %7: object, 2: number
+;; CHECK-NEXT:   %20 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst "mixed": string, %20: object, "name": string
+;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %20: object, "kind": string
+;; CHECK-NEXT:         StorePropertyStrictInst %20: object, %7: object, 3: number
+;; CHECK-NEXT:   %24 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst "id_i64": string, %24: object, "name": string
+;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %24: object, "kind": string
+;; CHECK-NEXT:         StorePropertyStrictInst %24: object, %7: object, 4: number
+;; CHECK-NEXT:   %28 = LoadPropertyInst (:any) %3: any, "Array": string
+;; CHECK-NEXT:   %29 = CreateThisInst (:any) %28: any, %28: any, empty: any
+;; CHECK-NEXT:   %30 = CallInst (:any) %28: any, empty: any, false: boolean, empty: any, %28: any, %29: any, 0: number
+;; CHECK-NEXT:   %31 = GetConstructedObjectInst (:object) %29: any, %30: any
+;; CHECK-NEXT:   %32 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %32: object, "instantiate": string
+;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %32: object, "exportDescs": string
+;; CHECK-NEXT:         StorePropertyStrictInst %31: object, %32: object, "importDescs": string
+;; CHECK-NEXT:         ReturnInst %32: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_0(p0: number, p1: number): number
@@ -182,82 +184,88 @@
 ;; CHECK-NEXT: function __wasm_instantiate__(imports: any): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
-;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
-;; CHECK-NEXT:        StoreFrameInst %0: environment, %1: object, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %3 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_1(): functionCode
-;; CHECK-NEXT:        StoreFrameInst %0: environment, %3: object, [%VS0.closure_1]: any
-;; CHECK-NEXT:   %5 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_2(): functionCode
-;; CHECK-NEXT:        StoreFrameInst %0: environment, %5: object, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %7 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_3(): functionCode
-;; CHECK-NEXT:        StoreFrameInst %0: environment, %7: object, [%VS0.closure_3]: any
-;; CHECK-NEXT:   %9 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_4(): functionCode
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %9: object, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %11 = TryLoadGlobalPropertyInst (:any) globalObject: object, "ArrayBuffer": string
-;; CHECK-NEXT:   %12 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Uint32Array": string
-;; CHECK-NEXT:   %13 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Float64Array": string
-;; CHECK-NEXT:   %14 = CreateThisInst (:any) %11: any, %11: any, empty: any
-;; CHECK-NEXT:   %15 = CallInst (:any) %11: any, empty: any, false: boolean, empty: any, %11: any, %14: any, 8: number
-;; CHECK-NEXT:   %16 = GetConstructedObjectInst (:object) %14: any, %15: any
-;; CHECK-NEXT:   %17 = CreateThisInst (:any) %12: any, %12: any, empty: any
-;; CHECK-NEXT:   %18 = CallInst (:any) %12: any, empty: any, false: boolean, empty: any, %12: any, %17: any, %16: object
-;; CHECK-NEXT:   %19 = GetConstructedObjectInst (:object) %17: any, %18: any
-;; CHECK-NEXT:   %20 = CreateThisInst (:any) %13: any, %13: any, empty: any
-;; CHECK-NEXT:   %21 = CallInst (:any) %13: any, empty: any, false: boolean, empty: any, %13: any, %20: any, %16: object
+;; CHECK-NEXT:   %1 = TryLoadGlobalPropertyInst (:any) globalObject: object, "HermesInternal": string
+;; CHECK-NEXT:   %2 = LoadPropertyInst (:any) %1: any, "intrinsics": string
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %2: any, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %4 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %4: object, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %6 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_1(): functionCode
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %6: object, [%VS0.closure_1]: any
+;; CHECK-NEXT:   %8 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_2(): functionCode
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %8: object, [%VS0.closure_2]: any
+;; CHECK-NEXT:   %10 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_3(): functionCode
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %10: object, [%VS0.closure_3]: any
+;; CHECK-NEXT:   %12 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_4(): functionCode
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %12: object, [%VS0.closure_4]: any
+;; CHECK-NEXT:   %14 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %15 = LoadPropertyInst (:any) %14: any, "ArrayBuffer": string
+;; CHECK-NEXT:   %16 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %17 = LoadPropertyInst (:any) %16: any, "Uint32Array": string
+;; CHECK-NEXT:   %18 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %19 = LoadPropertyInst (:any) %18: any, "Float64Array": string
+;; CHECK-NEXT:   %20 = CreateThisInst (:any) %15: any, %15: any, empty: any
+;; CHECK-NEXT:   %21 = CallInst (:any) %15: any, empty: any, false: boolean, empty: any, %15: any, %20: any, 8: number
 ;; CHECK-NEXT:   %22 = GetConstructedObjectInst (:object) %20: any, %21: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %19: object, [%VS0.retBufI]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %22: object, [%VS0.retBufF]: any
-;; CHECK-NEXT:   %25 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:ii:i": string
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %25: any, [%VS0.wasm_type_id_0]: any
-;; CHECK-NEXT:   %27 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::": string
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %27: any, [%VS0.wasm_type_id_1]: any
-;; CHECK-NEXT:   %29 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:dd:d": string
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %29: any, [%VS0.wasm_type_id_2]: any
-;; CHECK-NEXT:   %31 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:id:d": string
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %31: any, [%VS0.wasm_type_id_3]: any
-;; CHECK-NEXT:   %33 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:l:l": string
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %33: any, [%VS0.wasm_type_id_4]: any
-;; CHECK-NEXT:   %35 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_i32(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func:ii:i": string, %35: object, "__wasm_type__": string
-;; CHECK-NEXT:   %37 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %38 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
-;; CHECK-NEXT:   %39 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %35: object, %37: any, %38: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %35: object, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:   %41 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_void_func(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func::": string, %41: object, "__wasm_type__": string
-;; CHECK-NEXT:   %43 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
-;; CHECK-NEXT:   %44 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
+;; CHECK-NEXT:   %23 = CreateThisInst (:any) %17: any, %17: any, empty: any
+;; CHECK-NEXT:   %24 = CallInst (:any) %17: any, empty: any, false: boolean, empty: any, %17: any, %23: any, %22: object
+;; CHECK-NEXT:   %25 = GetConstructedObjectInst (:object) %23: any, %24: any
+;; CHECK-NEXT:   %26 = CreateThisInst (:any) %19: any, %19: any, empty: any
+;; CHECK-NEXT:   %27 = CallInst (:any) %19: any, empty: any, false: boolean, empty: any, %19: any, %26: any, %22: object
+;; CHECK-NEXT:   %28 = GetConstructedObjectInst (:object) %26: any, %27: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %25: object, [%VS0.retBufI]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %28: object, [%VS0.retBufF]: any
+;; CHECK-NEXT:   %31 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:ii:i": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %31: any, [%VS0.wasm_type_id_0]: any
+;; CHECK-NEXT:   %33 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %33: any, [%VS0.wasm_type_id_1]: any
+;; CHECK-NEXT:   %35 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:dd:d": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %35: any, [%VS0.wasm_type_id_2]: any
+;; CHECK-NEXT:   %37 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:id:d": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %37: any, [%VS0.wasm_type_id_3]: any
+;; CHECK-NEXT:   %39 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:l:l": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %39: any, [%VS0.wasm_type_id_4]: any
+;; CHECK-NEXT:   %41 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_i32(): functionCode
+;; CHECK-NEXT:         StorePropertyStrictInst "func:ii:i": string, %41: object, "__wasm_type__": string
+;; CHECK-NEXT:   %43 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %44 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
 ;; CHECK-NEXT:   %45 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %41: object, %43: any, %44: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %41: object, [%VS0.exported_func_1]: any
-;; CHECK-NEXT:   %47 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_f64(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func:dd:d": string, %47: object, "__wasm_type__": string
-;; CHECK-NEXT:   %49 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %50 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_2]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %41: object, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:   %47 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_void_func(): functionCode
+;; CHECK-NEXT:         StorePropertyStrictInst "func::": string, %47: object, "__wasm_type__": string
+;; CHECK-NEXT:   %49 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
+;; CHECK-NEXT:   %50 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
 ;; CHECK-NEXT:   %51 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %47: object, %49: any, %50: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %47: object, [%VS0.exported_func_2]: any
-;; CHECK-NEXT:   %53 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_mixed(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func:id:d": string, %53: object, "__wasm_type__": string
-;; CHECK-NEXT:   %55 = LoadFrameInst (:any) %0: environment, [%VS0.closure_3]: any
-;; CHECK-NEXT:   %56 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_3]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %47: object, [%VS0.exported_func_1]: any
+;; CHECK-NEXT:   %53 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_f64(): functionCode
+;; CHECK-NEXT:         StorePropertyStrictInst "func:dd:d": string, %53: object, "__wasm_type__": string
+;; CHECK-NEXT:   %55 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
+;; CHECK-NEXT:   %56 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_2]: any
 ;; CHECK-NEXT:   %57 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %53: object, %55: any, %56: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %53: object, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:   %59 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_id_i64(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func:l:l": string, %59: object, "__wasm_type__": string
-;; CHECK-NEXT:   %61 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %62 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_4]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %53: object, [%VS0.exported_func_2]: any
+;; CHECK-NEXT:   %59 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_mixed(): functionCode
+;; CHECK-NEXT:         StorePropertyStrictInst "func:id:d": string, %59: object, "__wasm_type__": string
+;; CHECK-NEXT:   %61 = LoadFrameInst (:any) %0: environment, [%VS0.closure_3]: any
+;; CHECK-NEXT:   %62 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_3]: any
 ;; CHECK-NEXT:   %63 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %59: object, %61: any, %62: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %59: object, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:   %65 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:   %66 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %66: any, %65: object, "add_i32": string
-;; CHECK-NEXT:   %68 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_1]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %68: any, %65: object, "void_func": string
-;; CHECK-NEXT:   %70 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_2]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %70: any, %65: object, "add_f64": string
-;; CHECK-NEXT:   %72 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %72: any, %65: object, "mixed": string
-;; CHECK-NEXT:   %74 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %74: any, %65: object, "id_i64": string
-;; CHECK-NEXT:         ReturnInst %65: object
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %59: object, [%VS0.exported_func_3]: any
+;; CHECK-NEXT:   %65 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_id_i64(): functionCode
+;; CHECK-NEXT:         StorePropertyStrictInst "func:l:l": string, %65: object, "__wasm_type__": string
+;; CHECK-NEXT:   %67 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
+;; CHECK-NEXT:   %68 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_4]: any
+;; CHECK-NEXT:   %69 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %65: object, %67: any, %68: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %65: object, [%VS0.exported_func_4]: any
+;; CHECK-NEXT:   %71 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:   %72 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %72: any, %71: object, "add_i32": string
+;; CHECK-NEXT:   %74 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_1]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %74: any, %71: object, "void_func": string
+;; CHECK-NEXT:   %76 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_2]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %76: any, %71: object, "add_f64": string
+;; CHECK-NEXT:   %78 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %78: any, %71: object, "mixed": string
+;; CHECK-NEXT:   %80 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %80: any, %71: object, "id_i64": string
+;; CHECK-NEXT:         ReturnInst %71: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_export_add_i32(p0: any, p1: any): any

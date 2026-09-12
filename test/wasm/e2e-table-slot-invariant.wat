@@ -107,53 +107,21 @@
 ;; uninitialized rather than merely untyped.
 ;; CHECK-NEXT: clear(0); callAsT0(0): trap: call_indirect: uninitialized element
 
-;; A frozen backing array must not be able to take the triple apart. A refused
-;; element write reports SUCCESS -- a frozen JSArray answers false with no
-;; exception -- so an unchecked funnel wrote some of the three arrays and left
-;; the rest, which is the desynchronization that made a function callable
-;; through another function's signature.
+;; Storage the engine does not control is no longer constructible from script.
+;; A frozen backing array refuses element writes while reporting success; a
+;; non-array, or an accessor installed at an index, is the same problem in
+;; another shape. wasmCheckTableArrays, the writability check in the table-set
+;; funnel, and the length rollback in wasmTableGrow all exist for that, and
+;; this file used to drive all three by replacing globalThis.Array while an
+;; externref table was built.
 ;;
-;; Reached here through an externref table's storage, which comes from
-;; globalThis.Array; see the note at the top. The write order is the same for
-;; both table kinds, and so is the checked store, so freezing any one of the
-;; three arrays must raise rather than silently drop the write.
+;; A funcref table's arrays are internal fields of a genuine WebAssembly.Table,
+;; and an externref table's now come from the pristine Array under
+;; HermesInternal.intrinsics, so neither kind can be handed storage script
+;; chose. Those checks are kept as defence in depth and have no reachable
+;; caller left to test them through; that gap is recorded on dz
+;; 01a0904b-398b. What is still reachable is the ordinary behaviour of the
+;; same paths.
 ;; CHECK-NEXT: sane externref table: extSet ok, extGet: x
-;; CHECK-NEXT: frozen funcs: extSet: TypeError: Wasm table storage is not writable
-;; CHECK-NEXT: frozen funcs; extGet(0): null
-;; CHECK-NEXT: frozen types: extSet: TypeError: Wasm table storage is not writable
-;; CHECK-NEXT: frozen types; extGet(0): null
-;; CHECK-NEXT: frozen exported: extSet: TypeError: Wasm table storage is not writable
-;; CHECK-NEXT: frozen exported; extGet(0): null
-
-;; The same storage is script's to choose in shape as well as in writability,
-;; so it is validated once at instantiation. A non-array is a LinkError there
-;; rather than an unchecked cast in the table builtins later.
-;; CHECK-NEXT: non-array storage: LinkError
-
-;; And being a genuine array is not enough: an accessor installed at an index
-;; runs on an ordinary property read, so table.get reads the indexed storage
-;; directly and never calls anything.
-;; CHECK-NEXT: accessor ran: false, extGet(0): null
-
-;; table.grow has the same problem one level up: it extends all three array
-;; LENGTHS and then fills the new slots. A refused length write leaves that
-;; array short with no exception raised, so an unchecked grow would answer
-;; "grown" over three arrays of different lengths, and a later write to a new
-;; slot would land in some of them and extend others. The refusal is caught by
-;; the fill below it, which is turned into the spec's "could not grow" answer
-;; of -1 with the lengths rolled back -- so the table must be exactly as long
-;; afterwards as it was before, whichever of the three arrays refused.
-;;
-;; ALL THREE LENGTHS are measured, in funcs/types/exported order. extSize()
-;; compiles to funcs.length alone, and in the `frozen funcs` row Object.freeze
-;; pins funcs.length at 5 no matter what the engine does -- so that row's
-;; "size still 5" could not fail, and it was the rollback of the OTHER two that
-;; it was supposed to be asserting. Deleting the rollback in wasmTableGrow
-;; (HermesBuiltin.cpp) leaves this row at `lengths 5/7/7` while extSize() still
-;; answers 5: exactly the desynchronization the paragraph above forbids, and
-;; previously invisible to the whole suite.
-;; CHECK-NEXT: sane grow: 5 -> 7, lengths 7/7/7, extGrow returned 5
-;; CHECK-NEXT: frozen funcs grow: -1, lengths 5/5/5, size still 5
-;; CHECK-NEXT: frozen types grow: -1, lengths 5/5/5, size still 5
-;; CHECK-NEXT: frozen exported grow: -1, lengths 5/5/5, size still 5
+;; CHECK-NEXT: sane grow: 5 -> 7, extGrow returned 5
 ;; CHECK-NEXT: done

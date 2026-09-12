@@ -919,6 +919,23 @@ void WasmIRGen::createFunctions() {
       topLevelVS_, builder_.getEmptySentinel());
   auto *tlScope = tlScope_;
 
+  // Read the pristine-constructor holder once, before anything allocates.
+  // Every constructor this module builds with comes from here rather than
+  // from globalThis, so replacing a global cannot redirect the module's
+  // allocations -- its linear-memory views, its return buffer, its table
+  // backing arrays. globalThis.HermesInternal and its `intrinsics` property
+  // are both non-writable and non-configurable and the holder is
+  // non-extensible, so neither of these two loads can be intercepted or
+  // redirected.
+  //
+  // Cached in a Variable rather than re-read at each use because memory.grow
+  // rebuilds all eight views at run time; this way the walk is paid once per
+  // instance instead of once per grow.
+  intrinsicsVar_ = builder_.createVariable(
+      topLevelVS_, "intrinsics", Type::createAnyType(), /* hidden */ true);
+  builder_.createStoreFrameInst(
+      tlScope, loadIntrinsicsHolder(), intrinsicsVar_);
+
   // Resolve and validate ALL imports from the imports object.
   // The imports object arrives as instantiate()'s parameter.
   // It has the shape: { moduleName: { fieldName: value } }.
@@ -1423,8 +1440,8 @@ void WasmIRGen::createFunctions() {
 
           // No wasmCheckTableArrays call: these came out of a table this
           // engine built, so they are JSArrays by construction. The check
-          // remains for externref tables, whose arrays come from
-          // globalThis.Array.
+          // remains on the externref path, where createTables() builds the
+          // arrays itself instead of taking them out of a Table.
 
           ++importTableIdx;
           tlEntry_ = acceptBB;
@@ -1617,30 +1634,46 @@ void WasmIRGen::createFunctions() {
   // function that returns an i64 or a multi-value result. A function marshals
   // its numeric results into them and its caller reads them straight back
   // out, so a write in between corrupts the result. Any operation that could
-  // re-enter Wasm -- calling back into an export, or running arbitrary JS such
-  // as a property getter, valueOf, or a Proxy trap -- while a result sits
-  // unread in the buffer will overwrite it. The import trampoline's two-pass
-  // marshalling converts each result into an SSA value in the first pass and
-  // stores them in the second, which keeps script from running between one
-  // result's conversion and another's store.
+  // re-enter Wasm while a result sits unread in the buffer -- calling back
+  // into an export from a JS import, say -- will overwrite it. The import
+  // trampoline's two-pass marshalling converts each result into an SSA value
+  // in the first pass and stores them in the second, which keeps script from
+  // running between one result's conversion and another's store.
   //
-  // It does NOT make the numeric path safe: the buffer is built from
-  // globalThis.ArrayBuffer / Uint32Array / Float64Array, which a script can
-  // replace, and the stores and loads are ordinary indexed property
-  // operations, so a replacement's accessor can substitute a numeric result or
-  // re-enter Wasm between two of them. That is filed as 01a0821a-1093, along
-  // with 01a0820d-5190 for a nested call reading a different buffer than the
-  // one it passed; both are out of scope here and neither is inherited by the
-  // reference container. The native builtins that read these views
-  // (writeI64ToRetBuf and friends) do at least treat arg0 as untrusted and
-  // reject a non-typed-array rather than casting it blindly.
+  // The constructors come from HermesInternal.intrinsics rather than from
+  // globalThis, so replacing ArrayBuffer / Uint32Array / Float64Array cannot
+  // substitute the storage. That closes the substitution half of
+  // 01a0821a-1093, and with it the only route by which touching the buffer
+  // ran script at all: indexed access on a genuine typed array calls no
+  // accessor, so a store or a load here cannot hand control to a getter that
+  // re-enters. What is left of that issue is reentrancy reached some other
+  // way, which per-activation buffers -- not pristine constructors -- would
+  // be the fix for.
+  //
+  // It also closes 01a0850f-ac3e outright, including the rounding half. F32
+  // and F64 share one arm of the result load and both go through the
+  // Float64Array, and nothing on that path rounds to f32 -- which is correct
+  // only because every producer of an f32 value has rounded it already
+  // (arithmetic and the conversions via emitFround, f32.const via a float
+  // cast, f32.load via the Float32Array view, an imported global and an
+  // import's result through the trampoline). A replaced Float64Array was the
+  // one way to get an unrounded double into an f32 slot. Measured against the
+  // old buffer, `(result f32 f32)` of 0.1 answered 0.1, where f32 can only
+  // hold 0.10000000149011612; pinned now by e2e-pristine-retbuf.wat.
+  //
+  // What this does NOT fix is 01a0820d-5190: a function reads nested-call
+  // results from its incoming buffer while passing a module-local one. Its
+  // cause is passing one buffer and reading another, which is untouched by
+  // who allocated them.
+  //
+  // The native builtins that read these views (writeI64ToRetBuf and friends)
+  // still treat arg0 as untrusted and reject a non-typed-array. Nothing
+  // reaches them with a forged view by this route any more, but the check is
+  // what stands between a future caller and a blind cast, so it stays.
   if (retBufSize_ > 0) {
-    auto *ArrayBufferCtor =
-        builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
-    auto *Uint32ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Uint32Array");
-    auto *Float64ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Float64Array");
+    auto *ArrayBufferCtor = loadIntrinsic(tlScope, "ArrayBuffer");
+    auto *Uint32ArrayCtor = loadIntrinsic(tlScope, "Uint32Array");
+    auto *Float64ArrayCtor = loadIntrinsic(tlScope, "Float64Array");
     auto *buf = emitNew(
         ArrayBufferCtor,
         {builder_.getLiteralNumber(static_cast<double>(retBufSize_))});
@@ -1736,9 +1769,14 @@ void WasmIRGen::createFunctions() {
     return builder_.getLiteralString("function");
   };
 
+  // The factory creates its own instance of topLevelVS_, so intrinsicsVar_
+  // is not filled in here -- __wasm_instantiate__ fills the instance it
+  // creates for itself. Walk to the holder once and build both arrays off it.
+  auto *descIntrinsics = loadIntrinsicsHolder();
+
   // Build exportDescs array.
   auto *exportDescsArr = emitNew(
-      builder_.createTryLoadGlobalPropertyInst("Array"),
+      loadIntrinsicFrom(descIntrinsics, "Array"),
       {builder_.getLiteralNumber(
           static_cast<double>(moduleInfo_.exports.size()))});
   for (uint32_t i = 0; i < moduleInfo_.exports.size(); ++i) {
@@ -1757,7 +1795,7 @@ void WasmIRGen::createFunctions() {
 
   // Build importDescs array.
   auto *importDescsArr = emitNew(
-      builder_.createTryLoadGlobalPropertyInst("Array"),
+      loadIntrinsicFrom(descIntrinsics, "Array"),
       {builder_.getLiteralNumber(
           static_cast<double>(moduleInfo_.imports.size()))});
   for (uint32_t i = 0; i < moduleInfo_.imports.size(); ++i) {
@@ -1961,10 +1999,9 @@ bool WasmIRGen::finalizeModule() {
   // or null for segments that have been dropped.
   if (dataSegVar_) {
     uint32_t numSegs = moduleInfo_.dataSegments.size();
-    auto *Uint8ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Uint8Array");
+    auto *Uint8ArrayCtor = loadIntrinsic(tlScope, "Uint8Array");
     auto *segsArr = emitNew(
-        builder_.createTryLoadGlobalPropertyInst("Array"),
+        loadIntrinsic(tlScope, "Array"),
         {builder_.getLiteralNumber(static_cast<double>(numSegs))});
     builder_.createStoreFrameInst(tlScope, segsArr, dataSegVar_);
 
@@ -2176,7 +2213,7 @@ bool WasmIRGen::finalizeModule() {
   if (elemSegVar_) {
     uint32_t numElemSegs = moduleInfo_.elements.size();
     auto *elemsArr = emitNew(
-        builder_.createTryLoadGlobalPropertyInst("Array"),
+        loadIntrinsic(tlScope, "Array"),
         {builder_.getLiteralNumber(static_cast<double>(numElemSegs))});
     builder_.createStoreFrameInst(tlScope, elemsArr, elemSegVar_);
 
@@ -2204,7 +2241,7 @@ bool WasmIRGen::finalizeModule() {
       // Create the segment array, one slot per entry, in segment order.
       uint32_t numEntries = seg.items.size();
       auto *segArr = emitNew(
-          builder_.createTryLoadGlobalPropertyInst("Array"),
+          loadIntrinsic(tlScope, "Array"),
           {builder_.getLiteralNumber(static_cast<double>(numEntries))});
 
       for (uint32_t i = 0; i < numEntries; ++i) {
@@ -2392,8 +2429,8 @@ bool WasmIRGen::finalizeModule() {
   // internal fields through the wasmLinkTable brand check, so there is no
   // publication left to make and no forgeable copy of the ABI to leak.
   // Loaded lazily: only an externref table export needs the constructor now,
-  // and reading globalThis.WebAssembly.Table when nothing will use it would
-  // run a user getter for nothing.
+  // so a module without one emits neither the holder load nor the property
+  // reads.
   Value *wasmTableCtor = nullptr;
 
   for (const auto &exp : moduleInfo_.exports) {
@@ -2446,12 +2483,8 @@ bool WasmIRGen::finalizeModule() {
     // externref work, not with this change. An IMPORTED externref table
     // cannot link at all (no object can satisfy the declaration), so only the
     // declared limits are used.
-    if (!wasmTableCtor) {
-      auto *wasmObj =
-          builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-      wasmTableCtor = builder_.createLoadPropertyInst(
-          wasmObj, builder_.getLiteralString("Table"));
-    }
+    if (!wasmTableCtor)
+      wasmTableCtor = loadWasmIntrinsic(tlScope, "Table");
     auto *descriptor = builder_.createAllocObjectLiteralInst({});
     builder_.createStorePropertyStrictInst(
         builder_.getLiteralString("externref"),
@@ -2831,9 +2864,16 @@ Function *WasmIRGen::createExportWrapper(
       //
       // That is a claim about the ARRAY, not about the reads that fill it.
       // The numeric reads below are ordinary indexed property loads on
-      // rbI/rbF, which are built from replaceable globals -- see the retBuf
-      // view creation in createFunctions(), where that is written out in
-      // full. It is filed as 01a0821a-1093 and is not fixed here.
+      // rbI/rbF, which are genuine typed arrays built from the pristine
+      // constructors -- see the retBuf view creation in createFunctions().
+      // An indexed load on one of those runs no script, so nothing can
+      // substitute a result or re-enter between two of them here.
+      //
+      // F32 and F64 share one arm of the read below and both go through the
+      // Float64Array, which does not round. That is correct because every
+      // producer of an f32 value rounds already, and a replaced Float64Array
+      // was the one way to get an unrounded double into an f32 slot -- see
+      // the retbuf view creation in createFunctions().
       auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
       llvh::SmallVector<Value *, 8> resultVals;
       resultVals.reserve(funcType.results.size());
@@ -6404,9 +6444,7 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
           descriptor,
           builder_.getLiteralString("maximum"));
     }
-    auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-    auto *memCtor = builder_.createLoadPropertyInst(
-        wasmObj, builder_.getLiteralString("Memory"));
+    auto *memCtor = loadWasmIntrinsic(tlScope, "Memory");
     auto *memObj = emitNew(memCtor, {descriptor});
     builder_.createStoreFrameInst(tlScope, memObj, memObjVar_);
     // Take the buffer out of the memory's internal field, through the same
@@ -6420,12 +6458,14 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     // cross-module: wasmLinkMemory would hand an importer a buffer that was
     // provably not this module's linear memory.
     //
-    // The brand check CAN fail here: `globalThis.WebAssembly.Memory` is an
-    // ordinary property and script may replace it with a constructor that
-    // returns anything. Without the branch, `.buffer` yielded undefined,
-    // `new Uint8Array(undefined)` gave a zero-length view, and instantiation
-    // SUCCEEDED with a memory of no pages -- every access silently out of
-    // bounds. Report it by name instead.
+    // The constructor is the pristine WebAssembly.Memory out of
+    // HermesInternal.intrinsics, so what used to make this branch reachable
+    // -- a replaced `globalThis.WebAssembly.Memory` returning anything at
+    // all -- is closed. The branch stays as the named diagnostic for a link
+    // failure, because what it replaced was silence: without it `.buffer`
+    // yielded undefined, `new Uint8Array(undefined)` gave a zero-length
+    // view, and instantiation SUCCEEDED with a memory of no pages, every
+    // access silently out of bounds.
     auto *linked = helpers_.emitLinkMemory(memObj);
     auto *ctorFunc = builder_.getInsertionBlock()->getParent();
     auto *ctorBadBB = builder_.createBasicBlock(ctorFunc);
@@ -6444,13 +6484,19 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     builder_.createUnreachableInst();
     builder_.setInsertionBlock(ctorOkBB);
 
-    // The brand is not the whole of it. A hostile constructor can return a
-    // GENUINE WebAssembly.Memory with limits of its own choosing, and the
-    // declaration's limits are compile-time constants of what this module
-    // ASKED FOR, not of what came back. Checking only the brand was the same
-    // "validate one object, use another" shape one level down. Reproduced
-    // before this check existed: declare `(memory 1 4)`, return a memory
-    // built with `{initial: 1, maximum: 2}`, and the module's memory.grow --
+    // The brand is not the whole of it, and a pristine constructor does not
+    // make it so. The limits a construction honours come out of a DESCRIPTOR
+    // built just above with ordinary strict stores, and those walk the
+    // prototype chain: an accessor named `initial` or `maximum` installed on
+    // Object.prototype swallows the store and answers the constructor's read
+    // with a number of its own choosing. The result is a GENUINE
+    // WebAssembly.Memory with limits nobody declared, while the declaration's
+    // limits are compile-time constants of what this module ASKED FOR.
+    // Checking only the brand was the same "validate one object, use another"
+    // shape one level down. Reproduced before this check existed, then by a
+    // replaced constructor and now by that descriptor accessor: declare
+    // `(memory 1 4)`, obtain a memory built with `{initial: 1, maximum: 2}`,
+    // and the module's memory.grow --
     // which uses the compile-time literal 4 for a defined memory -- grows it
     // to four pages, past the substituted object's own maximum, leaving
     // maxPages_ at 2 with a four-page buffer:
@@ -6467,10 +6513,11 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     // supplied memory satisfy a declaration", it is "did the constructor
     // build the memory this module asked for". A genuine construction always
     // yields exactly the requested pages, and exactly the requested maximum
-    // or -1 when none was requested, so anything else means the descriptor or
-    // the constructor was interfered with. (The descriptor is reachable too:
-    // it is a fresh object literal, and its `initial`/`maximum` stores walk
-    // the prototype chain, so a setter on Object.prototype can rewrite them.)
+    // or -1 when none was requested, so anything else means the descriptor
+    // was interfered with. The constructor can no longer be: it comes from
+    // HermesInternal.intrinsics. The descriptor still can, which is what
+    // keeps this check load-bearing -- see
+    // test/wasm/e2e-pristine-descriptor.wat.
     auto *actualPages = builder_.createLoadPropertyInst(
         linked, builder_.getLiteralNumber(0));
     auto *actualMax = builder_.createLoadPropertyInst(
@@ -6508,7 +6555,7 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
   } else {
     // No memory at all -- only reached if createMemoryViews() is called
     // without a memory, which hasMemory guards against.
-    auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+    auto *abCtor = loadIntrinsic(tlScope, "ArrayBuffer");
     buffer = emitNew(abCtor, {builder_.getLiteralNumber(0)});
   }
 
@@ -6524,10 +6571,32 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
       "Float64Array",
   };
   for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
-    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *ctor = loadIntrinsic(tlScope, ctorNames[i]);
     auto *view = emitNew(ctor, {buffer});
     builder_.createStoreFrameInst(tlScope, view, memViewVars_[i]);
   }
+}
+
+Value *WasmIRGen::loadIntrinsicsHolder() {
+  return builder_.createLoadPropertyInst(
+      builder_.createTryLoadGlobalPropertyInst("HermesInternal"),
+      builder_.getLiteralString("intrinsics"));
+}
+
+Value *WasmIRGen::loadIntrinsicFrom(Value *holder, llvh::StringRef name) {
+  return builder_.createLoadPropertyInst(
+      holder, builder_.getLiteralString(name));
+}
+
+Value *WasmIRGen::loadIntrinsic(Instruction *scope, llvh::StringRef name) {
+  return loadIntrinsicFrom(
+      builder_.createLoadFrameInst(scope, intrinsicsVar_), name);
+}
+
+Value *WasmIRGen::loadWasmIntrinsic(Instruction *scope, llvh::StringRef name) {
+  auto *wasmIntrinsics = loadIntrinsic(scope, "WebAssembly");
+  return builder_.createLoadPropertyInst(
+      wasmIntrinsics, builder_.getLiteralString(name));
 }
 
 Value *WasmIRGen::loadMemView(MemView view) {
@@ -7383,7 +7452,7 @@ void WasmIRGen::onMemoryGrow() {
       "Float64Array",
   };
   for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
-    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *ctor = loadIntrinsic(parentScopeInst_, ctorNames[i]);
     auto *view = emitNew(ctor, {result});
     builder_.createStoreFrameInst(parentScopeInst_, view, memViewVars_[i]);
   }
@@ -7550,12 +7619,13 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       // import path uses, and the arrays are JSArrays by construction, so no
       // wasmCheckTableArrays call is needed.
       //
-      // The brand check CAN fail here: `globalThis.WebAssembly.Table` is an
-      // ordinary property and script may replace it with a constructor that
-      // returns anything. It is branched on for the diagnostic, not for
-      // safety -- without the branch the null result reaches an indexed load
-      // and reports "Cannot read property 0 of null", which names nothing and
-      // points at generated code.
+      // The constructor is the pristine WebAssembly.Table out of
+      // HermesInternal.intrinsics, so the route that used to make this branch
+      // reachable -- a replaced `globalThis.WebAssembly.Table` returning
+      // anything at all -- is closed. It stays because it is branched on for
+      // the diagnostic, not for safety: without it a null result reaches an
+      // indexed load and reports "Cannot read property 0 of null", which
+      // names nothing and points at generated code.
       auto *descriptor = builder_.createAllocObjectLiteralInst({});
       builder_.createStorePropertyStrictInst(
           builder_.getLiteralString("anyfunc"),
@@ -7570,9 +7640,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             descriptor,
             builder_.getLiteralString("maximum"));
       }
-      auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-      auto *tableCtor = builder_.createLoadPropertyInst(
-          wasmObj, builder_.getLiteralString("Table"));
+      auto *tableCtor = loadWasmIntrinsic(tlScope, "Table");
       auto *tableObj = emitNew(tableCtor, {descriptor});
       builder_.createStoreFrameInst(tlScope, tableObj, tableObjVars_[tblIdx]);
       auto *linked =
@@ -7601,12 +7669,15 @@ void WasmIRGen::createTables(Instruction *tlScope) {
           linked, builder_.getLiteralNumber(2));
 
       // The brand is not the whole of it, exactly as for a defined memory
-      // (createMemoryViews). A hostile `globalThis.WebAssembly.Table` can
-      // return a GENUINE WebAssembly.Table with limits of its own choosing,
-      // and the declaration's limits are compile-time constants of what this
-      // module ASKED FOR, not of what came back. Reproduced against
-      // `(table 1 2 funcref)` handed a genuine Table built with
-      // `{initial: 1, maximum: 1}`:
+      // (createMemoryViews), and for the same reason a pristine constructor
+      // does not settle: the limits come out of a DESCRIPTOR built just above
+      // with ordinary strict stores, which walk the prototype chain, so an
+      // `initial`/`maximum` accessor on Object.prototype can answer the
+      // constructor's read with a number of its own choosing. The result is a
+      // GENUINE WebAssembly.Table with limits nobody declared, while the
+      // declaration's limits are compile-time constants of what this module
+      // ASKED FOR. Reproduced against `(table 1 2 funcref)` yielding a genuine
+      // Table built with `{initial: 1, maximum: 1}`:
       //
       //   instantiation: linked
       //   wasm table.grow(1) -> 1 ; t.length now 2
@@ -7621,9 +7692,8 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       // declaration" but "did the constructor build the table this module
       // asked for". A genuine construction always yields exactly the requested
       // entries and exactly the requested maximum, or none, so anything else
-      // means the constructor or the descriptor was interfered with -- and the
-      // descriptor is reachable too, being a fresh object literal whose
-      // `initial`/`maximum` stores walk the prototype chain.
+      // means the descriptor was interfered with. The constructor can no
+      // longer be: it comes from HermesInternal.intrinsics.
       //
       // Both numbers are compared, each with its own branch: a check on only
       // one of them would let the other through.
@@ -7668,10 +7738,11 @@ void WasmIRGen::createTables(Instruction *tlScope) {
           tlScope, exportedArr, tableExportVars_[tblIdx]);
     } else {
       // externref tables are not built by the Table constructor, so keep the
-      // plain-array backing. These come from globalThis.Array, which script
-      // can replace, so validate once here to let call_indirect cast them
+      // plain-array backing. These come from the pristine Array, so they are
+      // JSArrays by construction; wasmCheckTableArrays stays as the one place
+      // that establishes it, which is what lets call_indirect cast them
       // without re-checking on every indirect call.
-      auto *arrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+      auto *arrayCtor = loadIntrinsic(tlScope, "Array");
       funcsArr = emitNew(arrayCtor, {sizeVal});
       builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
       typesArr = emitNew(arrayCtor, {sizeVal});

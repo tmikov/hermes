@@ -3,10 +3,12 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; A DEFINED table is built by calling `globalThis.WebAssembly.Table`, which is
-;; an ordinary property script may replace. The brand check that Task 4 added
-;; establishes that what came back is a genuine WebAssembly.Table -- and stops
-;; there. It says nothing about the table's LIMITS, which the module's own
+;; A DEFINED table is built by calling WebAssembly.Table. The constructor now
+;; comes from HermesInternal.intrinsics.WebAssembly, so replacing
+;; globalThis.WebAssembly.Table no longer decides what a module's table is --
+;; but the DESCRIPTOR handed to it is still an ordinary object, which is what
+;; the rows below drive. The brand check that Task 4 added establishes that
+;; what came back is a genuine WebAssembly.Table -- and stops there. It says nothing about the table's LIMITS, which the module's own
 ;; `table.grow` does not consult: for a defined table the maximum is a
 ;; compile-time literal, so a substituted table with a smaller maximum of its
 ;; own is grown straight past it.
@@ -27,9 +29,9 @@
 ;; question is not "does the supplied table satisfy a declaration" but "did the
 ;; constructor build the table this module asked for", and a genuine
 ;; construction always yields exactly the requested entries and exactly the
-;; requested maximum, or none at all. The descriptor is reachable as well as
-;; the constructor -- it is a fresh object literal whose `initial`/`maximum`
-;; stores walk the prototype chain -- and the same comparison closes that too.
+;; requested maximum, or none at all. The descriptor is what remains reachable
+;; -- it is a fresh object literal whose `initial`/`maximum` stores walk the
+;; prototype chain -- and this comparison is what closes it.
 
 ;; REQUIRES: wasm
 
@@ -49,17 +51,23 @@
 ;; the rows below fail.
 ;; CHECK: honest: size 1, call0 7, t.length 1
 
+;; Replacing the constructor decides nothing; the module builds from the
+;; pristine one. The second line proves the replacement would have been used
+;; by anything that read it.
+;; CHECK-NEXT: replaced Table constructor: size 1, call0 7
+;; CHECK-NEXT: replaced Table constructor was live: true
+
 ;; Each of the three differs from `(table 1 2 funcref)` in a different place,
 ;; and each gets its own row: a check comparing only the entry count or only
 ;; the maximum would let the other through.
-;; CHECK-NEXT: substituted 1 entry, no maximum: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
-;; CHECK-NEXT: substituted 1 entry, maximum 1: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
-;; CHECK-NEXT: substituted 2 entries, maximum 2: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
+;; CHECK-NEXT: descriptor said 1 entry, no maximum: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
+;; CHECK-NEXT: descriptor said 1 entry, maximum 1: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
+;; CHECK-NEXT: descriptor said 2 entries, maximum 2: LinkError: WebAssembly.Table did not construct a table with this module's declared limits for table 0
 
-;; A substitute that matches the declaration exactly still links and still
-;; works -- the check refuses a DIFFERENT table, not every replaced
-;; constructor.
-;; CHECK-NEXT: substituted exactly as declared: size 1, call0 7
+;; A descriptor that matches the declaration exactly still links and still
+;; works -- the check refuses a DIFFERENT table, not every tampered
+;; descriptor.
+;; CHECK-NEXT: descriptor said exactly what was declared: size 1, call0 7
 
 ;; The state the check exists to prevent, measured on the far side of it: the
 ;; module's table.grow must never be able to take the table past the maximum

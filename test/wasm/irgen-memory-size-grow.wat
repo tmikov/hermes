@@ -37,9 +37,14 @@
 ;; CHECK:   BinaryStrictlyEqualInst (:any) %{{.*}}, -1: number
 ;; CHECK:   CondBranchInst
 ;; On success, create new typed array views from the returned ArrayBuffer.
-;; CHECK:   TryLoadGlobalPropertyInst (:any) globalObject: object, "Int8Array": string
+;; The constructors come from the cached HermesInternal.intrinsics holder, not
+;; from globalThis: memory.grow rebuilds all eight views at run time, and a
+;; replaceable constructor here would hand the module's linear memory to
+;; script on every grow.
+;; CHECK:   LoadFrameInst (:any) %{{.*}}, [%VS0.intrinsics]: any
+;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "Int8Array": string
 ;; CHECK:   StoreFrameInst %{{.*}}, %{{.*}}, [%VS0.HEAP8]: any
-;; CHECK:   TryLoadGlobalPropertyInst (:any) globalObject: object, "Uint8Array": string
+;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "Uint8Array": string
 ;; CHECK:   StoreFrameInst %{{.*}}, %{{.*}}, [%VS0.HEAPU8]: any
 ;; The phi merges -1 (failure) with oldPages (success).
 ;; CHECK:   PhiInst (:number) -1: number, %BB{{[0-9]+}}, %{{.*}}, %BB{{[0-9]+}}

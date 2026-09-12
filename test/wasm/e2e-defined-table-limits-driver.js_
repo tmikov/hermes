@@ -17,27 +17,57 @@ var e = new WebAssembly.Instance(mod).exports;
 print('honest: size ' + e.size() + ', call0 ' + e.call0() +
       ', t.length ' + e.t.length);
 
-// globalThis.WebAssembly.Table is an ordinary property. What comes back here
-// is a GENUINE WebAssembly.Table -- the brand check passes -- built with
-// limits of the substitute's choosing rather than the module's.
-function withSubstitute(label, descriptor) {
-  var saved = WebAssembly.Table;
-  WebAssembly.Table = function () { return new saved(descriptor); };
+// A replaced constructor is ignored: createTables() reads the constructor
+// from HermesInternal.intrinsics.WebAssembly, not off the namespace object.
+var savedCtor = WebAssembly.Table;
+var replacementUsed = false;
+WebAssembly.Table = function () { replacementUsed = true; return {}; };
+try {
+  var rex = new WebAssembly.Instance(mod).exports;
+  print('replaced Table constructor: size ' + rex.size() +
+        ', call0 ' + rex.call0());
+} catch (err) {
+  print('replaced Table constructor: ' + err.name + ': ' + err.message);
+}
+new WebAssembly.Table({element: 'anyfunc', initial: 1});
+print('replaced Table constructor was live: ' + replacementUsed);
+WebAssembly.Table = savedCtor;
+
+// The constructor is out of reach; the DESCRIPTOR generated code hands it is
+// not. It is a fresh object literal, and its stores walk the prototype chain,
+// so accessors installed here swallow what the module wrote and answer the
+// constructor's reads. What comes back is a GENUINE WebAssembly.Table -- the
+// brand check passes -- built to limits of this driver's choosing rather than
+// the module's.
+//
+// Nothing inside these accessors assigns to another object: every ordinary
+// object inherits from Object.prototype, so that would re-enter them.
+function withDescriptor(label, initialVal, maximumVal) {
+  var installed = [];
+  function install(name, value) {
+    Object.defineProperty(Object.prototype, name, {
+      get: function () { return value; },
+      set: function (v) {},
+      configurable: true,
+    });
+    installed.push(name);
+  }
+  install('initial', initialVal);
+  install('maximum', maximumVal);
   try {
     var ex = new WebAssembly.Instance(mod).exports;
     print(label + ': size ' + ex.size() + ', call0 ' + ex.call0());
   } catch (err) {
     print(label + ': ' + err.name + ': ' + err.message);
   }
-  WebAssembly.Table = saved;
+  for (var i = 0; i < installed.length; i++)
+    delete Object.prototype[installed[i]];
 }
-withSubstitute('substituted 1 entry, no maximum', {element: 'anyfunc', initial: 1});
-withSubstitute('substituted 1 entry, maximum 1',
-               {element: 'anyfunc', initial: 1, maximum: 1});
-withSubstitute('substituted 2 entries, maximum 2',
-               {element: 'anyfunc', initial: 2, maximum: 2});
-withSubstitute('substituted exactly as declared',
-               {element: 'anyfunc', initial: 1, maximum: 2});
+// `undefined` for the maximum is how the descriptor spells "no maximum".
+withDescriptor('descriptor said 1 entry, no maximum', 1, undefined);
+withDescriptor('descriptor said 1 entry, maximum 1', 1, 1);
+withDescriptor('descriptor said 2 entries, maximum 2', 2, 2);
+withDescriptor('descriptor said exactly what was declared', 1, 2);
 
 // The module's own table.grow uses the compile-time maximum, 2. On the honest
 // table that agrees with the object's own maxSize_, so growing to 2 succeeds

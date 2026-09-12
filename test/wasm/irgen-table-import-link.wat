@@ -33,11 +33,11 @@
 ;; element type as the second argument -- the element type is no longer read
 ;; off the supplied object, which is what let an externref declaration borrow
 ;; a funcref table's storage.
-;; CHECK: %12 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %7: any, true: boolean
+;; CHECK: %15 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %10: any, true: boolean
 
 ;; Null means "not a WebAssembly.Table", and gets the message that says so.
-;; CHECK-NEXT: %13 = BinaryStrictlyEqualInst (:any) %12: any, null: null
-;; CHECK-NEXT: CondBranchInst %13: any, %BB5, %BB7
+;; CHECK-NEXT: %16 = BinaryStrictlyEqualInst (:any) %15: any, null: null
+;; CHECK-NEXT: CondBranchInst %16: any, %BB5, %BB7
 ;; CHECK: [HermesBuiltin.wasmLinkError]{{.*}}"import e.t is not a WebAssembly.Table": string
 
 ;; A table that IS a table but does not fit the declaration gets its own
@@ -47,24 +47,24 @@
 ;; [funcs, types, exported, max]. The current size is the storage's own
 ;; length, so it reflects every grow and cannot go stale the way a recorded
 ;; __wasm_min__ did.
-;; CHECK: %19 = LoadPropertyInst (:any) %12: any, 0: number
-;; CHECK-NEXT: %20 = LoadPropertyInst (:any) %12: any, 1: number
-;; CHECK-NEXT: %21 = LoadPropertyInst (:any) %12: any, 2: number
-;; CHECK-NEXT: %22 = LoadPropertyInst (:any) %12: any, 3: number
-;; CHECK-NEXT: %23 = LoadPropertyInst (:any) %19: any, "length": string
-;; CHECK-NEXT: %24 = BinaryGreaterThanOrEqualInst (:any) %23: any, 2: number
+;; CHECK: %22 = LoadPropertyInst (:any) %15: any, 0: number
+;; CHECK-NEXT: %23 = LoadPropertyInst (:any) %15: any, 1: number
+;; CHECK-NEXT: %24 = LoadPropertyInst (:any) %15: any, 2: number
+;; CHECK-NEXT: %25 = LoadPropertyInst (:any) %15: any, 3: number
+;; CHECK-NEXT: %26 = LoadPropertyInst (:any) %22: any, "length": string
+;; CHECK-NEXT: %27 = BinaryGreaterThanOrEqualInst (:any) %26: any, 2: number
 
 ;; The maximum that table.grow will respect is the TABLE'S, not the
 ;; declaration's -- the declaration is only an upper bound on it. The imported
 ;; object itself is recorded too, because a re-export publishes that very
 ;; object; there is nothing left to copy onto a fresh one.
-;; CHECK: StoreFrameInst %0: environment, %22: any, [%VS0.imported_table_max_0]: any
-;; CHECK-NEXT: StoreFrameInst %0: environment, %7: any, [%VS0.table_0_obj]: any
-;; CHECK-NEXT: StoreFrameInst %0: environment, %19: any, [%VS0.table_0_funcs]: any
-;; CHECK-NEXT: StoreFrameInst %0: environment, %20: any, [%VS0.table_0_types]: any
-;; CHECK-NEXT: StoreFrameInst %0: environment, %21: any, [%VS0.table_0_exported]: any
+;; CHECK: StoreFrameInst %0: environment, %25: any, [%VS0.imported_table_max_0]: any
+;; CHECK-NEXT: StoreFrameInst %0: environment, %10: any, [%VS0.table_0_obj]: any
+;; CHECK-NEXT: StoreFrameInst %0: environment, %22: any, [%VS0.table_0_funcs]: any
+;; CHECK-NEXT: StoreFrameInst %0: environment, %23: any, [%VS0.table_0_types]: any
+;; CHECK-NEXT: StoreFrameInst %0: environment, %24: any, [%VS0.table_0_exported]: any
 
 ;; The declared maximum is checked against the table's own, and "no maximum"
 ;; (-1) does not satisfy a declaration that has one.
-;; CHECK: %59 = BinaryStrictlyEqualInst (:any) %22: any, -1: number
-;; CHECK: %61 = BinaryLessThanOrEqualInst (:any) %22: any, 10: number
+;; CHECK: %65 = BinaryStrictlyEqualInst (:any) %25: any, -1: number
+;; CHECK: %67 = BinaryLessThanOrEqualInst (:any) %25: any, 10: number

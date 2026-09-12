@@ -1,0 +1,77 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-pristine-memviews.wat. The module is loaded AFTER the
+// globals are replaced: the eight views are built during instantiation.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+
+var ctorCalls = 0;
+
+// Poisoned storage. A float load reads this and then narrows the result to
+// `number` under a TRUSTED narrow, so a string here is a lie the rest of the
+// pipeline is entitled to believe.
+function makePoisoned() {
+  var view = {};
+  for (var i = 0; i < 64; i++) {
+    (function(i) {
+      Object.defineProperty(view, String(i), {
+        get: function() { return 'poison'; },
+        set: function(v) {},
+        configurable: true,
+        enumerable: true,
+      });
+    })(i);
+  }
+  return view;
+}
+
+var VIEW_CTORS = [
+  'Int8Array',
+  'Uint8Array',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float32Array',
+  'Float64Array',
+];
+for (var i = 0; i < VIEW_CTORS.length; i++) {
+  globalThis[VIEW_CTORS[i]] = function(buf) {
+    ctorCalls++;
+    return makePoisoned();
+  };
+}
+globalThis.ArrayBuffer = function(n) { ctorCalls++; return {}; };
+
+var probe = new Float64Array(new ArrayBuffer(64));
+print('replacement is live: ' + (probe[0] === 'poison' && ctorCalls === 2));
+
+ctorCalls = 0;
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+print('module called the replaced constructors: ' + ctorCalls);
+
+inst.exports.storeF64(-3.5);
+var f = inst.exports.loadF64();
+print('f64 round trip: typeof ' + typeof f + ', === -3.5: ' + (f === -3.5));
+
+inst.exports.storeI32(1234);
+var n = inst.exports.loadI32();
+print('i32 round trip: typeof ' + typeof n + ', === 1234: ' + (n === 1234));
+
+// memory.grow rebuilds all eight views, from the same holder.
+ctorCalls = 0;
+var old = inst.exports.grow(1);
+print('grow returned old size: ' + (old === 1));
+print('module called the replaced constructors after grow: ' + ctorCalls);
+
+var f2 = inst.exports.loadF64();
+print(
+  'f64 survives grow: typeof ' + typeof f2 + ', === -3.5: ' + (f2 === -3.5));
+
+print('done');

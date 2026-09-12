@@ -717,6 +717,14 @@ class WasmIRGen {
   /// or null (dropped). Only populated if the module has element segments.
   Variable *elemSegVar_ = nullptr;
 
+  /// Variable in the top-level scope holding HermesInternal.intrinsics, the
+  /// engine's holder of pristine constructors. Every constructor this module
+  /// allocates through is read from here rather than from globalThis, so a
+  /// script that replaces a global cannot redirect one of the module's
+  /// allocations. Stored once at the top of __wasm_instantiate__ and read via
+  /// loadIntrinsic()/loadWasmIntrinsic().
+  Variable *intrinsicsVar_ = nullptr;
+
   /// Per-module return buffer variables. Only created if the module uses i64
   /// or multi-value returns. The buffer is an ArrayBuffer shared by all
   /// functions. retBufIVar_ is a Uint32Array view, retBufFVar_ is a
@@ -915,6 +923,32 @@ class WasmIRGen {
   /// Check if the current insertion block is terminated (ends with a
   /// terminator instruction).
   bool isCurrentBlockTerminated();
+
+  /// Emit the walk to the HermesInternal.intrinsics holder itself. Only for
+  /// code emitted OUTSIDE __wasm_instantiate__ -- the module factory, which
+  /// creates its own instance of topLevelVS_ and so cannot read the
+  /// intrinsicsVar_ slot that __wasm_instantiate__ fills in. Everything
+  /// inside instantiation goes through loadIntrinsic() instead, which reads
+  /// the cached Variable.
+  Value *loadIntrinsicsHolder();
+
+  /// Emit a load of the pristine constructor \p name off an already-loaded
+  /// \p holder.
+  Value *loadIntrinsicFrom(Value *holder, llvh::StringRef name);
+
+  /// Emit a load of the pristine constructor \p name from
+  /// HermesInternal.intrinsics. Use this instead of
+  /// createTryLoadGlobalPropertyInst for any constructor generated code
+  /// allocates through: a global is replaceable, this is not.
+  /// \param scope the scope to read intrinsicsVar_ from -- the top-level
+  ///   scope instruction during instantiation, parentScopeInst_ from inside
+  ///   a function body.
+  Value *loadIntrinsic(Instruction *scope, llvh::StringRef name);
+
+  /// Same as loadIntrinsic(), for a constructor under the WebAssembly
+  /// sub-holder (Memory, Table, ...). These live one level down because their
+  /// names would be ambiguous beside the ECMAScript ones.
+  Value *loadWasmIntrinsic(Instruction *scope, llvh::StringRef name);
 
   /// Load a memory view variable from the top-level scope.
   /// \return the LoadFrameInst for the view.

@@ -448,6 +448,7 @@ STR(revocable, "revocable")
 STR(revoke, "revoke")
 
 STR(HermesInternal, "HermesInternal")
+STR(intrinsics, "intrinsics")
 STR(detachArrayBuffer, "detachArrayBuffer")
 STR(createHeapSnapshot, "createHeapSnapshot")
 STR(hasPromise, "hasPromise")

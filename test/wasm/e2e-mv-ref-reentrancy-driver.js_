@@ -54,58 +54,26 @@ print(
   "shape 1: externref is the outer activation's: " + (r1[1] === outerObject));
 
 // ---------------------------------------------------------------- shape 2 --
+//
+// The reentrancy this section used to drive is no longer constructible.
+// Replacing globalThis.Uint32Array / Float64Array before instantiation gave a
+// getter and a setter control between two reference stores and again between
+// two reference loads, because the numeric buffer sat between them and was
+// built from those globals. The buffer now comes from the pristine
+// constructors under HermesInternal.intrinsics, so an indexed access on it
+// runs no script at all and there is no gap left to re-enter from -- nor any
+// way to force a GC while a result is outstanding, which is what the WeakRef
+// machinery here used to do.
+//
+// What is asserted instead is that the replacements really are not consulted,
+// which is a property that CAN fail: before the constructors became pristine,
+// both of these fired. The reference results are still checked, because the
+// container's indexing has to survive a signature with an i32 between two
+// references. The lost reentrancy and GC probes are recorded on dz
+// 01a0904b-398b.
 
-var inst2 = null;
 var taSets = 0;
 var taGets = 0;
-var storeGapReentries = 0;
-var loadGapReentries = 0;
-var collections = 0;
-var controlCollected = false;
-var taDepth = 0;
-var reentrantA = {tag: 'reentrantA'};
-var reentrantB = {tag: 'reentrantB'};
-
-// Runs a whole second activation of `mixed`, from inside the outer one.
-function reenter() {
-  inst2.exports.setE0(reentrantA);
-  inst2.exports.setE1(reentrantB);
-  inst2.exports.mixed();
-}
-
-// `mixed` lays out externref, i32, externref, so slot index 1 is the i32 and
-// its accessors are the gap between the two reference stores and, later,
-// between the two reference loads.
-function onTypedArraySet(i) {
-  taSets++;
-  if (i === 1 && inst2 !== null && taDepth === 0) {
-    taDepth++;
-    storeGapReentries++;
-    reenter();
-    taDepth--;
-  }
-}
-
-function onTypedArrayGet(i) {
-  taGets++;
-  if (i === 1 && inst2 !== null && taDepth === 0) {
-    taDepth++;
-    // The producing frame has returned and cleared its globals, and the
-    // driver dropped its own references, so the second externref is still
-    // sitting in the container waiting to be read.
-    collections++;
-    gc();
-    // The control was created next to the two transported objects, handed to
-    // nobody, and its WeakRef was made in the same place theirs were. If it
-    // is gone here, a collection at this point really does collect -- which
-    // is what makes the survival of the transported reference mean something
-    // rather than meaning that nothing was collected at all.
-    controlCollected = controlWeak.deref() === undefined;
-    loadGapReentries++;
-    reenter();
-    taDepth--;
-  }
-}
 
 function makeFakeTypedArray() {
   var store = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -113,8 +81,8 @@ function makeFakeTypedArray() {
   for (var i = 0; i < store.length; i++) {
     (function (i) {
       Object.defineProperty(view, String(i), {
-        get: function () { onTypedArrayGet(i); return store[i]; },
-        set: function (v) { store[i] = v; onTypedArraySet(i); },
+        get: function () { taGets++; return store[i]; },
+        set: function (v) { store[i] = v; taSets++; },
         configurable: true,
         enumerable: true,
       });
@@ -123,68 +91,30 @@ function makeFakeTypedArray() {
   return view;
 }
 
-// Installed BEFORE instantiation: the buffers are built during instantiation
-// and kept in the module's frame, so a replacement installed afterwards would
-// never be reached.
+// Installed BEFORE instantiation, which is the timing that used to matter:
+// the buffers are built during instantiation and kept in the module's frame.
 globalThis.Uint32Array = function (buf) { return makeFakeTypedArray(); };
 globalThis.Float64Array = function (buf) { return makeFakeTypedArray(); };
 
-inst2 = new WebAssembly.Instance(
+var inst2 = new WebAssembly.Instance(
   WebAssembly.Module.fromHermesBytecode(bytes));
 
 var outer0 = {tag: 'outer0'};
 var outer1 = {tag: 'outer1'};
-var control = {tag: 'control'};
-var weak0 = new WeakRef(outer0);
-var weak1 = new WeakRef(outer1);
-var controlWeak = new WeakRef(control);
 inst2.exports.setE0(outer0);
 inst2.exports.setE1(outer1);
-outer0 = null;
-outer1 = null;
-control = null;
+var r2 = inst2.exports.mixed();
 
-// The call runs from a HOST TASK rather than here, and that is load-bearing.
-// Constructing a WeakRef calls Runtime::addToKeptObjects, which inserts the
-// target into keptObjects_ -- a STRONG JSSet (Runtime.cpp) -- and `gc()` is
-// only runtime.collect("forced"), which does not empty it. Emptying it is the
-// HOST's job: several hosts call clearKeptObjects, and nothing reachable from
-// inside a synchronous script run does. In this one it is the microtask
-// checkpoint (ConsoleHost.h), which the CLI performs after the script and
-// before it drains the task queue. So a target whose WeakRef was made here is
-// strongly held for the rest of this synchronous run, and every liveness
-// question asked inside it would answer "alive" whatever the transport did.
-setTimeout(function () {
-  var r2 = inst2.exports.mixed();
+globalThis.Uint32Array = realUint32Array;
+globalThis.Float64Array = realFloat64Array;
 
-  globalThis.Uint32Array = realUint32Array;
-  globalThis.Float64Array = realFloat64Array;
+print('shape 2: replacement typed-array setter fired: ' + (taSets > 0));
+print('shape 2: replacement typed-array getter fired: ' + (taGets > 0));
 
-  print('shape 2: typed-array setter fired: ' + (taSets > 0));
-  print('shape 2: typed-array getter fired: ' + (taGets > 0));
-  print(
-    'shape 2: reentered from both the store gap and the load gap: ' +
-      (storeGapReentries === 1 && loadGapReentries === 1));
-  print(
-    'shape 2: collected once while the results were outstanding: ' +
-      (collections === 1));
-  print(
-    'shape 2: the unrooted control was collected there: ' + controlCollected);
+// The i32 laid out between the two references. It travels in the numeric
+// buffer, which is now a genuine Uint32Array, so it comes back as written.
+print('shape 2: the i32 between them: ' + r2[1]);
 
-  // Only the reference halves are asserted. The i32 between them travels in a
-  // replaced Uint32Array through ordinary property operations, so a reentrant
-  // activation can still overwrite it and a replacement getter can still
-  // substitute it outright. That is 01a0821a-1093, it is not a reference-type
-  // defect, and this change does not close it -- so r2[1] is deliberately not
-  // checked here, and the silence must not be read as evidence it is safe.
-  print(
-    "shape 2: result 0 is the outer activation's reference: " +
-      (r2[0] === weak0.deref() && r2[0] !== undefined));
-  print(
-    "shape 2: result 2 is the outer activation's reference: " +
-      (r2[2] === weak1.deref() && r2[2] !== undefined));
-  print(
-    "shape 2: neither is the reentrant activation's: " +
-      (r2[0] !== reentrantA && r2[2] !== reentrantB));
-  print('done');
-}, 0);
+print("shape 2: result 0 is the reference that was set: " + (r2[0] === outer0));
+print("shape 2: result 2 is the reference that was set: " + (r2[2] === outer1));
+print('done');

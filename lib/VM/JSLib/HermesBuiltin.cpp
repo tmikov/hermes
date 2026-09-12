@@ -517,11 +517,17 @@ static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
 }
 
 /// The Wasm builtins receive their linear-memory view and i64 return buffer
-/// as arguments the compiler emits, but those objects are constructed in
+/// as arguments the compiler emits. Those objects used to be constructed in
 /// generated IR through the replaceable globals \c globalThis.Uint32Array /
-/// \c ArrayBuffer. Script can override those, so arg0 is untrusted and must
-/// not be cast with \c vmcast, which only asserts. \p minByteLength is the
-/// number of bytes the caller is about to touch unconditionally (0 to skip).
+/// \c ArrayBuffer, so arg0 was genuinely script's to choose; they now come
+/// from the pristine constructors under \c HermesInternal.intrinsics and no
+/// caller can hand these builtins a non-typed-array any more. The check stays
+/// rather than reverting to \c vmcast, which only asserts: it is what stands
+/// between the next caller and a wild pointer write in a Release build, and
+/// it has no reachable test left to catch its removal (dz 01a0904b-398b).
+///
+/// \p minByteLength is the number of bytes the caller is about to touch
+/// unconditionally (0 to skip).
 /// \return the attached view, or nullptr after raising a TypeError.
 static JSTypedArrayBase *wasmTypedArrayArg(
     Runtime &runtime,
@@ -941,15 +947,16 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
   return lv.newBuf.getHermesValue();
 }
 
-/// Some Wasm table and segment arrays reach these builtins through values
-/// script controls: an EXTERNREF table's three arrays are built with
-/// `new Array(n)` off globalThis.Array, which script can replace, and the
-/// element-segment arrays are built the same way. Those are untrusted and must
-/// not be cast with vmcast, which only asserts. (A FUNCREF table's arrays are
-/// the internal fields of a genuine WebAssembly.Table, established by
-/// wasmLinkTable's brand check; they are JSArrays by construction. The checked
-/// cast still runs for them -- these builtins do not know which kind they were
-/// handed -- and costs one branch on a cold path.)
+/// Every array reaching these builtins is now engine-allocated: an EXTERNREF
+/// table's three arrays and the element-segment arrays come from the pristine
+/// Array under HermesInternal.intrinsics, and a FUNCREF table's are the
+/// internal fields of a genuine WebAssembly.Table, established by
+/// wasmLinkTable's brand check. Both kinds are JSArrays by construction.
+///
+/// The checked cast stays anyway, at one branch on a cold path. It was put
+/// here when `new Array(n)` came off globalThis.Array and script could hand
+/// these builtins anything; that route is closed, which also means nothing
+/// tests this any more (dz 01a0904b-398b).
 /// \return the array, or nullptr after raising a TypeError.
 static JSArray *wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
   auto *arr = dyn_vmcast<JSArray>(v);
@@ -984,7 +991,9 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   // `hermesc --wasm` did not -- `compileWasmModule` ran `wabt::ReadBinary`
   // only -- so a module built with `wat2wasm --no-check` and compiled ahead
   // of time could call_indirect through an externref table whose arrays
-  // script chose via a replaced globalThis.Array. The cast survives that;
+  // script chose via a replaced globalThis.Array. (Those arrays now come from
+  // the pristine Array, so that half is closed on its own.) The cast survives
+  // that;
   // the reads below do NOT (see the type check). `compileWasmModule` now
   // calls `validateWasmBinary` too (H19), so both compile entry points
   // agree and this branch is unreachable through them. The check is kept
@@ -1020,13 +1029,16 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   // `getNumber()` assumes the slot holds a number, and on a funcref table it
   // does: the only writer is the funnel, which takes every id from an Exported
   // Function's WasmFuncTypeId internal property, always a wasmInternType
-  // result. It is NOT guaranteed on an externref table reached by an invalid
+  // result. It was NOT guaranteed on an externref table reached by an invalid
   // module (see the note at the top of this function): a replaced
-  // globalThis.Array can seed the types array with an object, and this line
-  // then asserts in a Debug build and reinterprets object bits as a double in
-  // a Release one. That is H19, whose fix is validation on the compile path,
-  // not a check here -- adding one would put a branch on the indirect-call hot
-  // path to compensate for a module the engine should never have accepted.
+  // globalThis.Array could seed the types array with an object, and this line
+  // then asserted in a Debug build and reinterpreted object bits as a double
+  // in a Release one. That is H19, whose fix is validation on the compile
+  // path, not a check here -- adding one would put a branch on the
+  // indirect-call hot path to compensate for a module the engine should never
+  // have accepted. The seeding route is closed independently now that the
+  // arrays come from the pristine Array, but the argument above is about
+  // where the fix belongs and is unchanged by that.
   auto typeVal = typesArr->at(runtime, static_cast<uint32_t>(index));
   int32_t actualTypeIdx = typeVal.isEmpty()
       ? -1
@@ -2065,16 +2077,19 @@ CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
   // for what is, inside the shared array, an overlapping self-copy, and smears
   // one entry across the range.
   //
-  // This is reachable, and it is not fail-closed. A FUNCREF table's three
-  // arrays travel together out of one object's internal fields, so two funcref
-  // tables share all six or none -- but an EXTERNREF table's three arrays are
-  // three independent `new Array(n)` calls off globalThis.Array, and
-  // wasmCheckTableArrays only checks that each is an array, not that they are
-  // distinct. A replaced Array constructor hands two externref tables a shared
-  // array for one role and private ones for the others; a forward copy then
-  // smears, and `table.get` hands out the wrong reference. Pinned by
-  // e2e-table-copy-alias.wat's externref section. Do not narrow this to the
-  // same-role funcs pair.
+  // Two tables sharing one array is no longer constructible from script: a
+  // FUNCREF table's three arrays travel together out of one object's internal
+  // fields, so two funcref tables share all six or none, and an EXTERNREF
+  // table's are three independent allocations from the pristine Array, which
+  // nothing can make return the same object twice. It WAS constructible --
+  // `new Array(n)` came off globalThis.Array, wasmCheckTableArrays only checks
+  // that each is an array and not that they are distinct, and a replaced
+  // constructor handed two externref tables a shared array for one role and
+  // private ones for the others; a forward copy then smeared and `table.get`
+  // handed out the wrong reference. That probe is gone with its route (dz
+  // 01a0904b-398b). Do not narrow this to the same-role funcs pair: the
+  // same-table overlap below is ordinary Wasm and needs the full comparison
+  // to be chosen correctly anyway.
   //
   // Backward is equally correct when the arrays are distinct -- order is
   // irrelevant then -- so erring towards backward costs nothing.
@@ -2346,11 +2361,13 @@ static ExecutionStatus raiseWasmLinkError(Runtime &runtime, const char *msg) {
 /// wasmCallIndirect -- on the indirect-call hot path -- cast them without
 /// re-checking.
 ///
-/// Only EXTERNREF tables still need this. Their three arrays are built with
-/// `new Array(n)` off globalThis.Array, which script can replace with anything
-/// at all. A funcref table's arrays are the internal fields of a genuine
-/// WebAssembly.Table, which wasmLinkTable below establishes by brand check, so
-/// they are JSArrays by construction.
+/// Only EXTERNREF tables are checked here. Their three arrays used to be built
+/// with `new Array(n)` off globalThis.Array, which script could replace with
+/// anything at all; they now come from the pristine Array under
+/// HermesInternal.intrinsics, so the check has no way left to fail and no test
+/// left to prove it can (dz 01a0904b-398b). A funcref table's arrays are the
+/// internal fields of a genuine WebAssembly.Table, which wasmLinkTable below
+/// establishes by brand check, so they are JSArrays by construction.
 /// wasmCheckTableArrays(funcsArr, typesArr, exportedArr).
 CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();

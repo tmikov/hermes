@@ -127,21 +127,24 @@ print('module tbl.get(2) [never written]: ' + tbl.get(2));
 print('fresh JS-API tbl.get(0): ' +
       new WebAssembly.Table({element: 'anyfunc', initial: 1}).get(0));
 
-// -- A replaced Table constructor --
-// A module's own funcref table is built with globalThis.WebAssembly.Table,
-// which script can replace. The brand check catches that too; without a branch
-// on it the failure surfaces as "Cannot read property 0 of null" from inside
-// generated code, which names nothing.
+// -- A replaced Table constructor is ignored --
+// A module's own funcref table is built with WebAssembly.Table read from
+// HermesInternal.intrinsics.WebAssembly, not off globalThis, so replacing the
+// namespace property no longer decides what the module's table is.
 var savedTableCtor = WebAssembly.Table;
-WebAssembly.Table = function () { return {}; };
+var replacementUsed = false;
+WebAssembly.Table = function () { replacementUsed = true; return {}; };
 var hijacked;
 try {
-  new WebAssembly.Instance(mod, {});
-  hijacked = 'instantiated (should not happen)';
+  var hex = new WebAssembly.Instance(mod, {}).exports;
+  hijacked = 'instantiated, tbl.get(2) = ' + hex.tbl.get(2);
 } catch (e) {
   hijacked = e.name + ': ' + e.message;
 }
+// The replacement really would have been used by anything that read it.
+new WebAssembly.Table({element: 'anyfunc', initial: 1});
 WebAssembly.Table = savedTableCtor;
 print('replaced WebAssembly.Table: ' + hijacked);
+print('replaced WebAssembly.Table was live: ' + replacementUsed);
 
 print('done');

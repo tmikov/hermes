@@ -15,23 +15,23 @@
 ;; ZERO; what the outer/inner identities buy is that a count of zero is not the
 ;; only thing standing between this test and a false pass.
 ;;
-;; SHAPE 2 -- the numeric buffer's accessors. Those buffers are still built from
-;; globalThis.Uint32Array and globalThis.Float64Array and are still read and
-;; written with ordinary property operations, so a replacement installed BEFORE
-;; instantiation gets control between two reference stores and again between
-;; two reference loads: `(result externref i32 externref)` lays the i32 out
-;; between them. Per-activation containers mean the reentrant call writes
-;; different storage, so both externrefs survive. The i32 between them does NOT
-;; -- see the driver.
+;; SHAPE 2 -- the numeric buffer's accessors. This one is no longer
+;; constructible. The buffers used to be built from globalThis.Uint32Array and
+;; globalThis.Float64Array, so a replacement installed BEFORE instantiation got
+;; control between two reference stores and again between two reference loads:
+;; `(result externref i32 externref)` lays the i32 out between them, and its
+;; accessors were the gap. The buffers now come from the pristine constructors
+;; under HermesInternal.intrinsics, so an indexed access on one runs no script
+;; and there is no gap to re-enter from -- and no way to force a GC while a
+;; result is outstanding either, which is what this section's WeakRef
+;; machinery used to do.
 ;;
-;; The reference-load gap is also where the driver forces a GC. By then the
-;; producing frame has returned and its globals are cleared, and the driver has
-;; dropped its own references, so the second externref is still sitting in the
-;; container waiting to be read. The driver runs that call from a HOST TASK,
-;; because constructing a WeakRef strongly keeps its target until the host's
-;; microtask checkpoint clears keptObjects_, and it collects an unrooted
-;; CONTROL object at the same instant: without the control, "the reference
-;; survived" and "nothing was collected" look alike.
+;; What it asserts now is that those replacements are not consulted, which is
+;; a property that CAN fail: before the constructors became pristine both
+;; accessors fired. The reference results are still checked, because the
+;; container's indexing has to survive a signature with an i32 between two
+;; references. The lost reentrancy and GC probes are recorded on dz
+;; 01a0904b-398b.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-mv-ref-reentrancy-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
@@ -85,20 +85,17 @@
 
 ;; --- Shape 2 ---
 
-;; The replacement typed arrays really are the module's buffers: both halves of
-;; the numeric path ran through them.
-;; CHECK-NEXT: shape 2: typed-array setter fired: true
-;; CHECK-NEXT: shape 2: typed-array getter fired: true
-;; CHECK-NEXT: shape 2: reentered from both the store gap and the load gap: true
-;; CHECK-NEXT: shape 2: collected once while the results were outstanding: true
+;; The replacement typed arrays are never reached: the module allocated its
+;; buffer from the pristine constructors.
+;; CHECK-NEXT: shape 2: replacement typed-array setter fired: false
+;; CHECK-NEXT: shape 2: replacement typed-array getter fired: false
 
-;; The collection at that instant really collects: an object created alongside
-;; the two transported ones, and handed to nobody, is gone.
-;; CHECK-NEXT: shape 2: the unrooted control was collected there: true
+;; The i32 laid out between the two references travels in the numeric buffer,
+;; which is a genuine Uint32Array, and comes back as written.
+;; CHECK-NEXT: shape 2: the i32 between them: 11
 
-;; Both externrefs are the outer activation's, and neither is the reentrant
-;; one's.
-;; CHECK-NEXT: shape 2: result 0 is the outer activation's reference: true
-;; CHECK-NEXT: shape 2: result 2 is the outer activation's reference: true
-;; CHECK-NEXT: shape 2: neither is the reentrant activation's: true
+;; Both externrefs come back from the per-activation container, in the right
+;; slots, past the i32 sitting between them.
+;; CHECK-NEXT: shape 2: result 0 is the reference that was set: true
+;; CHECK-NEXT: shape 2: result 2 is the reference that was set: true
 ;; CHECK-NEXT: done
