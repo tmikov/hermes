@@ -599,6 +599,11 @@ Instruction *WasmHelpers::emitIsExportedFunction(Value *value) {
       BuiltinMethod::HermesBuiltin_wasmIsExportedFunction, {value});
 }
 
+Instruction *WasmHelpers::emitFuncTypeId(Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmFuncTypeId, {value});
+}
+
 Instruction *WasmHelpers::emitAllocRefBuf(Value *slots) {
   auto *inst = builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmAllocRefBuf, {slots});

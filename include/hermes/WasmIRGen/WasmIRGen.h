@@ -689,7 +689,13 @@ class WasmIRGen {
   /// Whether internTypeIds() has run. The Variables in typeIdVars_ are created
   /// unconditionally, so their non-nullness says nothing; only this says the
   /// interning calls were actually emitted and the slots hold real ids rather
-  /// than undefined. Anything that loads a type id must assert on this.
+  /// than undefined. Anything that loads a type id FROM typeIdVars_ must
+  /// assert on this.
+  ///
+  /// It is not a precondition for comparing type ids generally. The function
+  /// import check interns the signature it expects at the check site, because
+  /// import resolution runs before internTypeIds(); that is the same string
+  /// through the same builtin, so the two agree without sharing a slot.
   bool internedTypeIds_ = false;
 
   /// tagVars_[i] holds the object identifying tag i. Wasm tag identity is
@@ -704,7 +710,9 @@ class WasmIRGen {
   void createTagObjects(Instruction *tlScope);
 
   /// Emit the interning calls that populate typeIdVars_. Must run before
-  /// anything that stores or compares a type id.
+  /// anything that reads typeIdVars_. Not before every type-id comparison:
+  /// the function import check interns the signature it expects at the check
+  /// site, because import resolution runs first.
   void internTypeIds(Instruction *tlScope);
 
   /// Variable holding a JS Array of data segments in the top-level scope.

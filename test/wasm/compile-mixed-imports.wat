@@ -181,7 +181,7 @@
 ;; CHECK-NEXT:   %13 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import env.log": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB4:
-;; CHECK-NEXT:   %15 = LoadPropertyInst (:any) %10: any, "__wasm_type__": string
+;; CHECK-NEXT:   %15 = CallBuiltinInst (:any) [HermesBuiltin.wasmFuncTypeId]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %10: any
 ;; CHECK-NEXT:   %16 = BinaryStrictlyEqualInst (:any) %15: any, undefined: undefined
 ;; CHECK-NEXT:         CondBranchInst %16: any, %BB5, %BB6
 ;; CHECK-NEXT: %BB5:
@@ -189,278 +189,276 @@
 ;; CHECK-NEXT:   %19 = BinaryStrictlyEqualInst (:any) %18: string, "function": string
 ;; CHECK-NEXT:         CondBranchInst %19: any, %BB7, %BB8
 ;; CHECK-NEXT: %BB6:
-;; CHECK-NEXT:   %21 = BinaryStrictlyNotEqualInst (:any) %15: any, "func:i:": string
-;; CHECK-NEXT:         CondBranchInst %21: any, %BB8, %BB9
+;; CHECK-NEXT:   %21 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:": string
+;; CHECK-NEXT:   %22 = BinaryStrictlyNotEqualInst (:any) %15: any, %21: any
+;; CHECK-NEXT:         CondBranchInst %22: any, %BB8, %BB9
 ;; CHECK-NEXT: %BB7:
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %10: any, [%VS0.import_func_0]: any
-;; CHECK-NEXT:   %24 = LoadPropertyInst (:any) %4: any, "config": string
-;; CHECK-NEXT:   %25 = BinaryStrictlyEqualInst (:any) %24: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %25: any, %BB10, %BB11
+;; CHECK-NEXT:   %25 = LoadPropertyInst (:any) %4: any, "config": string
+;; CHECK-NEXT:   %26 = BinaryStrictlyEqualInst (:any) %25: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %26: any, %BB10, %BB11
 ;; CHECK-NEXT: %BB8:
-;; CHECK-NEXT:   %27 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.log is not a function": string
+;; CHECK-NEXT:   %28 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.log is not a function": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB9:
-;; CHECK-NEXT:   %29 = TypeOfInst (:string) %10: any
-;; CHECK-NEXT:   %30 = BinaryStrictlyEqualInst (:any) %29: string, "function": string
-;; CHECK-NEXT:         CondBranchInst %30: any, %BB7, %BB8
+;; CHECK-NEXT:   %30 = TypeOfInst (:string) %10: any
+;; CHECK-NEXT:   %31 = BinaryStrictlyEqualInst (:any) %30: string, "function": string
+;; CHECK-NEXT:         CondBranchInst %31: any, %BB7, %BB8
 ;; CHECK-NEXT: %BB10:
-;; CHECK-NEXT:   %32 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace config": string
+;; CHECK-NEXT:   %33 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace config": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB11:
-;; CHECK-NEXT:   %34 = LoadPropertyInst (:any) %24: any, "max_size": string
-;; CHECK-NEXT:   %35 = BinaryStrictlyEqualInst (:any) %34: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %35: any, %BB12, %BB13
+;; CHECK-NEXT:   %35 = LoadPropertyInst (:any) %25: any, "max_size": string
+;; CHECK-NEXT:   %36 = BinaryStrictlyEqualInst (:any) %35: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %36: any, %BB12, %BB13
 ;; CHECK-NEXT: %BB12:
-;; CHECK-NEXT:   %37 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import config.max_size": string
+;; CHECK-NEXT:   %38 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import config.max_size": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB13:
-;; CHECK-NEXT:   %39 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkGlobal]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %34: any, 0: number, false: boolean
-;; CHECK-NEXT:   %40 = BinaryStrictlyEqualInst (:any) %39: any, null: null
-;; CHECK-NEXT:         CondBranchInst %40: any, %BB18, %BB14
+;; CHECK-NEXT:   %40 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkGlobal]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %35: any, 0: number, false: boolean
+;; CHECK-NEXT:   %41 = BinaryStrictlyEqualInst (:any) %40: any, null: null
+;; CHECK-NEXT:         CondBranchInst %41: any, %BB18, %BB14
 ;; CHECK-NEXT: %BB14:
-;; CHECK-NEXT:   %42 = BinaryStrictlyEqualInst (:any) %39: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %42: any, %BB16, %BB19
+;; CHECK-NEXT:   %43 = BinaryStrictlyEqualInst (:any) %40: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %43: any, %BB16, %BB19
 ;; CHECK-NEXT: %BB15:
-;; CHECK-NEXT:   %44 = PhiInst (:any) %34: any, %BB18, %56: any, %BB19
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %44: any, [%VS0.import_global_val_0]: any
-;; CHECK-NEXT:   %46 = LoadPropertyInst (:any) %4: any, "env": string
-;; CHECK-NEXT:   %47 = BinaryStrictlyEqualInst (:any) %46: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %47: any, %BB20, %BB21
+;; CHECK-NEXT:   %45 = PhiInst (:any) %35: any, %BB18, %57: any, %BB19
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %45: any, [%VS0.import_global_val_0]: any
+;; CHECK-NEXT:   %47 = LoadPropertyInst (:any) %4: any, "env": string
+;; CHECK-NEXT:   %48 = BinaryStrictlyEqualInst (:any) %47: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %48: any, %BB20, %BB21
 ;; CHECK-NEXT: %BB16:
-;; CHECK-NEXT:   %49 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import config.max_size is a WebAssembly.Global that does not match the declared immutable i32 global import": string
+;; CHECK-NEXT:   %50 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import config.max_size is a WebAssembly.Global that does not match the declared immutable i32 global import": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB17:
-;; CHECK-NEXT:   %51 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import config.max_size must be a Number to satisfy an i32 global import": string
+;; CHECK-NEXT:   %52 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import config.max_size must be a Number to satisfy an i32 global import": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB18:
-;; CHECK-NEXT:   %53 = TypeOfInst (:string) %34: any
-;; CHECK-NEXT:   %54 = BinaryStrictlyEqualInst (:any) %53: string, "number": string
-;; CHECK-NEXT:         CondBranchInst %54: any, %BB15, %BB17
+;; CHECK-NEXT:   %54 = TypeOfInst (:string) %35: any
+;; CHECK-NEXT:   %55 = BinaryStrictlyEqualInst (:any) %54: string, "number": string
+;; CHECK-NEXT:         CondBranchInst %55: any, %BB15, %BB17
 ;; CHECK-NEXT: %BB19:
-;; CHECK-NEXT:   %56 = CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalGet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %39: any
+;; CHECK-NEXT:   %57 = CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalGet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %40: any
 ;; CHECK-NEXT:         BranchInst %BB15
 ;; CHECK-NEXT: %BB20:
-;; CHECK-NEXT:   %58 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace env": string
+;; CHECK-NEXT:   %59 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace env": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB21:
-;; CHECK-NEXT:   %60 = LoadPropertyInst (:any) %46: any, "memory": string
-;; CHECK-NEXT:   %61 = BinaryStrictlyEqualInst (:any) %60: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %61: any, %BB22, %BB23
+;; CHECK-NEXT:   %61 = LoadPropertyInst (:any) %47: any, "memory": string
+;; CHECK-NEXT:   %62 = BinaryStrictlyEqualInst (:any) %61: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %62: any, %BB22, %BB23
 ;; CHECK-NEXT: %BB22:
-;; CHECK-NEXT:   %63 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import env.memory": string
+;; CHECK-NEXT:   %64 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import env.memory": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB23:
-;; CHECK-NEXT:   %65 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkMemory]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %60: any
-;; CHECK-NEXT:   %66 = BinaryStrictlyEqualInst (:any) %65: any, null: null
-;; CHECK-NEXT:         CondBranchInst %66: any, %BB24, %BB27
+;; CHECK-NEXT:   %66 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkMemory]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %61: any
+;; CHECK-NEXT:   %67 = BinaryStrictlyEqualInst (:any) %66: any, null: null
+;; CHECK-NEXT:         CondBranchInst %67: any, %BB24, %BB27
 ;; CHECK-NEXT: %BB24:
-;; CHECK-NEXT:   %68 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.memory is not a WebAssembly.Memory": string
+;; CHECK-NEXT:   %69 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.memory is not a WebAssembly.Memory": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB25:
-;; CHECK-NEXT:   %70 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.memory does not satisfy the declared memory limits": string
+;; CHECK-NEXT:   %71 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.memory does not satisfy the declared memory limits": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB26:
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %60: any, [%VS0.mem_obj]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %79: any, [%VS0.imported_mem_max]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %80: any, [%VS0.imported_mem_buf]: any
-;; CHECK-NEXT:   %75 = LoadPropertyInst (:any) %4: any, "math": string
-;; CHECK-NEXT:   %76 = BinaryStrictlyEqualInst (:any) %75: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %76: any, %BB30, %BB31
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %61: any, [%VS0.mem_obj]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %80: any, [%VS0.imported_mem_max]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %81: any, [%VS0.imported_mem_buf]: any
+;; CHECK-NEXT:   %76 = LoadPropertyInst (:any) %4: any, "math": string
+;; CHECK-NEXT:   %77 = BinaryStrictlyEqualInst (:any) %76: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %77: any, %BB30, %BB31
 ;; CHECK-NEXT: %BB27:
-;; CHECK-NEXT:   %78 = LoadPropertyInst (:any) %65: any, 0: number
-;; CHECK-NEXT:   %79 = LoadPropertyInst (:any) %65: any, 1: number
-;; CHECK-NEXT:   %80 = LoadPropertyInst (:any) %65: any, 2: number
-;; CHECK-NEXT:   %81 = BinaryGreaterThanOrEqualInst (:any) %78: any, 1: number
-;; CHECK-NEXT:         CondBranchInst %81: any, %BB28, %BB25
+;; CHECK-NEXT:   %79 = LoadPropertyInst (:any) %66: any, 0: number
+;; CHECK-NEXT:   %80 = LoadPropertyInst (:any) %66: any, 1: number
+;; CHECK-NEXT:   %81 = LoadPropertyInst (:any) %66: any, 2: number
+;; CHECK-NEXT:   %82 = BinaryGreaterThanOrEqualInst (:any) %79: any, 1: number
+;; CHECK-NEXT:         CondBranchInst %82: any, %BB28, %BB25
 ;; CHECK-NEXT: %BB28:
-;; CHECK-NEXT:   %83 = BinaryStrictlyEqualInst (:any) %79: any, -1: number
-;; CHECK-NEXT:         CondBranchInst %83: any, %BB25, %BB29
+;; CHECK-NEXT:   %84 = BinaryStrictlyEqualInst (:any) %80: any, -1: number
+;; CHECK-NEXT:         CondBranchInst %84: any, %BB25, %BB29
 ;; CHECK-NEXT: %BB29:
-;; CHECK-NEXT:   %85 = BinaryLessThanOrEqualInst (:any) %79: any, 10: number
-;; CHECK-NEXT:         CondBranchInst %85: any, %BB26, %BB25
+;; CHECK-NEXT:   %86 = BinaryLessThanOrEqualInst (:any) %80: any, 10: number
+;; CHECK-NEXT:         CondBranchInst %86: any, %BB26, %BB25
 ;; CHECK-NEXT: %BB30:
-;; CHECK-NEXT:   %87 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace math": string
+;; CHECK-NEXT:   %88 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import namespace math": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB31:
-;; CHECK-NEXT:   %89 = LoadPropertyInst (:any) %75: any, "square": string
-;; CHECK-NEXT:   %90 = BinaryStrictlyEqualInst (:any) %89: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %90: any, %BB32, %BB33
+;; CHECK-NEXT:   %90 = LoadPropertyInst (:any) %76: any, "square": string
+;; CHECK-NEXT:   %91 = BinaryStrictlyEqualInst (:any) %90: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %91: any, %BB32, %BB33
 ;; CHECK-NEXT: %BB32:
-;; CHECK-NEXT:   %92 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import math.square": string
+;; CHECK-NEXT:   %93 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "module has no import math.square": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT: %BB33:
-;; CHECK-NEXT:   %94 = LoadPropertyInst (:any) %89: any, "__wasm_type__": string
-;; CHECK-NEXT:   %95 = BinaryStrictlyEqualInst (:any) %94: any, undefined: undefined
-;; CHECK-NEXT:         CondBranchInst %95: any, %BB34, %BB35
+;; CHECK-NEXT:   %95 = CallBuiltinInst (:any) [HermesBuiltin.wasmFuncTypeId]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %90: any
+;; CHECK-NEXT:   %96 = BinaryStrictlyEqualInst (:any) %95: any, undefined: undefined
+;; CHECK-NEXT:         CondBranchInst %96: any, %BB34, %BB35
 ;; CHECK-NEXT: %BB34:
-;; CHECK-NEXT:   %97 = TypeOfInst (:string) %89: any
-;; CHECK-NEXT:   %98 = BinaryStrictlyEqualInst (:any) %97: string, "function": string
-;; CHECK-NEXT:         CondBranchInst %98: any, %BB36, %BB37
+;; CHECK-NEXT:   %98 = TypeOfInst (:string) %90: any
+;; CHECK-NEXT:   %99 = BinaryStrictlyEqualInst (:any) %98: string, "function": string
+;; CHECK-NEXT:          CondBranchInst %99: any, %BB36, %BB37
 ;; CHECK-NEXT: %BB35:
-;; CHECK-NEXT:   %100 = BinaryStrictlyNotEqualInst (:any) %94: any, "func:i:i": string
-;; CHECK-NEXT:          CondBranchInst %100: any, %BB37, %BB38
+;; CHECK-NEXT:   %101 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:i": string
+;; CHECK-NEXT:   %102 = BinaryStrictlyNotEqualInst (:any) %95: any, %101: any
+;; CHECK-NEXT:          CondBranchInst %102: any, %BB37, %BB38
 ;; CHECK-NEXT: %BB36:
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %89: any, [%VS0.import_func_1]: any
-;; CHECK-NEXT:   %103 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %103: object, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %105 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_1(): functionCode
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %105: object, [%VS0.closure_1]: any
-;; CHECK-NEXT:   %107 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_2(): functionCode
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %107: object, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %109 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_3(): functionCode
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %109: object, [%VS0.closure_3]: any
-;; CHECK-NEXT:   %111 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_4(): functionCode
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %111: object, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %113 = LoadFrameInst (:any) %0: environment, [%VS0.imported_mem_buf]: any
-;; CHECK-NEXT:   %114 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %115 = LoadPropertyInst (:any) %114: any, "Int8Array": string
-;; CHECK-NEXT:   %116 = CreateThisInst (:any) %115: any, %115: any, empty: any
-;; CHECK-NEXT:   %117 = CallInst (:any) %115: any, empty: any, false: boolean, empty: any, %115: any, %116: any, %113: any
-;; CHECK-NEXT:   %118 = GetConstructedObjectInst (:object) %116: any, %117: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %118: object, [%VS0.HEAP8]: any
-;; CHECK-NEXT:   %120 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %121 = LoadPropertyInst (:any) %120: any, "Uint8Array": string
-;; CHECK-NEXT:   %122 = CreateThisInst (:any) %121: any, %121: any, empty: any
-;; CHECK-NEXT:   %123 = CallInst (:any) %121: any, empty: any, false: boolean, empty: any, %121: any, %122: any, %113: any
-;; CHECK-NEXT:   %124 = GetConstructedObjectInst (:object) %122: any, %123: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %124: object, [%VS0.HEAPU8]: any
-;; CHECK-NEXT:   %126 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %127 = LoadPropertyInst (:any) %126: any, "Int16Array": string
-;; CHECK-NEXT:   %128 = CreateThisInst (:any) %127: any, %127: any, empty: any
-;; CHECK-NEXT:   %129 = CallInst (:any) %127: any, empty: any, false: boolean, empty: any, %127: any, %128: any, %113: any
-;; CHECK-NEXT:   %130 = GetConstructedObjectInst (:object) %128: any, %129: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %130: object, [%VS0.HEAP16]: any
-;; CHECK-NEXT:   %132 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %133 = LoadPropertyInst (:any) %132: any, "Uint16Array": string
-;; CHECK-NEXT:   %134 = CreateThisInst (:any) %133: any, %133: any, empty: any
-;; CHECK-NEXT:   %135 = CallInst (:any) %133: any, empty: any, false: boolean, empty: any, %133: any, %134: any, %113: any
-;; CHECK-NEXT:   %136 = GetConstructedObjectInst (:object) %134: any, %135: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %136: object, [%VS0.HEAPU16]: any
-;; CHECK-NEXT:   %138 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %139 = LoadPropertyInst (:any) %138: any, "Int32Array": string
-;; CHECK-NEXT:   %140 = CreateThisInst (:any) %139: any, %139: any, empty: any
-;; CHECK-NEXT:   %141 = CallInst (:any) %139: any, empty: any, false: boolean, empty: any, %139: any, %140: any, %113: any
-;; CHECK-NEXT:   %142 = GetConstructedObjectInst (:object) %140: any, %141: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %142: object, [%VS0.HEAP32]: any
-;; CHECK-NEXT:   %144 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %145 = LoadPropertyInst (:any) %144: any, "Uint32Array": string
-;; CHECK-NEXT:   %146 = CreateThisInst (:any) %145: any, %145: any, empty: any
-;; CHECK-NEXT:   %147 = CallInst (:any) %145: any, empty: any, false: boolean, empty: any, %145: any, %146: any, %113: any
-;; CHECK-NEXT:   %148 = GetConstructedObjectInst (:object) %146: any, %147: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %148: object, [%VS0.HEAPU32]: any
-;; CHECK-NEXT:   %150 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %151 = LoadPropertyInst (:any) %150: any, "Float32Array": string
-;; CHECK-NEXT:   %152 = CreateThisInst (:any) %151: any, %151: any, empty: any
-;; CHECK-NEXT:   %153 = CallInst (:any) %151: any, empty: any, false: boolean, empty: any, %151: any, %152: any, %113: any
-;; CHECK-NEXT:   %154 = GetConstructedObjectInst (:object) %152: any, %153: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %154: object, [%VS0.HEAPF32]: any
-;; CHECK-NEXT:   %156 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %157 = LoadPropertyInst (:any) %156: any, "Float64Array": string
-;; CHECK-NEXT:   %158 = CreateThisInst (:any) %157: any, %157: any, empty: any
-;; CHECK-NEXT:   %159 = CallInst (:any) %157: any, empty: any, false: boolean, empty: any, %157: any, %158: any, %113: any
-;; CHECK-NEXT:   %160 = GetConstructedObjectInst (:object) %158: any, %159: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %160: object, [%VS0.HEAPF64]: any
-;; CHECK-NEXT:   %162 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %163 = LoadPropertyInst (:any) %162: any, "ArrayBuffer": string
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %90: any, [%VS0.import_func_1]: any
+;; CHECK-NEXT:   %105 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %105: object, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %107 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_1(): functionCode
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %107: object, [%VS0.closure_1]: any
+;; CHECK-NEXT:   %109 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_2(): functionCode
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %109: object, [%VS0.closure_2]: any
+;; CHECK-NEXT:   %111 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_3(): functionCode
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %111: object, [%VS0.closure_3]: any
+;; CHECK-NEXT:   %113 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_4(): functionCode
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %113: object, [%VS0.closure_4]: any
+;; CHECK-NEXT:   %115 = LoadFrameInst (:any) %0: environment, [%VS0.imported_mem_buf]: any
+;; CHECK-NEXT:   %116 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %117 = LoadPropertyInst (:any) %116: any, "Int8Array": string
+;; CHECK-NEXT:   %118 = CreateThisInst (:any) %117: any, %117: any, empty: any
+;; CHECK-NEXT:   %119 = CallInst (:any) %117: any, empty: any, false: boolean, empty: any, %117: any, %118: any, %115: any
+;; CHECK-NEXT:   %120 = GetConstructedObjectInst (:object) %118: any, %119: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %120: object, [%VS0.HEAP8]: any
+;; CHECK-NEXT:   %122 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %123 = LoadPropertyInst (:any) %122: any, "Uint8Array": string
+;; CHECK-NEXT:   %124 = CreateThisInst (:any) %123: any, %123: any, empty: any
+;; CHECK-NEXT:   %125 = CallInst (:any) %123: any, empty: any, false: boolean, empty: any, %123: any, %124: any, %115: any
+;; CHECK-NEXT:   %126 = GetConstructedObjectInst (:object) %124: any, %125: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %126: object, [%VS0.HEAPU8]: any
+;; CHECK-NEXT:   %128 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %129 = LoadPropertyInst (:any) %128: any, "Int16Array": string
+;; CHECK-NEXT:   %130 = CreateThisInst (:any) %129: any, %129: any, empty: any
+;; CHECK-NEXT:   %131 = CallInst (:any) %129: any, empty: any, false: boolean, empty: any, %129: any, %130: any, %115: any
+;; CHECK-NEXT:   %132 = GetConstructedObjectInst (:object) %130: any, %131: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %132: object, [%VS0.HEAP16]: any
+;; CHECK-NEXT:   %134 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %135 = LoadPropertyInst (:any) %134: any, "Uint16Array": string
+;; CHECK-NEXT:   %136 = CreateThisInst (:any) %135: any, %135: any, empty: any
+;; CHECK-NEXT:   %137 = CallInst (:any) %135: any, empty: any, false: boolean, empty: any, %135: any, %136: any, %115: any
+;; CHECK-NEXT:   %138 = GetConstructedObjectInst (:object) %136: any, %137: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %138: object, [%VS0.HEAPU16]: any
+;; CHECK-NEXT:   %140 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %141 = LoadPropertyInst (:any) %140: any, "Int32Array": string
+;; CHECK-NEXT:   %142 = CreateThisInst (:any) %141: any, %141: any, empty: any
+;; CHECK-NEXT:   %143 = CallInst (:any) %141: any, empty: any, false: boolean, empty: any, %141: any, %142: any, %115: any
+;; CHECK-NEXT:   %144 = GetConstructedObjectInst (:object) %142: any, %143: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %144: object, [%VS0.HEAP32]: any
+;; CHECK-NEXT:   %146 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %147 = LoadPropertyInst (:any) %146: any, "Uint32Array": string
+;; CHECK-NEXT:   %148 = CreateThisInst (:any) %147: any, %147: any, empty: any
+;; CHECK-NEXT:   %149 = CallInst (:any) %147: any, empty: any, false: boolean, empty: any, %147: any, %148: any, %115: any
+;; CHECK-NEXT:   %150 = GetConstructedObjectInst (:object) %148: any, %149: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %150: object, [%VS0.HEAPU32]: any
+;; CHECK-NEXT:   %152 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %153 = LoadPropertyInst (:any) %152: any, "Float32Array": string
+;; CHECK-NEXT:   %154 = CreateThisInst (:any) %153: any, %153: any, empty: any
+;; CHECK-NEXT:   %155 = CallInst (:any) %153: any, empty: any, false: boolean, empty: any, %153: any, %154: any, %115: any
+;; CHECK-NEXT:   %156 = GetConstructedObjectInst (:object) %154: any, %155: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %156: object, [%VS0.HEAPF32]: any
+;; CHECK-NEXT:   %158 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %159 = LoadPropertyInst (:any) %158: any, "Float64Array": string
+;; CHECK-NEXT:   %160 = CreateThisInst (:any) %159: any, %159: any, empty: any
+;; CHECK-NEXT:   %161 = CallInst (:any) %159: any, empty: any, false: boolean, empty: any, %159: any, %160: any, %115: any
+;; CHECK-NEXT:   %162 = GetConstructedObjectInst (:object) %160: any, %161: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %162: object, [%VS0.HEAPF64]: any
 ;; CHECK-NEXT:   %164 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %165 = LoadPropertyInst (:any) %164: any, "Uint32Array": string
+;; CHECK-NEXT:   %165 = LoadPropertyInst (:any) %164: any, "ArrayBuffer": string
 ;; CHECK-NEXT:   %166 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %167 = LoadPropertyInst (:any) %166: any, "Float64Array": string
-;; CHECK-NEXT:   %168 = CreateThisInst (:any) %163: any, %163: any, empty: any
-;; CHECK-NEXT:   %169 = CallInst (:any) %163: any, empty: any, false: boolean, empty: any, %163: any, %168: any, 8: number
-;; CHECK-NEXT:   %170 = GetConstructedObjectInst (:object) %168: any, %169: any
-;; CHECK-NEXT:   %171 = CreateThisInst (:any) %165: any, %165: any, empty: any
-;; CHECK-NEXT:   %172 = CallInst (:any) %165: any, empty: any, false: boolean, empty: any, %165: any, %171: any, %170: object
-;; CHECK-NEXT:   %173 = GetConstructedObjectInst (:object) %171: any, %172: any
-;; CHECK-NEXT:   %174 = CreateThisInst (:any) %167: any, %167: any, empty: any
-;; CHECK-NEXT:   %175 = CallInst (:any) %167: any, empty: any, false: boolean, empty: any, %167: any, %174: any, %170: object
-;; CHECK-NEXT:   %176 = GetConstructedObjectInst (:object) %174: any, %175: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %173: object, [%VS0.retBufI]: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %176: object, [%VS0.retBufF]: any
-;; CHECK-NEXT:   %179 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:": string
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %179: any, [%VS0.wasm_type_id_0]: any
-;; CHECK-NEXT:   %181 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:i": string
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %181: any, [%VS0.wasm_type_id_1]: any
-;; CHECK-NEXT:   %183 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::": string
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %183: any, [%VS0.wasm_type_id_2]: any
-;; CHECK-NEXT:   %185 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::i": string
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %185: any, [%VS0.wasm_type_id_3]: any
-;; CHECK-NEXT:   %187 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_funcref_0(): functionCode
-;; CHECK-NEXT:          StorePropertyStrictInst "func:i:": string, %187: object, "__wasm_type__": string
-;; CHECK-NEXT:   %189 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %190 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
-;; CHECK-NEXT:   %191 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %187: object, %189: any, %190: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %187: object, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:   %193 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_funcref_1(): functionCode
-;; CHECK-NEXT:          StorePropertyStrictInst "func:i:i": string, %193: object, "__wasm_type__": string
+;; CHECK-NEXT:   %167 = LoadPropertyInst (:any) %166: any, "Uint32Array": string
+;; CHECK-NEXT:   %168 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %169 = LoadPropertyInst (:any) %168: any, "Float64Array": string
+;; CHECK-NEXT:   %170 = CreateThisInst (:any) %165: any, %165: any, empty: any
+;; CHECK-NEXT:   %171 = CallInst (:any) %165: any, empty: any, false: boolean, empty: any, %165: any, %170: any, 8: number
+;; CHECK-NEXT:   %172 = GetConstructedObjectInst (:object) %170: any, %171: any
+;; CHECK-NEXT:   %173 = CreateThisInst (:any) %167: any, %167: any, empty: any
+;; CHECK-NEXT:   %174 = CallInst (:any) %167: any, empty: any, false: boolean, empty: any, %167: any, %173: any, %172: object
+;; CHECK-NEXT:   %175 = GetConstructedObjectInst (:object) %173: any, %174: any
+;; CHECK-NEXT:   %176 = CreateThisInst (:any) %169: any, %169: any, empty: any
+;; CHECK-NEXT:   %177 = CallInst (:any) %169: any, empty: any, false: boolean, empty: any, %169: any, %176: any, %172: object
+;; CHECK-NEXT:   %178 = GetConstructedObjectInst (:object) %176: any, %177: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %175: object, [%VS0.retBufI]: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %178: object, [%VS0.retBufF]: any
+;; CHECK-NEXT:   %181 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:": string
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %181: any, [%VS0.wasm_type_id_0]: any
+;; CHECK-NEXT:   %183 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:i:i": string
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %183: any, [%VS0.wasm_type_id_1]: any
+;; CHECK-NEXT:   %185 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::": string
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %185: any, [%VS0.wasm_type_id_2]: any
+;; CHECK-NEXT:   %187 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func::i": string
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %187: any, [%VS0.wasm_type_id_3]: any
+;; CHECK-NEXT:   %189 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_funcref_0(): functionCode
+;; CHECK-NEXT:   %190 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %191 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
+;; CHECK-NEXT:   %192 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %189: object, %190: any, %191: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %189: object, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:   %194 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_funcref_1(): functionCode
 ;; CHECK-NEXT:   %195 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
 ;; CHECK-NEXT:   %196 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
-;; CHECK-NEXT:   %197 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %193: object, %195: any, %196: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %193: object, [%VS0.exported_func_1]: any
+;; CHECK-NEXT:   %197 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %194: object, %195: any, %196: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %194: object, [%VS0.exported_func_1]: any
 ;; CHECK-NEXT:   %199 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_run(): functionCode
-;; CHECK-NEXT:          StorePropertyStrictInst "func::i": string, %199: object, "__wasm_type__": string
-;; CHECK-NEXT:   %201 = LoadFrameInst (:any) %0: environment, [%VS0.closure_3]: any
-;; CHECK-NEXT:   %202 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_3]: any
-;; CHECK-NEXT:   %203 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %199: object, %201: any, %202: any
+;; CHECK-NEXT:   %200 = LoadFrameInst (:any) %0: environment, [%VS0.closure_3]: any
+;; CHECK-NEXT:   %201 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_3]: any
+;; CHECK-NEXT:   %202 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %199: object, %200: any, %201: any
 ;; CHECK-NEXT:          StoreFrameInst %0: environment, %199: object, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:   %205 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_helper(): functionCode
-;; CHECK-NEXT:          StorePropertyStrictInst "func:i:i": string, %205: object, "__wasm_type__": string
-;; CHECK-NEXT:   %207 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %208 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
-;; CHECK-NEXT:   %209 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %205: object, %207: any, %208: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %205: object, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:   %211 = LoadFrameInst (:any) %0: environment, [%VS0.import_global_val_0]: any
-;; CHECK-NEXT:   %212 = AsInt32Inst (:number) %211: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %212: number, [%VS0.global_0]: any
-;; CHECK-NEXT:   %214 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:          StorePropertyStrictInst "anyfunc": string, %214: object, "element": string
-;; CHECK-NEXT:          StorePropertyStrictInst 4: number, %214: object, "initial": string
-;; CHECK-NEXT:   %217 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
-;; CHECK-NEXT:   %218 = LoadPropertyInst (:any) %217: any, "WebAssembly": string
-;; CHECK-NEXT:   %219 = LoadPropertyInst (:any) %218: any, "Table": string
-;; CHECK-NEXT:   %220 = CreateThisInst (:any) %219: any, %219: any, empty: any
-;; CHECK-NEXT:   %221 = CallInst (:any) %219: any, empty: any, false: boolean, empty: any, %219: any, %220: any, %214: object
-;; CHECK-NEXT:   %222 = GetConstructedObjectInst (:object) %220: any, %221: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %222: object, [%VS0.table_0_obj]: any
-;; CHECK-NEXT:   %224 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %222: object, true: boolean
-;; CHECK-NEXT:   %225 = BinaryStrictlyEqualInst (:any) %224: any, null: null
-;; CHECK-NEXT:          CondBranchInst %225: any, %BB39, %BB40
+;; CHECK-NEXT:   %204 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_helper(): functionCode
+;; CHECK-NEXT:   %205 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
+;; CHECK-NEXT:   %206 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
+;; CHECK-NEXT:   %207 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %204: object, %205: any, %206: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %204: object, [%VS0.exported_func_4]: any
+;; CHECK-NEXT:   %209 = LoadFrameInst (:any) %0: environment, [%VS0.import_global_val_0]: any
+;; CHECK-NEXT:   %210 = AsInt32Inst (:number) %209: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %210: number, [%VS0.global_0]: any
+;; CHECK-NEXT:   %212 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:          StorePropertyStrictInst "anyfunc": string, %212: object, "element": string
+;; CHECK-NEXT:          StorePropertyStrictInst 4: number, %212: object, "initial": string
+;; CHECK-NEXT:   %215 = LoadFrameInst (:any) %0: environment, [%VS0.intrinsics]: any
+;; CHECK-NEXT:   %216 = LoadPropertyInst (:any) %215: any, "WebAssembly": string
+;; CHECK-NEXT:   %217 = LoadPropertyInst (:any) %216: any, "Table": string
+;; CHECK-NEXT:   %218 = CreateThisInst (:any) %217: any, %217: any, empty: any
+;; CHECK-NEXT:   %219 = CallInst (:any) %217: any, empty: any, false: boolean, empty: any, %217: any, %218: any, %212: object
+;; CHECK-NEXT:   %220 = GetConstructedObjectInst (:object) %218: any, %219: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %220: object, [%VS0.table_0_obj]: any
+;; CHECK-NEXT:   %222 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %220: object, true: boolean
+;; CHECK-NEXT:   %223 = BinaryStrictlyEqualInst (:any) %222: any, null: null
+;; CHECK-NEXT:          CondBranchInst %223: any, %BB39, %BB40
 ;; CHECK-NEXT: %BB37:
-;; CHECK-NEXT:   %227 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import math.square is not a function": string
+;; CHECK-NEXT:   %225 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import math.square is not a function": string
 ;; CHECK-NEXT:          UnreachableInst
 ;; CHECK-NEXT: %BB38:
-;; CHECK-NEXT:   %229 = TypeOfInst (:string) %89: any
-;; CHECK-NEXT:   %230 = BinaryStrictlyEqualInst (:any) %229: string, "function": string
-;; CHECK-NEXT:          CondBranchInst %230: any, %BB36, %BB37
+;; CHECK-NEXT:   %227 = TypeOfInst (:string) %90: any
+;; CHECK-NEXT:   %228 = BinaryStrictlyEqualInst (:any) %227: string, "function": string
+;; CHECK-NEXT:          CondBranchInst %228: any, %BB36, %BB37
 ;; CHECK-NEXT: %BB39:
-;; CHECK-NEXT:   %232 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table for this module's table 0": string
+;; CHECK-NEXT:   %230 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table for this module's table 0": string
 ;; CHECK-NEXT:          UnreachableInst
 ;; CHECK-NEXT: %BB40:
-;; CHECK-NEXT:   %234 = LoadPropertyInst (:any) %224: any, 0: number
-;; CHECK-NEXT:   %235 = LoadPropertyInst (:any) %224: any, 1: number
-;; CHECK-NEXT:   %236 = LoadPropertyInst (:any) %224: any, 2: number
-;; CHECK-NEXT:   %237 = LoadPropertyInst (:any) %234: any, "length": string
-;; CHECK-NEXT:   %238 = LoadPropertyInst (:any) %224: any, 3: number
-;; CHECK-NEXT:   %239 = BinaryStrictlyEqualInst (:any) %237: any, 4: number
-;; CHECK-NEXT:          CondBranchInst %239: any, %BB42, %BB41
+;; CHECK-NEXT:   %232 = LoadPropertyInst (:any) %222: any, 0: number
+;; CHECK-NEXT:   %233 = LoadPropertyInst (:any) %222: any, 1: number
+;; CHECK-NEXT:   %234 = LoadPropertyInst (:any) %222: any, 2: number
+;; CHECK-NEXT:   %235 = LoadPropertyInst (:any) %232: any, "length": string
+;; CHECK-NEXT:   %236 = LoadPropertyInst (:any) %222: any, 3: number
+;; CHECK-NEXT:   %237 = BinaryStrictlyEqualInst (:any) %235: any, 4: number
+;; CHECK-NEXT:          CondBranchInst %237: any, %BB42, %BB41
 ;; CHECK-NEXT: %BB41:
-;; CHECK-NEXT:   %241 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table with this module's declared limits for table 0": string
+;; CHECK-NEXT:   %239 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table with this module's declared limits for table 0": string
 ;; CHECK-NEXT:          UnreachableInst
 ;; CHECK-NEXT: %BB42:
-;; CHECK-NEXT:   %243 = BinaryStrictlyEqualInst (:any) %238: any, -1: number
-;; CHECK-NEXT:          CondBranchInst %243: any, %BB43, %BB41
+;; CHECK-NEXT:   %241 = BinaryStrictlyEqualInst (:any) %236: any, -1: number
+;; CHECK-NEXT:          CondBranchInst %241: any, %BB43, %BB41
 ;; CHECK-NEXT: %BB43:
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %234: any, [%VS0.table_0_funcs]: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %235: any, [%VS0.table_0_types]: any
-;; CHECK-NEXT:          StoreFrameInst %0: environment, %236: any, [%VS0.table_0_exported]: any
-;; CHECK-NEXT:   %248 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %249 = CallInst (:any) %248: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
-;; CHECK-NEXT:   %250 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:   %251 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:          StorePropertyStrictInst %251: any, %250: object, "run": string
-;; CHECK-NEXT:   %253 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:          StorePropertyStrictInst %253: any, %250: object, "helper": string
-;; CHECK-NEXT:          ReturnInst %250: object
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %232: any, [%VS0.table_0_funcs]: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %233: any, [%VS0.table_0_types]: any
+;; CHECK-NEXT:          StoreFrameInst %0: environment, %234: any, [%VS0.table_0_exported]: any
+;; CHECK-NEXT:   %246 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
+;; CHECK-NEXT:   %247 = CallInst (:any) %246: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %248 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:   %249 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
+;; CHECK-NEXT:          StorePropertyStrictInst %249: any, %248: object, "run": string
+;; CHECK-NEXT:   %251 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
+;; CHECK-NEXT:          StorePropertyStrictInst %251: any, %248: object, "helper": string
+;; CHECK-NEXT:          ReturnInst %248: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_funcref_0(p0: any): any

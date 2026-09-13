@@ -66,5 +66,5 @@
 
 ;; The declared maximum is checked against the table's own, and "no maximum"
 ;; (-1) does not satisfy a declaration that has one.
-;; CHECK: %65 = BinaryStrictlyEqualInst (:any) %25: any, -1: number
-;; CHECK: %67 = BinaryLessThanOrEqualInst (:any) %25: any, 10: number
+;; CHECK: %64 = BinaryStrictlyEqualInst (:any) %25: any, -1: number
+;; CHECK: %66 = BinaryLessThanOrEqualInst (:any) %25: any, 10: number

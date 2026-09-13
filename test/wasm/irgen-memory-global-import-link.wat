@@ -89,7 +89,7 @@
 ;; %122 reaches here from %BB18 alone, so a fetch emitted before the
 ;; mismatch test -- on the not-a-Global value, say -- would come from another
 ;; block and this line would go red.
-;; CHECK: %44 = PhiInst (:any) %25: any, %BB17, %136: any, %BB18
+;; CHECK: %44 = PhiInst (:any) %25: any, %BB17, %135: any, %BB18
 ;; CHECK-NEXT: StoreFrameInst {{.*}}, %44: any, [%VS0.import_global_val_0]: any
 
 ;; The views are built over the recorded buffer.
@@ -105,5 +105,5 @@
 ;; A mutable import keeps the object and emits none of this; that is pinned
 ;; by the CHECK-NOT in irgen-global-mutable-shared.wat.
 ;; CHECK: %BB18:
-;; CHECK-NEXT: %136 = CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalGet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %39: any
+;; CHECK-NEXT: %135 = CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalGet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %39: any
 ;; CHECK-NEXT: BranchInst %BB14

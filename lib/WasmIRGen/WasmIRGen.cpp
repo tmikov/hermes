@@ -1040,13 +1040,21 @@ void WasmIRGen::createFunctions() {
       // Per-kind type validation.
       switch (imp.kind) {
         case WasmExternalKind::Function: {
-          // Load __wasm_type__ from the import value.
-          auto *typeStr = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("__wasm_type__"));
+          // The signature comes from the Exported Function brand, not from a
+          // property on the value. A `__wasm_type__` string used to be read
+          // here; createExportedFunctions says what was wrong with publishing
+          // it, and all three failures were failures of THIS check.
+          //
+          // undefined means "not an Exported Function", which is not a
+          // failure: a plain JS callable satisfies a function import and
+          // takes its types from the declaration below. That is the JS API
+          // as specified, and it is why the old forgery bought nothing a
+          // forwarding function could not -- the check exists to catch a
+          // genuine export wired to the wrong import.
+          auto *typeId = helpers_.emitFuncTypeId(importVal);
           auto *typeIsUndef = builder_.createBinaryOperatorInst(
-              typeStr, undefinedVal,
+              typeId, undefinedVal,
               ValueKind::BinaryStrictlyEqualInstKind);
-          // If undefined → could be plain JS function. Check typeof.
           auto *checkCallableBB =
               builder_.createBasicBlock(topLevelFunc);
           auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
@@ -1056,10 +1064,12 @@ void WasmIRGen::createFunctions() {
               typeIsUndef, checkCallableBB, checkTypeBB);
 
           // Check that the import value is callable (typeof === "function").
-          // This runs on both paths: carrying a matching __wasm_type__ says
-          // what the value claims to be, not that it can be called, and a
-          // non-callable used to link happily and fail as a TypeError at the
-          // first call instead of a LinkError at instantiation.
+          // This runs on both paths: carrying a matching signature says what
+          // the value is, not that it can be called, and a non-callable used
+          // to link happily and fail as a TypeError at the first call instead
+          // of a LinkError at instantiation. Kept on the branded path too
+          // rather than argued away from wasmSetFuncInfo's precondition: one
+          // branch on a cold path is cheaper than that argument going stale.
           builder_.setInsertionBlock(checkCallableBB);
           auto *typeofVal = builder_.createTypeOfInst(importVal);
           auto *isFunc = builder_.createBinaryOperatorInst(
@@ -1070,13 +1080,19 @@ void WasmIRGen::createFunctions() {
               isFunc, acceptBB, linkErrorBB);
 
           builder_.setInsertionBlock(checkTypeBB);
-          // Compare type string against expected.
+          // Intern the declared signature here rather than reading
+          // typeIdVars_: internTypeIds() runs well after import resolution.
+          // It is the same structural string and the same interning, so the
+          // two agree by construction.
           std::string expectedType =
               buildFuncTypeString(moduleInfo_.getFunctionType(
                   importFuncIdx));
+          auto *expectedId = builder_.createCallBuiltinInst(
+              BuiltinMethod::HermesBuiltin_wasmInternType,
+              {builder_.getLiteralString(expectedType)});
           auto *mismatch = builder_.createBinaryOperatorInst(
-              typeStr,
-              builder_.getLiteralString(expectedType),
+              typeId,
+              expectedId,
               ValueKind::BinaryStrictlyNotEqualInstKind);
           auto *typedCallableBB =
               builder_.createBasicBlock(topLevelFunc);
@@ -1575,10 +1591,30 @@ void WasmIRGen::createFunctions() {
               ValueKind::BinaryStrictlyEqualInstKind);
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
           auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *notFuncBB = builder_.createBasicBlock(topLevelFunc);
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          // If __wasm_type__ is undefined, accept (raw JS value as tag).
+          // If __wasm_type__ is undefined, the value is not a tag this engine
+          // built -- but it must still not be an Exported Function. A tag
+          // import satisfied by a function export is
+          // `assert_unlinkable ... "incompatible import type"` in
+          // spec/imports.wast, and it used to be refused only INCIDENTALLY:
+          // wrappers carried a "func:..." string, which differed from the
+          // expected "tag:..." one. Wrappers publish nothing now, so the
+          // refusal is made on the brand instead of on a string that happened
+          // to disagree.
+          //
+          // Anything else with no signature is still accepted as a raw JS
+          // value, which is what this path has always done.
           builder_.createCondBranchInst(
-              typeIsUndef, acceptBB, checkTypeBB);
+              typeIsUndef, notFuncBB, checkTypeBB);
+
+          builder_.setInsertionBlock(notFuncBB);
+          auto *isExportedFunc = builder_.createBinaryOperatorInst(
+              helpers_.emitFuncTypeId(importVal),
+              undefinedVal,
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              isExportedFunc, linkErrorBB, acceptBB);
 
           builder_.setInsertionBlock(checkTypeBB);
           const WasmFuncType &tagFuncType =
@@ -2542,14 +2578,29 @@ void WasmIRGen::createExportedFunctions(BaseScopeInst *tlScope) {
   for (const auto &w : wrappers) {
     auto *wrapperClosure = builder_.createCreateFunctionInst(
         tlScope, w.wrapperFunc);
-    // Set __wasm_type__ on the wrapper closure for import type validation.
-    std::string typeStr =
-        buildFuncTypeString(moduleInfo_.getFunctionType(w.funcIndex));
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(typeStr),
-        wrapperClosure,
-        builder_.getLiteralString("__wasm_type__"));
-
+    // NOTHING IS PUBLISHED ON THE WRAPPER. It used to carry one ordinary
+    // own property, __wasm_type__, holding a signature string such as
+    // "func:i:i" that an importing module's type check compared against.
+    // That was wrong three ways at once, all of them measured:
+    //
+    //   - The store was an ordinary one, so it walked the prototype chain and
+    //     a setter on Function.prototype.__wasm_type__ ran user JS INSIDE
+    //     instantiation, with the module's own wrapper as `this`. Node runs
+    //     none.
+    //   - That setter SWALLOWED the store. A wrapper created while it was
+    //     installed carried no signature, so an importer handed that wrapper
+    //     fell through to the path accepting any callable. Wrappers made
+    //     before it was installed keep their own property and are still
+    //     checked, so this disables checking for everything instantiated
+    //     while the setter is in place, not retroactively.
+    //   - What did get stored arrived writable, enumerable and configurable
+    //     on an object handed straight to script, so a plain assignment
+    //     rewrote it afterwards and an importer compared against the forgery.
+    //
+    // The import check reads the interned type id stamped just below instead,
+    // which lives in an internal property: no name to assign to, so nothing
+    // to intercept, swallow or rewrite. See e2e-func-import-brand.wat.
+    //
     // Stamp the internal state that makes this an Exported Function: the
     // closure it wraps and the INTERNED id of its signature. Interned, not
     // module-local: the same signature is numbered differently in another

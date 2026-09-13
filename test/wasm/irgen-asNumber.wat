@@ -103,16 +103,15 @@
 ;; CHECK-NEXT:   %23 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:d:d": string
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %23: any, [%VS0.wasm_type_id_0]: any
 ;; CHECK-NEXT:   %25 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_global(): functionCode
-;; CHECK-NEXT:         StorePropertyStrictInst "func:d:d": string, %25: object, "__wasm_type__": string
-;; CHECK-NEXT:   %27 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %28 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
-;; CHECK-NEXT:   %29 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %25: object, %27: any, %28: any
+;; CHECK-NEXT:   %26 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %27 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
+;; CHECK-NEXT:   %28 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %25: object, %26: any, %27: any
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %25: object, [%VS0.exported_func_0]: any
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, 1: number, [%VS0.global_0]: any
-;; CHECK-NEXT:   %32 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:   %33 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %33: any, %32: object, "add_global": string
-;; CHECK-NEXT:         ReturnInst %32: object
+;; CHECK-NEXT:   %31 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:   %32 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %32: any, %31: object, "add_global": string
+;; CHECK-NEXT:         ReturnInst %31: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_export_add_global(p0: any): any

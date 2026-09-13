@@ -1508,6 +1508,49 @@ CallResult<HermesValue> wasmIsExportedFunction(void *, Runtime &runtime) {
       isWasmExportedFunction(runtime, args.getArgHandle(0)));
 }
 
+/// wasmFuncTypeId(value) -> the interned type id of an Exported Function's
+/// signature, or undefined.
+///
+/// The function-import type check, asked from generated IR. It reads the id
+/// wasmSetFuncInfo stamped in an internal property rather than a named
+/// property, so there is nothing for script to intercept, swallow or rewrite.
+///
+/// Delegates to readWasmFuncInfo for the same reason wasmIsExportedFunction
+/// does: two independent notions of "is an Exported Function" are two things
+/// that can drift apart, and the gap between them would be a value one path
+/// admits and the other refuses.
+///
+/// This ALLOCATES, by the same route wasmIsExportedFunction documents:
+/// readWasmFuncInfo reaches HiddenClass::findPropertyNoMap, which initializes
+/// a missing property map. Nothing of this builtin's survives the call.
+///
+/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
+/// with its index, so this answers for every argument rather than carrying a
+/// precondition: anything unbranded -- a primitive, a plain function, a
+/// missing argument -- is undefined.
+CallResult<HermesValue> wasmFuncTypeId(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  struct : public Locals {
+    PinnedValue<> closure;
+    PinnedValue<> typeId;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  if (!readWasmFuncInfo(runtime, args.getArgHandle(0), lv.closure, lv.typeId))
+    return HermesValue::encodeUndefinedValue();
+  // wasmSetFuncInfo refuses a non-Number type id, so a branded value always
+  // carries a Number here. That is all the writer establishes: it cannot say
+  // the number came from wasmInternType, because a PRIVATE_BUILTIN is
+  // reachable from any bytecode and a hand-written call could stamp any
+  // number at all. Compiler-generated calls pass interned ids. An importer
+  // compares for numeric equality, not provenance, so a forged id is refused
+  // only when it differs from the one the importer interned -- stamping the
+  // right number is stamping the right number.
+  assert(
+      lv.typeId.getHermesValue().isNumber() &&
+      "wasmSetFuncInfo refuses a non-Number type id");
+  return lv.typeId.getHermesValue();
+}
+
 /// Read \p arg as a slot count or slot index: a Number that is a non-negative
 /// integer and fits in uint32. A PRIVATE_BUILTIN is reachable from any
 /// bytecode that emits a CallBuiltin with its index, so the three reference-
@@ -3062,6 +3105,14 @@ CallResult<HermesValue> wasmSetFuncInfo(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!vmisa<Callable>(args.getArg(1))))
     return runtime.raiseTypeError(
         "a Wasm exported function must wrap a function");
+  // The type id must be a Number, because wasmFuncTypeId hands it to
+  // generated code that compares it against a wasmInternType result, and
+  // wasmCallIndirect reads the same property with getNumber(). Compiler-
+  // generated calls always pass one; a PRIVATE_BUILTIN is reachable from any
+  // bytecode, so the postcondition is enforced rather than assumed.
+  if (LLVM_UNLIKELY(!args.getArg(2).isNumber()))
+    return runtime.raiseTypeError(
+        "a Wasm exported function's type id must be a number");
   lv.fn = fn;
   lv.closure = args.getArg(1);
   lv.typeId = args.getArg(2);
@@ -4418,6 +4469,8 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmMakeResultArray,
       wasmMakeResultArray,
       0);
+  defineInternMethod(
+      B::HermesBuiltin_wasmFuncTypeId, P::wasmFuncTypeId, wasmFuncTypeId, 1);
 #else
   // Without Wasm the bodies above are not compiled and the names are not even
   // predefined strings, but Builtins.def numbering stays independent of
@@ -4437,7 +4490,7 @@ void createHermesBuiltins(Runtime &runtime) {
   // the "native builtin not initialized" assertion at startup -- after
   // compiling and linking cleanly.
   for (unsigned i = B::HermesBuiltin_wasmTrap;
-       i <= B::HermesBuiltin_wasmMakeResultArray;
+       i <= B::HermesBuiltin_wasmFuncTypeId;
        ++i) {
     defineInternMethod(
         static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);

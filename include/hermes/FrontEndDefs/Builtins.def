@@ -447,6 +447,29 @@ WASM_BUILTIN(wasmRefBufSet)
 // array's own indexed storage without consulting a prototype or an accessor.
 WASM_BUILTIN(wasmMakeResultArray)
 
+// wasmFuncTypeId(value) -> the interned type id of `value`'s signature if it
+// is a WebAssembly Exported Function, otherwise undefined.
+//
+// This is how a FUNCTION IMPORT is type-checked. It used to be checked by
+// loading a `__wasm_type__` string the compiler stored on each export
+// wrapper, which was wrong three ways at once: the store walked the prototype
+// chain, so a Function.prototype setter ran user JS inside instantiation; the
+// setter SWALLOWED the store, leaving every wrapper created while it was
+// installed unsigned, so an importer handed one fell through to its "any
+// callable" path; and what did get stored arrived writable and configurable
+// on an object handed to script, so a plain assignment rewrote it afterwards.
+//
+// The id read here is the one wasmSetFuncInfo already stamps in an internal
+// property, which script can neither read, write nor shadow -- there is no
+// name to assign to. It is the SAME interning call_indirect compares, so a
+// signature is numbered identically in every module.
+//
+// Answers rather than throws for every argument, like wasmIsExportedFunction:
+// anything unbranded, including a missing argument, is undefined. Undefined
+// is not a failure -- a plain JS callable legitimately satisfies a function
+// import and takes its types from the importer's declaration.
+WASM_BUILTIN(wasmFuncTypeId)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

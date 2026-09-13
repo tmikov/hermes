@@ -360,6 +360,15 @@ class WasmHelpers {
   /// throwing, `null` and `undefined` included.
   Instruction *emitIsExportedFunction(Value *value);
 
+  /// Emit wasmFuncTypeId: yield the INTERNED type id of \p value's signature
+  /// if it is a WebAssembly Exported Function, and undefined otherwise. The
+  /// function-import type check reads this instead of a `__wasm_type__`
+  /// string property, which script could intercept on store, swallow, or
+  /// rewrite afterwards. Answers for any argument rather than throwing;
+  /// undefined means "unbranded", not "failed", because a plain JS callable
+  /// legitimately satisfies a function import.
+  Instruction *emitFuncTypeId(Value *value);
+
   /// Emit wasmAllocRefBuf: allocate the private container that carries the
   /// REFERENCE results of one multi-value call, \p slots elements long. The
   /// caller passes the result to the callee as a hidden argument and reads the
