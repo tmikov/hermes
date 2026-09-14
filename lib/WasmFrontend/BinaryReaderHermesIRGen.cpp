@@ -1740,7 +1740,8 @@ wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  irgen_->onTry(convertBlockSigType(sigType).results);
+  auto blockType = convertBlockSigType(sigType);
+  irgen_->onTry(blockType.params, blockType.results);
   return wabt::Result::Ok;
 }
 

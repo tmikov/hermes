@@ -413,8 +413,11 @@ class WasmIRGen {
 
   // --- Exception handling (L.1) ---
 
-  /// Enter a try block with the given result types.
-  void onTry(const std::vector<WasmValType> &resultTypes);
+  /// Enter a try block whose body consumes \p paramTypes from the enclosing
+  /// stack and produces \p resultTypes.
+  void onTry(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
   /// Handle a catch clause for the given tag index. Emits the tag test and
   /// the payload loads. A funcref payload item that is neither null nor a
   /// WebAssembly Exported Function makes the emitted handler raise a
@@ -933,9 +936,11 @@ class WasmIRGen {
       const std::vector<WasmValType> &resultTypes);
 
   /// Add phi operands for branching to the given control entry from the
-  /// current block. For Block/If entries, pops result values and adds them
-  /// as phi incoming edges. For Loop entries, no phi operands are added
-  /// (loop phis are for loop parameters, handled separately).
+  /// current block, popping the values they consume. A Block/If/Try entry
+  /// takes the branch's result values. A Loop entry takes the loop's
+  /// PARAMETER values instead, because a branch to a loop targets its
+  /// header; a loop's result phis live in its exit block and are filled by
+  /// onEnd's fall-through path, never from here.
   void addBranchPhiOperands(ControlEntry &entry);
 
   /// Peek at (don't pop) the result values on the value stack for the given

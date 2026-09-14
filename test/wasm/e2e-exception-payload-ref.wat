@@ -47,10 +47,11 @@
 ;; The externref rows fail if a test ever appears on that arm: every JS value
 ;; is a valid externref.
 ;;
-;; None of the `try` blocks here declares a result type. A `try` that declares
-;; one and whose body FALLS THROUGH miscompiles on this branch
-;; (dz 01a088d7-3c82), which is unrelated to payloads and is why the results
-;; travel in locals.
+;; None of the `try` blocks here declares a result type. When these tests were
+;; written, a `try` that declared one and whose body FELL THROUGH did not
+;; compile (dz 01a088d7-3c82), so the results travel in locals instead. That
+;; shape works now and e2e-try-result-fallthrough.wat covers it; nothing here
+;; depends on the locals either way.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s --enable-exceptions -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-exception-payload-ref-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s

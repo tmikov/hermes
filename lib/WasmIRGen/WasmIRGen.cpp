@@ -4382,9 +4382,10 @@ void WasmIRGen::onEnd() {
 
     if (fallsThrough) {
       // Add phi operands to the end block from the fallthrough path.
-      // We handle this directly here rather than via addBranchPhiOperands,
-      // because addBranchPhiOperands skips Loop entries (since br to a
-      // loop targets the header, not the end block).
+      // Directly rather than via addBranchPhiOperands: handed a Loop entry
+      // that fills the HEADER's parameter phis, because that is where a br
+      // to a loop goes. The exit block's result phis are only ever filled
+      // here.
       if (!entry.resultPhis.empty()) {
         auto *currentBlock = builder_.getInsertionBlock();
         size_t numPhis = entry.resultPhis.size();
@@ -5900,13 +5901,22 @@ void WasmIRGen::onNop() {
 
 // --- Exception handling (L.1) ---
 
-void WasmIRGen::onTry(const std::vector<WasmValType> &resultTypes) {
+void WasmIRGen::onTry(
+    const std::vector<WasmValType> &paramTypes,
+    const std::vector<WasmValType> &resultTypes) {
+  // Count param stack slots (i64 params use 2 slots).
+  size_t numParamSlots = 0;
+  for (auto t : paramTypes) {
+    numParamSlots += (t == WasmValType::I64) ? 2 : 1;
+  }
+
   if (unreachable_) {
     // Push a dummy Try entry so onEnd/onCatch can pop it.
     ControlEntry entry;
     entry.kind = ControlEntry::Try;
     entry.contBlock = nullptr;
     entry.catchBlock = nullptr;
+    entry.paramTypes = paramTypes;
     entry.resultTypes = resultTypes;
     entry.stackHeight = valueStack_.size();
     entry.outerUnreachable = true;
@@ -5929,8 +5939,13 @@ void WasmIRGen::onTry(const std::vector<WasmValType> &resultTypes) {
   entry.kind = ControlEntry::Try;
   entry.contBlock = contBlock; // br target and end continuation
   entry.catchBlock = catchBlock;
+  entry.paramTypes = paramTypes;
   entry.resultTypes = resultTypes;
-  entry.stackHeight = valueStack_.size();
+  // Below the params, as onBlock does, so they are part of the try body's
+  // accessible stack. This is also the height a handler runs at: an
+  // exception unwinds past the params the body consumed, so a handler sees
+  // the stack as it was before they were pushed.
+  entry.stackHeight = valueStack_.size() - numParamSlots;
   entry.outerUnreachable = unreachable_;
 
   // Create phi nodes in the continuation block for results.
@@ -5960,6 +5975,20 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
+      // The try body's results are the try's results on this edge, so they
+      // have to reach the continuation's phis like any other incoming edge.
+      // Without this the phi had one operand for two predecessors, and the
+      // operand it did have was the catch handler's payload load -- which
+      // does not dominate the continuation, so the lowered IR verifier
+      // rejected the function outright:
+      //
+      //   Operand %8 must dominate the Instruction %2
+      //
+      // branchTargeted for the same reason the explicit branches below set
+      // it: onEnd decides whether the continuation is reachable from it, and
+      // this edge reaches it whether or not any handler falls through.
+      addBranchPhiOperands(entry);
+      entry.branchTargeted = true;
       // End the try body: TryEndInst exits the protected region.
       builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
     }
@@ -6080,6 +6109,10 @@ void WasmIRGen::onCatchAll() {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
+      // The try body's results reach the continuation on this edge too --
+      // see the comment on the same three lines in onCatch.
+      addBranchPhiOperands(entry);
+      entry.branchTargeted = true;
       builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
     }
 
