@@ -23,6 +23,7 @@
 #include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyTable.h"
+#include "hermes/VM/JSWebAssemblyTag.h"
 #endif
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
@@ -1549,6 +1550,91 @@ CallResult<HermesValue> wasmFuncTypeId(void *, Runtime &runtime) {
       lv.typeId.getHermesValue().isNumber() &&
       "wasmSetFuncInfo refuses a non-Number type id");
   return lv.typeId.getHermesValue();
+}
+
+/// Read the argument list of wasmMakeTag/wasmCheckTagType as a Wasm tag
+/// signature: \p first onwards must each be a Number holding a
+/// JSWebAssemblyTag::ValType code. \return false if any is not. It raises
+/// nothing itself -- the caller does, because the two callers want different
+/// messages.
+///
+/// Allocates on the C++ heap, by growing \p out, and nothing on the JS heap:
+/// it reads argument registers and appends to a vector. It is not a GC
+/// safepoint, which is why wasmCheckTagType may hold a raw JSWebAssemblyTag*
+/// across the call.
+///
+/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
+/// with its index, so the codes are validated rather than assumed. Generated
+/// code only ever passes globalValTypeCode results, which the static_assert in
+/// JSWebAssemblyTag.h ties to this enum.
+static bool readWasmTagParams(
+    NativeArgs &args,
+    unsigned first,
+    std::vector<JSWebAssemblyTag::ValType> &out) {
+  constexpr double kMaxCode =
+      static_cast<double>(JSWebAssemblyTag::ValType::FuncRef);
+  for (unsigned i = first, e = args.getArgCount(); i < e; ++i) {
+    HermesValue v = args.getArg(i);
+    if (LLVM_UNLIKELY(!v.isNumber()))
+      return false;
+    // The range and integrality tests are done in DOUBLE, before any cast.
+    // Converting NaN, an infinity, or an out-of-range value to an integer
+    // type is undefined behaviour, so a cast-then-check would already have
+    // gone wrong by the time the check ran. wasmRefBufIndexArg orders it the
+    // same way.
+    double d = v.getNumber();
+    if (LLVM_UNLIKELY(!(d >= 0) || !(d <= kMaxCode) || d != std::trunc(d)))
+      return false;
+    out.push_back(
+        static_cast<JSWebAssemblyTag::ValType>(static_cast<unsigned>(d)));
+  }
+  return true;
+}
+
+/// wasmMakeTag(code0, code1, ...) -> a WebAssembly.Tag with those parameters.
+///
+/// The signature goes in the cell's C++ field, so there is no property for
+/// script to intercept on store or rewrite afterwards, and a module's tag
+/// becomes the same kind of object `new WebAssembly.Tag(...)` produces.
+CallResult<HermesValue> wasmMakeTag(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  std::vector<JSWebAssemblyTag::ValType> params;
+  if (LLVM_UNLIKELY(!readWasmTagParams(args, 0, params)))
+    return runtime.raiseTypeError("wasmMakeTag: bad value type code");
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyTag> tag;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  Handle<JSObject> proto{runtime.wasmTagPrototype};
+  lv.tag = JSWebAssemblyTag::create(runtime, proto);
+  lv.tag->setParameters(std::move(params));
+  return lv.tag.getHermesValue();
+}
+
+/// wasmCheckTagType(value, code0, code1, ...) -> boolean.
+///
+/// The tag import check: a genuine tag, with exactly this signature. The
+/// dyn_vmcast is the brand, the same shape wasmLinkGlobal/Memory/Table use.
+///
+/// Answers rather than throws for every argument except a malformed code
+/// list, which only bytecode this compiler did not emit can produce: anything
+/// that is not a Tag is simply false.
+CallResult<HermesValue> wasmCheckTagType(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *tag = dyn_vmcast<JSWebAssemblyTag>(args.getArg(0));
+  if (!tag)
+    return HermesValue::encodeBoolValue(false);
+
+  std::vector<JSWebAssemblyTag::ValType> expected;
+  if (LLVM_UNLIKELY(!readWasmTagParams(args, 1, expected)))
+    return runtime.raiseTypeError("wasmCheckTagType: bad value type code");
+
+  // No JS-heap allocation happens between the dyn_vmcast and this read, so
+  // the raw pointer is still good. readWasmTagParams reads argument registers
+  // and grows a std::vector, neither of which is a GC safepoint.
+  const std::vector<JSWebAssemblyTag::ValType> &actual = tag->getParameters();
+  return HermesValue::encodeBoolValue(actual == expected);
 }
 
 /// Read \p arg as a slot count or slot index: a Number that is a non-negative
@@ -4471,6 +4557,13 @@ void createHermesBuiltins(Runtime &runtime) {
       0);
   defineInternMethod(
       B::HermesBuiltin_wasmFuncTypeId, P::wasmFuncTypeId, wasmFuncTypeId, 1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMakeTag, P::wasmMakeTag, wasmMakeTag, 0);
+  defineInternMethod(
+      B::HermesBuiltin_wasmCheckTagType,
+      P::wasmCheckTagType,
+      wasmCheckTagType,
+      1);
 #else
   // Without Wasm the bodies above are not compiled and the names are not even
   // predefined strings, but Builtins.def numbering stays independent of
@@ -4490,7 +4583,7 @@ void createHermesBuiltins(Runtime &runtime) {
   // the "native builtin not initialized" assertion at startup -- after
   // compiling and linking cleanly.
   for (unsigned i = B::HermesBuiltin_wasmTrap;
-       i <= B::HermesBuiltin_wasmFuncTypeId;
+       i <= B::HermesBuiltin_wasmCheckTagType;
        ++i) {
     defineInternMethod(
         static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);

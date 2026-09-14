@@ -103,16 +103,6 @@ static uint8_t globalValTypeCode(WasmValType vt) {
   }
 }
 
-/// Build a type string for a tag type, e.g. "tag:i:".
-/// Tags have parameters but no results per spec.
-static std::string buildTagTypeString(const WasmFuncType &ft) {
-  std::string s = "tag:";
-  for (auto p : ft.params)
-    s += valTypeChar(p);
-  s += ':';
-  return s;
-}
-
 /// If \p val is an AsInt32Inst whose operand is boolean, return the boolean
 /// operand directly (suitable for use as a CondBranchInst condition).
 /// Otherwise return \p val unchanged.
@@ -1583,49 +1573,35 @@ void WasmIRGen::createFunctions() {
         }
 
         case WasmExternalKind::Tag: {
-          // Load __wasm_type__ from the import value.
-          auto *typeStr = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("__wasm_type__"));
-          auto *typeIsUndef = builder_.createBinaryOperatorInst(
-              typeStr, undefinedVal,
-              ValueKind::BinaryStrictlyEqualInstKind);
-          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
-          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
-          auto *notFuncBB = builder_.createBasicBlock(topLevelFunc);
-          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          // If __wasm_type__ is undefined, the value is not a tag this engine
-          // built -- but it must still not be an Exported Function. A tag
-          // import satisfied by a function export is
-          // `assert_unlinkable ... "incompatible import type"` in
-          // spec/imports.wast, and it used to be refused only INCIDENTALLY:
-          // wrappers carried a "func:..." string, which differed from the
-          // expected "tag:..." one. Wrappers publish nothing now, so the
-          // refusal is made on the brand instead of on a string that happened
-          // to disagree.
+          // A tag import must be a GENUINE WebAssembly.Tag with exactly this
+          // signature. The brand is a dyn_vmcast inside the builtin, the same
+          // shape the memory, table and global import paths use.
           //
-          // Anything else with no signature is still accepted as a raw JS
-          // value, which is what this path has always done.
-          builder_.createCondBranchInst(
-              typeIsUndef, notFuncBB, checkTypeBB);
-
-          builder_.setInsertionBlock(notFuncBB);
-          auto *isExportedFunc = builder_.createBinaryOperatorInst(
-              helpers_.emitFuncTypeId(importVal),
-              undefinedVal,
-              ValueKind::BinaryStrictlyNotEqualInstKind);
-          builder_.createCondBranchInst(
-              isExportedFunc, linkErrorBB, acceptBB);
-
-          builder_.setInsertionBlock(checkTypeBB);
+          // What this replaced compared a `__wasm_type__` string, and
+          // accepted anything carrying none as a "raw JS value as tag". That
+          // last part is why swallowing the store on the EXPORTER's side made
+          // the IMPORTER accept it.
+          //
+          // Such an object was not inert: the accepted value goes straight
+          // into tagVars_, onThrow puts it in the exception, and
+          // wasmMatchException compares identity -- so a module handed an
+          // ordinary object could throw and catch with it, and two instances
+          // handed the same object would agree. Refusing it changes working,
+          // nonconforming behaviour rather than removing a no-op. Node
+          // refuses it.
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          // A function export reaching here is covered by the same refusal:
+          // it is not a Tag, so the brand check fails. spec/imports.wast has
+          // that as `assert_unlinkable ... "incompatible import type"`. The
+          // previous commit refused it explicitly, by asking wasmFuncTypeId
+          // whether the value was branded; that separate arm is gone because
+          // the brand check subsumes it.
           const WasmFuncType &tagFuncType =
               moduleInfo_.types[imp.tagTypeIndex];
-          std::string expectedType = buildTagTypeString(tagFuncType);
-          auto *mismatch = builder_.createBinaryOperatorInst(
-              typeStr,
-              builder_.getLiteralString(expectedType),
-              ValueKind::BinaryStrictlyNotEqualInstKind);
-          builder_.createCondBranchInst(
-              mismatch, linkErrorBB, acceptBB);
+          auto *ok =
+              helpers_.emitCheckTagType(importVal, tagTypeCodes(tagFuncType));
+          builder_.createCondBranchInst(ok, acceptBB, linkErrorBB);
 
           builder_.setInsertionBlock(linkErrorBB);
           helpers_.emitLinkError(builder_.getLiteralString(
@@ -1950,6 +1926,20 @@ WasmGlobalType WasmIRGen::globalTypeAt(uint32_t index) const {
   return WasmGlobalType{};
 }
 
+bool WasmIRGen::validateTagTypes() {
+  for (uint32_t i = 0, e = moduleInfo_.totalTagCount(); i < e; ++i) {
+    const WasmFuncType &ft = moduleInfo_.getTagType(i);
+    for (auto p : ft.params) {
+      if (LLVM_UNLIKELY(p == WasmValType::V128)) {
+        errorMsg_ = "tag " + std::to_string(i) +
+            " has a v128 parameter, and SIMD is not supported";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool WasmIRGen::validateGlobalExportTypes() {
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Global)
@@ -2011,6 +2001,21 @@ bool WasmIRGen::finalizeModule() {
   // before the export loops below, so that no half-populated exports object
   // is built for a module that is about to be refused.
   if (LLVM_UNLIKELY(!validateGlobalExportTypes()))
+    return false;
+
+  // The same treatment for a v128 TAG parameter, and for the same reason: tag
+  // parameter codes are globalValTypeCode's, which maps v128 to 0xFF, and
+  // wasmMakeTag range-checks that and raises "wasmMakeTag: bad value type
+  // code". Without this the module compiles and dies at instantiation on an
+  // internal builtin's message.
+  //
+  // Refusing here is late in the sense that createTagObjects() has already
+  // emitted the wasmMakeTag call -- it runs from createFunctions(), well
+  // before this -- but a refusal discards the half-built IR module, so that
+  // call is never reached. Not the same as the global check above, which runs
+  // BEFORE the export loops that would emit wasmMakeGlobal; only the tag one
+  // emits first and validates after.
+  if (LLVM_UNLIKELY(!validateTagTypes()))
     return false;
 
   // Ensure insertion is at the instantiate function's entry block.
@@ -2429,7 +2434,8 @@ bool WasmIRGen::finalizeModule() {
         globalObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
-  // Add tag exports as plain objects with __wasm_type__ metadata.
+  // Publish the tag exports. Each is the WebAssembly.Tag createTagObjects
+  // built, or the one an import supplied.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Tag)
       continue;
@@ -7578,20 +7584,33 @@ void WasmIRGen::onDataDrop(uint32_t segmentIndex) {
 
 // --- Table operations (J.1) ---
 
+llvh::SmallVector<Value *, 4> WasmIRGen::tagTypeCodes(
+    const WasmFuncType &ft) {
+  llvh::SmallVector<Value *, 4> codes;
+  for (auto p : ft.params)
+    codes.push_back(
+        builder_.getLiteralNumber(static_cast<double>(globalValTypeCode(p))));
+  return codes;
+}
+
 void WasmIRGen::createTagObjects(Instruction *tlScope) {
   uint32_t numImported = moduleInfo_.importedTagCount();
   for (uint32_t i = numImported; i < moduleInfo_.totalTagCount(); ++i) {
     if (!tagVars_[i])
       continue;
-    // One object per tag, created once per instance. Its identity is the
-    // tag's identity, so two tags with the same signature stay distinct and
-    // an imported tag stays equal to the exporter's.
-    auto *tagObj = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(
-            buildTagTypeString(moduleInfo_.getTagType(i))),
-        tagObj,
-        builder_.getLiteralString("__wasm_type__"));
+    // One WebAssembly.Tag per tag, created once per instance. Its identity is
+    // the tag's identity, so two tags with the same signature stay distinct
+    // and an imported tag stays equal to the exporter's.
+    //
+    // A real Tag, not a plain object carrying a `__wasm_type__` string. That
+    // string was published with an ordinary store, and the object it went on
+    // was an object literal, whose prototype is Object.prototype -- so a
+    // setter installed there ran user JS inside instantiation and swallowed
+    // the store, and what did get stored was writable on an object handed
+    // straight to script. The signature lives in the cell's own field now.
+    // See e2e-tag-import-brand.wat.
+    auto *tagObj =
+        helpers_.emitMakeTag(tagTypeCodes(moduleInfo_.getTagType(i)));
     builder_.createStoreFrameInst(tlScope, tagObj, tagVars_[i]);
   }
 }

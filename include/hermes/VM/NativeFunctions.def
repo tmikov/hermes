@@ -496,6 +496,8 @@ NATIVE_FUNCTION(wasmRefBufGet)
 NATIVE_FUNCTION(wasmRefBufSet)
 NATIVE_FUNCTION(wasmMakeResultArray)
 NATIVE_FUNCTION(wasmFuncTypeId)
+NATIVE_FUNCTION(wasmMakeTag)
+NATIVE_FUNCTION(wasmCheckTagType)
 #endif // HERMES_ENABLE_WASM
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)

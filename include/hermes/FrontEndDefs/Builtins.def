@@ -470,6 +470,31 @@ WASM_BUILTIN(wasmMakeResultArray)
 // import and takes its types from the importer's declaration.
 WASM_BUILTIN(wasmFuncTypeId)
 
+// wasmMakeTag(code0, code1, ...) -> a WebAssembly.Tag whose parameters are the
+// given value-type codes, which are WasmIRGen::globalValTypeCode's and so are
+// JSWebAssemblyTag::ValType's.
+//
+// A module-defined tag used to be a plain object literal carrying its
+// signature in an ordinary `__wasm_type__` string property. That store walked
+// Object.prototype, so a setter there ran user JS inside instantiation and
+// swallowed the store; and what did get stored was writable on an object
+// handed to script. Building the tag here instead puts the signature in the
+// cell's own C++ field, which has no name to assign to -- and makes a module's
+// exported tag a real WebAssembly.Tag, which the spec asks for and which
+// `new WebAssembly.Exception(tag, ...)` requires.
+WASM_BUILTIN(wasmMakeTag)
+
+// wasmCheckTagType(value, code0, code1, ...) -> boolean: is `value` a
+// WebAssembly.Tag whose parameters are exactly these value-type codes?
+//
+// The tag import check. It replaced a string comparison against
+// `__wasm_type__`, which had the three failures wasmMakeTag describes, plus a
+// fourth of its own: a value carrying no signature at all was accepted as a
+// "raw JS value as tag", so swallowing the store on the EXPORTER's side made
+// the IMPORTER accept it. A tag import now has to be a genuine tag, which is
+// what the spec says and what node does.
+WASM_BUILTIN(wasmCheckTagType)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

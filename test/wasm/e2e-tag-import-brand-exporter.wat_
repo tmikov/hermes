@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-tag-import-brand.wat. `ref` is here because a tag with a
+;; reference parameter is the case JSWebAssemblyTag::ValType could not express
+;; before this change.
+(module
+  (tag (export "t_i32") (param i32))
+  (tag (export "t_f64") (param f64))
+  (tag (export "t_ref") (param externref)))

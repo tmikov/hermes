@@ -6,22 +6,50 @@
  */
 
 // JS driver for e2e-tag-export.wat.
-// Verifies that exported tags are plain objects with __wasm_type__ metadata.
 
-var hbcPath = hermescli.getScriptArgs()[0];
-var bytes = hermescli.loadFile(hbcPath);
-var mod = WebAssembly.Module.fromHermesBytecode(bytes);
-var instance = new WebAssembly.Instance(mod);
-var exports = instance.exports;
+// ONE Module, instantiated twice below. Building a second Module would make
+// the cross-instance check pass even if tags were cached per Module object.
+var mod = WebAssembly.Module.fromHermesBytecode(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+var e = new WebAssembly.Instance(mod).exports;
 
-print("tag_empty type:", typeof exports.tag_empty);
-print("tag_empty __wasm_type__:", exports.tag_empty.__wasm_type__);
+var NAMES = ['tag_empty', 'tag_i32', 'tag_f32', 'tag_i32_f64', 'tag_ext',
+             'tag_fn', 'tag_i32_b'];
+for (var i = 0; i < NAMES.length; i++) {
+  var t = e[NAMES[i]];
+  print(NAMES[i] + ': Tag ' + (t instanceof WebAssembly.Tag) +
+        ', toString ' + Object.prototype.toString.call(t) +
+        ', published ' + t.__wasm_type__);
+}
 
-print("tag_i32 type:", typeof exports.tag_i32);
-print("tag_i32 __wasm_type__:", exports.tag_i32.__wasm_type__);
+// tag_i32 and tag_i32_b are declared separately with the same signature.
+// Nominal identity means they are still two different tags.
+print('same signature, different tags: ' + (e.tag_i32 !== e.tag_i32_b));
 
-print("tag_f32 type:", typeof exports.tag_f32);
-print("tag_f32 __wasm_type__:", exports.tag_f32.__wasm_type__);
+// A second instance of the SAME Module object gets its own tags, so identity
+// is per-instance -- not per-signature, and not cached on the Module.
+var e2 = new WebAssembly.Instance(mod).exports;
+print('and across instances of the same module: ' +
+      (e2.tag_i32 !== e.tag_i32 && e2.tag_i32 instanceof WebAssembly.Tag));
 
-print("tag_i32_f64 type:", typeof exports.tag_i32_f64);
-print("tag_i32_f64 __wasm_type__:", exports.tag_i32_f64.__wasm_type__);
+print('i32 payload 42.7 -> ' +
+      new WebAssembly.Exception(e.tag_i32, [42.7]).getArg(e.tag_i32, 0));
+print('f32 payload 0.1 -> ' +
+      new WebAssembly.Exception(e.tag_f32, [0.1]).getArg(e.tag_f32, 0));
+
+var obj = {tag: 'payload'};
+print('externref payload is the very object: ' +
+      (new WebAssembly.Exception(e.tag_ext, [obj]).getArg(e.tag_ext, 0) ===
+       obj));
+print('funcref payload is the exported function: ' +
+      (new WebAssembly.Exception(e.tag_fn, [e.f]).getArg(e.tag_fn, 0) === e.f));
+print('funcref payload null: ' +
+      (new WebAssembly.Exception(e.tag_fn, [null]).getArg(e.tag_fn, 0) ===
+       null));
+try {
+  new WebAssembly.Exception(e.tag_fn, [function() {}]);
+  print('funcref payload a plain function: accepted');
+} catch (err) {
+  print('funcref payload a plain function: ' + err.name);
+}
+print('done');

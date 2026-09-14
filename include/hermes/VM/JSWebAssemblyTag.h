@@ -34,7 +34,21 @@ class JSWebAssemblyTag final : public JSObject {
   }
 
   /// Value type enum matching WebAssembly value types.
-  enum class ValType : uint8_t { I32, I64, F32, F64 };
+  ///
+  /// The codes are deliberately the same as JSWebAssemblyGlobal::ValType's,
+  /// so one table in the Wasm frontend serves both: a module-defined tag is
+  /// built by the wasmMakeTag builtin from codes WasmIRGen::globalValTypeCode
+  /// produced. The static_assert below is the other half of that agreement.
+  enum class ValType : uint8_t { I32, I64, F32, F64, ExternRef, FuncRef };
+  static_assert(
+      static_cast<uint8_t>(ValType::I32) == 0 &&
+          static_cast<uint8_t>(ValType::I64) == 1 &&
+          static_cast<uint8_t>(ValType::F32) == 2 &&
+          static_cast<uint8_t>(ValType::F64) == 3 &&
+          static_cast<uint8_t>(ValType::ExternRef) == 4 &&
+          static_cast<uint8_t>(ValType::FuncRef) == 5,
+      "ValType codes are baked into WasmIRGen::globalValTypeCode; update it "
+      "before changing them");
 
   /// Create a JSWebAssemblyTag with the given prototype.
   static PseudoHandle<JSWebAssemblyTag> create(

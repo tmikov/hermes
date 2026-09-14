@@ -534,6 +534,15 @@ class WasmIRGen {
   /// \return false, having set errorMsg_, for the first one that does.
   bool validateGlobalExportTypes();
 
+  /// Check that no tag has a parameter type the engine cannot represent,
+  /// which today means v128: globalValTypeCode maps it to 0xFF and wasmMakeTag
+  /// rejects that code. Every tag is checked, defined or imported and whether
+  /// or not it is exported, because createTagObjects() builds an object for
+  /// each defined one and the import check passes the same codes for each
+  /// imported one.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateTagTypes();
+
   /// Whether to enable strict Wasm memory bounds checking (from --test262).
   bool test262_ = false;
 
@@ -704,6 +713,16 @@ class WasmIRGen {
   /// where a module-local tag index cannot -- another module numbers its tags
   /// differently, so throw/catch across a boundary matched the wrong handler.
   std::vector<Variable *> tagVars_;
+
+  /// \return the JSWebAssemblyTag::ValType codes for \p ft's parameters, as
+  /// literal operands for wasmMakeTag / wasmCheckTagType. Tag parameter codes
+  /// are globalValTypeCode's; JSWebAssemblyTag.h static_asserts the agreement.
+  ///
+  /// A type with no code -- v128, which globalValTypeCode maps to 0xFF -- is
+  /// emitted here rather than refused here: this runs during createFunctions()
+  /// and validateTagTypes() runs later, in finalizeModule(). The emitted call
+  /// is never reached, because a refusal discards the half-built IR module.
+  llvh::SmallVector<Value *, 4> tagTypeCodes(const WasmFuncType &ft);
 
   /// Create the tag objects for this module's own tags. Imported tags are
   /// stored into tagVars_ by import validation instead.

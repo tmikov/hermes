@@ -604,6 +604,24 @@ Instruction *WasmHelpers::emitFuncTypeId(Value *value) {
       BuiltinMethod::HermesBuiltin_wasmFuncTypeId, {value});
 }
 
+Instruction *WasmHelpers::emitMakeTag(llvh::ArrayRef<Value *> typeCodes) {
+  llvh::SmallVector<Value *, 4> callArgs(typeCodes.begin(), typeCodes.end());
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMakeTag, callArgs);
+  inst->setType(Type::createObject());
+  return inst;
+}
+
+Instruction *WasmHelpers::emitCheckTagType(
+    Value *value,
+    llvh::ArrayRef<Value *> typeCodes) {
+  llvh::SmallVector<Value *, 5> callArgs;
+  callArgs.push_back(value);
+  callArgs.append(typeCodes.begin(), typeCodes.end());
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmCheckTagType, callArgs);
+}
+
 Instruction *WasmHelpers::emitAllocRefBuf(Value *slots) {
   auto *inst = builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmAllocRefBuf, {slots});

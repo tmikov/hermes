@@ -573,6 +573,8 @@ STR(wasmRefBufGet, "wasmRefBufGet")
 STR(wasmRefBufSet, "wasmRefBufSet")
 STR(wasmMakeResultArray, "wasmMakeResultArray")
 STR(wasmFuncTypeId, "wasmFuncTypeId")
+STR(wasmMakeTag, "wasmMakeTag")
+STR(wasmCheckTagType, "wasmCheckTagType")
 #endif // HERMES_ENABLE_WASM
 STR(__wasmTag, "__wasmTag")
 STR(__wasmPayload, "__wasmPayload")

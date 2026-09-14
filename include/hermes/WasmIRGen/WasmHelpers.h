@@ -369,6 +369,19 @@ class WasmHelpers {
   /// legitimately satisfies a function import.
   Instruction *emitFuncTypeId(Value *value);
 
+  /// Emit wasmMakeTag: a WebAssembly.Tag whose parameters are \p typeCodes,
+  /// which are globalValTypeCode results. Used instead of building a plain
+  /// object and storing a signature string on it: the string was an ordinary
+  /// property, so the store walked Object.prototype and the result was
+  /// writable on an object handed to script.
+  Instruction *emitMakeTag(llvh::ArrayRef<Value *> typeCodes);
+
+  /// Emit wasmCheckTagType: is \p value a WebAssembly.Tag whose parameters
+  /// are exactly \p typeCodes? The tag import check.
+  Instruction *emitCheckTagType(
+      Value *value,
+      llvh::ArrayRef<Value *> typeCodes);
+
   /// Emit wasmAllocRefBuf: allocate the private container that carries the
   /// REFERENCE results of one multi-value call, \p slots elements long. The
   /// caller passes the result to the callee as a hidden argument and reads the

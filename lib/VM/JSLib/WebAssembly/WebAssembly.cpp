@@ -2642,6 +2642,18 @@ static bool parseValTypeString(
     result = JSWebAssemblyTag::ValType::F64;
     return true;
   }
+  // Spelled exactly as the Global parser above spells them, and refusing
+  // "funcref" for the same reason: the JS API's ToValueType lists `anyfunc`,
+  // an importing module checks against whatever this constructor produced,
+  // and being lenient here would admit a Tag node's constructor refuses.
+  if (matchStr("externref", 9)) {
+    result = JSWebAssemblyTag::ValType::ExternRef;
+    return true;
+  }
+  if (matchStr("anyfunc", 7)) {
+    result = JSWebAssemblyTag::ValType::FuncRef;
+    return true;
+  }
   return false;
 }
 
@@ -2735,7 +2747,7 @@ wasmTagConstructor(void *context, Runtime &runtime) {
     if (!parseValTypeString(runtime, lv.elemStr, vt)) {
       return runtime.raiseTypeError(
           "WebAssembly.Tag(): parameter type must be "
-          "'i32', 'i64', 'f32', or 'f64'");
+          "'i32', 'i64', 'f32', 'f64', 'externref', or 'anyfunc'");
     }
     paramTypes.push_back(vt);
   }
@@ -2822,6 +2834,35 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
     }
     lv.elemVal = std::move(*elemRes);
 
+    // A REFERENCE parameter is not a number and must not be run through
+    // ToNumber, which for an object calls valueOf/toString and yields
+    // whatever they produce -- NaN for an ordinary object, some unrelated
+    // number for one with a valueOf, or an exception. Any of those loses the
+    // reference. This arm became
+    // reachable when module-defined tags became JSWebAssemblyTag cells: until
+    // then a tag with a reference parameter could not be a Tag at all, so
+    // this constructor could not be handed one.
+    //
+    // externref admits any JS value. funcref admits null or a WebAssembly
+    // Exported Function and nothing else, which is the same admission the
+    // funcref table and global funnels make -- isWasmExportedFunction is the
+    // one definition of it, deliberately shared.
+    //
+    // This is the narrow fix: stop coercing a reference. It is NOT the wider
+    // validation of this inbound boundary, which is 01a0460b-abb6.
+    if (paramTypes[i] == JSWebAssemblyTag::ValType::ExternRef ||
+        paramTypes[i] == JSWebAssemblyTag::ValType::FuncRef) {
+      if (paramTypes[i] == JSWebAssemblyTag::ValType::FuncRef &&
+          !lv.elemVal->isNull() &&
+          !isWasmExportedFunction(runtime, lv.elemVal)) {
+        return runtime.raiseTypeError(
+            "WebAssembly.Exception(): a funcref payload value must be null "
+            "or a WebAssembly Exported Function");
+      }
+      (void)JSArray::setElementAt(lv.arr, runtime, i, lv.elemVal);
+      continue;
+    }
+
     // Coerce to number.
     lv.numVal = lv.elemVal.getHermesValue();
     auto numRes = toNumber_RJS(runtime, lv.numVal);
@@ -2843,6 +2884,9 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
       case JSWebAssemblyTag::ValType::F64:
         // Keep full double precision.
         break;
+      case JSWebAssemblyTag::ValType::ExternRef:
+      case JSWebAssemblyTag::ValType::FuncRef:
+        llvm_unreachable("reference parameters returned above");
     }
 
     lv.numVal = HermesValue::encodeTrustedNumberValue(val);
