@@ -1094,10 +1094,16 @@ CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
   // and a module-local index means nothing in another module.
   HermesValue expectedTag = args.getArg(1);
 
-  // Check if caught is a JSArray.
+  // Check if caught is a JSArray. dyn_vmcast_or_null TESTS the type;
+  // vmcast_or_null, which stood here, only asserts it -- so the line below
+  // was dead for every non-null object, and anything else a JS import threw
+  // became a JSArray pointer to something that was not one. `throw {}` from
+  // an import inside a `try` was enough: an assertion failure in a Debug
+  // build, and in a Release build a length and elements read off the wrong
+  // cell. See e2e-catch-non-array.wat.
   if (!caught.isObject())
     return HermesValue::encodeUndefinedValue();
-  auto *obj = vmcast_or_null<JSArray>(caught.getObject(runtime));
+  auto *obj = dyn_vmcast_or_null<JSArray>(caught.getObject(runtime));
   if (!obj)
     return HermesValue::encodeUndefinedValue();
 
