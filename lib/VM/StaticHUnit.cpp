@@ -13,13 +13,45 @@
 #include "hermes/VM/PropertyCache.h"
 #include "hermes/VM/StaticHUtils.h"
 
+#include <algorithm>
 #include <cstdarg>
+#include <limits>
 
 using namespace hermes;
 using namespace hermes::vm;
 
 static void sh_unit_init_symbols(Runtime &runtime, SHUnit *unit);
 static SHLegacyValue sh_unit_run(SHRuntime *shr, SHUnit *unit);
+
+bool hermes::vm::shUnitEnsureCapacity(Runtime &runtime, uint32_t index) {
+  if (index < runtime.units_size)
+    return true;
+
+  uint32_t newSize = runtime.units_size ? runtime.units_size : 8;
+  while (newSize <= index) {
+    if (newSize > std::numeric_limits<uint32_t>::max() / 2)
+      return false;
+    newSize *= 2;
+  }
+  if (newSize > std::numeric_limits<size_t>::max() / sizeof(SHUnit *))
+    return false;
+
+  // Into a temporary, committed only on success: realloc returning null
+  // leaves the old block valid, and overwriting the member with it would
+  // lose every registered unit on the way to reporting failure.
+  SHUnit **grown = static_cast<SHUnit **>(
+      realloc(runtime.units, (size_t)newSize * sizeof(SHUnit *)));
+  if (!grown)
+    return false;
+
+  // The lookup reads a null slot as "not registered in this runtime". The
+  // fixed array got that from a std::fill at construction; realloc gives
+  // uninitialized memory.
+  std::fill(grown + runtime.units_size, grown + newSize, nullptr);
+  runtime.units = grown;
+  runtime.units_size = newSize;
+  return true;
+}
 
 extern "C" bool _sh_initialize_units(SHRuntime *shr, uint32_t count, ...) {
   Runtime &runtime = getRuntime(shr);
@@ -93,13 +125,16 @@ extern "C" SHLegacyValue _sh_unit_init(
     static std::mutex idxMtx;
     std::lock_guard<std::mutex> lock(idxMtx);
     // If this unit does not have an index yet, assign one.
-    if (!*unit->index) {
-      if (nextIndex == std::size(runtime.units)) {
-        fprintf(stderr, "Too many SH units registered\n");
-        abort();
-      }
+    if (!*unit->index)
       *unit->index = nextIndex++;
-    }
+  }
+
+  // Unconditional, and outside the block above: the index may have been
+  // assigned by a different runtime, whose array size says nothing about
+  // this one's.
+  if (!shUnitEnsureCapacity(runtime, *unit->index)) {
+    fprintf(stderr, "Cannot grow the SH unit table\n");
+    abort();
   }
 
   // If the unit has already been initialized, discard the new copy.

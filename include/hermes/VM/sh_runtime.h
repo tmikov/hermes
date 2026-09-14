@@ -73,8 +73,19 @@ typedef struct SHRuntime {
   uint8_t dummy;
 #endif
 
-  /// The active SHUnits in this runtime.
-  SHUnit *units[8];
+  /// The active SHUnits in this runtime, indexed by the process-wide unit
+  /// index. Generated code reads shr->units[unit_index] in the prologue of
+  /// every function that touches its unit, which is why this is an array
+  /// reached by one load rather than a std::vector.
+  ///
+  /// Heap-allocated and grown on demand by _sh_unit_init. It was a fixed
+  /// SHUnit *units[8] until a program needed one unit per JavaScript module.
+  /// Growth is safe while units run: a frame holds the SHUnit * itself, not
+  /// a pointer into this array, and the SHUnit objects do not move.
+  SHUnit **units;
+  /// Number of slots in `units`. Per runtime, while unit indices are
+  /// per process -- see shUnitEnsureCapacity().
+  uint32_t units_size;
 
   /// The current top of the exception handler stack.
   SHJmpBuf *shCurJmpBuf;
