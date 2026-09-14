@@ -7,6 +7,7 @@
 
 #include "hermes/VM/StaticHUtils.h"
 
+#include "StaticHUnitFixtures.h"
 #include "VMRuntimeTestHelpers.h"
 #include "gtest/gtest.h"
 
@@ -76,36 +77,6 @@ TEST(StaticHUnitTest, MallocSizeCountsTheBackingStore) {
   EXPECT_GE(after - before, 4096u * sizeof(SHUnit *));
 }
 
-/// A minimal unit. unit_main mirrors what SH.cpp emits for an empty global:
-/// enter, leave, return undefined. Doing less corrupts the frame that
-/// sh_unit_run set up.
-static uint32_t g_testUnitIndex = 0;
-
-static SHNativeFuncInfo g_testUnitMainInfo = {};
-
-static SHLegacyValue testUnitMain(SHRuntime *shr) {
-  struct {
-    SHLocals head;
-  } locals;
-  SHLegacyValue *frame = _sh_enter(shr, &locals.head, 1);
-  locals.head.count = 0;
-  _sh_leave(shr, &locals.head, frame);
-  return _sh_ljs_undefined();
-}
-
-/// Model this initializer on the one SH.cpp emits (search SH.cpp for
-/// "CREATE_THIS_UNIT"); take SHNativeFuncInfo's field values from
-/// static_h.h rather than guessing them. Everything not needed by a unit
-/// that defines no strings and no properties stays zero.
-static SHUnit *createTestUnit() {
-  auto *unit = static_cast<SHUnit *>(calloc(1, sizeof(SHUnit)));
-  unit->index = &g_testUnitIndex;
-  unit->unit_main = testUnitMain;
-  unit->unit_main_info = &g_testUnitMainInfo;
-  unit->unit_name = "StaticHUnitTest.testUnit";
-  return unit;
-}
-
 /// The second-runtime hazard, through the real entry point. Runtime A
 /// assigns the index; runtime B then sees an already-assigned index and
 /// must still grow its own array before the lookup. With the capacity call
@@ -121,33 +92,6 @@ TEST(StaticHUnitTest, InitInASecondRuntimeGrowsThatRuntimesArray) {
   ASSERT_TRUE(_sh_unit_init_guarded(getSHRuntime(*b), createTestUnit, &v));
   EXPECT_GT(b->units_size, g_testUnitIndex);
   EXPECT_NE(nullptr, b->units[g_testUnitIndex]);
-}
-
-static uint32_t g_throwingUnitIndex = 0;
-
-static SHNativeFuncInfo g_throwingUnitMainInfo = {};
-
-/// A unit whose top-level code throws, which a CommonJS-wrapped module
-/// cannot do -- its global only creates a closure.
-static SHLegacyValue throwingUnitMain(SHRuntime *shr) {
-  struct {
-    SHLocals head;
-  } locals;
-  SHLegacyValue *frame = _sh_enter(shr, &locals.head, 1);
-  locals.head.count = 0;
-  _sh_throw(shr, _sh_ljs_double(42));
-  // _sh_throw does not return; the leave is here for shape only.
-  _sh_leave(shr, &locals.head, frame);
-  return _sh_ljs_undefined();
-}
-
-static SHUnit *createThrowingUnit() {
-  auto *unit = static_cast<SHUnit *>(calloc(1, sizeof(SHUnit)));
-  unit->index = &g_throwingUnitIndex;
-  unit->unit_main = throwingUnitMain;
-  unit->unit_main_info = &g_throwingUnitMainInfo;
-  unit->unit_name = "StaticHUnitTest.throwingUnit";
-  return unit;
 }
 
 TEST(StaticHUnitTest, GuardedInitReportsAThrowingUnit) {

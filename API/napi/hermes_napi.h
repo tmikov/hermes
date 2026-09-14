@@ -270,6 +270,31 @@ NAPI_EXTERN napi_status NAPI_CDECL hermes_run_bytecode(
     const hermes_bytecode_flags *flags,
     napi_value *result);
 
+/// An SH compilation unit, opaque to callers. Declared here so an embedder
+/// can hold a creator function pointer without including static_h.h, whose
+/// inline functions depend on the VM layout defines a caller has no way to
+/// match.
+typedef struct SHUnit SHUnit;
+typedef SHUnit *(*SHUnitCreator)(void);
+
+/// Register, initialize and run the compilation unit \p creator produces,
+/// returning its top-level completion value in \p result.
+///
+/// For a unit compiled from a single expression statement -- a CommonJS
+/// module wrapped in `(function (exports, require, module, __filename,
+/// __dirname) { ... })` -- that value is the wrapper function, ready to be
+/// called.
+///
+/// A second call for an already-registered unit re-runs it and returns a
+/// fresh value, which is what makes a native module behave like a bytecode
+/// one under `delete require.cache[...]`.
+///
+/// If the unit's top level throws, returns napi_pending_exception with the
+/// thrown value pending -- the same shape hermes_run_bytecode reports for a
+/// module whose top level threw, so a caller need not distinguish them.
+NAPI_EXTERN napi_status NAPI_CDECL
+hermes_init_sh_unit(napi_env env, SHUnitCreator creator, napi_value *result);
+
 #ifdef __cplusplus
 }
 #endif

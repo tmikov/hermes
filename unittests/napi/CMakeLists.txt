@@ -113,6 +113,7 @@ set(napi_test_sources
   NapiPromiseTest.cpp
   NapiReferenceTest.cpp
   NapiRunScriptTest.cpp
+  NapiShUnitTest.cpp
   NapiStringTest.cpp
   NapiTsfnTest.cpp
   NapiTypedArrayTest.cpp
