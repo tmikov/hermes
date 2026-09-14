@@ -6202,19 +6202,30 @@ void WasmIRGen::onDelegate(uint32_t depth) {
 
   bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
-  // End the try body. delegate pops the try entry.
-  // If the delegate targets an enclosing try, exceptions are forwarded there.
-  // For simplicity in Phase 1, we end the try body normally and let the
-  // catch block re-throw (which the outer try will catch).
+  // The body's own edge to the continuation, as for any try.
   if (fallsThrough) {
     addBranchPhiOperands(entry);
     builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
   }
 
-  // The catch block re-throws unconditionally (delegate just forwards).
+  // The synthetic handler rethrows, and WHERE it rethrows from is the whole
+  // of what `delegate` means: the exception has to arrive as though it had
+  // been thrown at the target label's position. So the handler first leaves
+  // every protected region the delegation skips -- those strictly between
+  // this try and the target -- and throws inside whatever region is left.
+  //
+  // This entry has already been popped, so depth counts from the enclosing
+  // scope, which is how `delegate l` numbers its label. The target's own
+  // region is deliberately NOT left: if the target is a try whose body is
+  // active, that is the one the exception is being handed to. A target that
+  // is a block or a loop, or a try whose HANDLER is running -- whose region
+  // ended when that handler started -- has no region of its own to leave, and
+  // the throw lands in whatever encloses it.
   auto *savedBlock = builder_.getInsertionBlock();
   builder_.setInsertionBlock(entry.catchBlock);
   auto *caught = builder_.createCatchInst();
+  if (depth > 0)
+    emitBranchTryEnds(depth - 1);
   builder_.createThrowInst(caught);
   builder_.setInsertionBlock(savedBlock);
 
