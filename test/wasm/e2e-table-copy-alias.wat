@@ -33,7 +33,7 @@
 ;;
 ;;   2. PARTIAL aliasing, which is still reachable: an EXTERNREF table's three
 ;;      arrays are three independent `new Array(n)` calls off globalThis.Array,
-;;      and wasmCheckTableArrays checks only that each is an array, not that
+;;      and nothing checked that the three were distinct, only that
 ;;      they are distinct. A replaced Array constructor gives two externref
 ;;      tables a shared array for ONE role and private arrays for the others.
 ;;      This is the case the six-way predicate exists for, and it is a live

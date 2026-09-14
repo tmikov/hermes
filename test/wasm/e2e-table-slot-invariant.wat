@@ -110,10 +110,10 @@
 ;; Storage the engine does not control is no longer constructible from script.
 ;; A frozen backing array refuses element writes while reporting success; a
 ;; non-array, or an accessor installed at an index, is the same problem in
-;; another shape. wasmCheckTableArrays, the writability check in the table-set
-;; funnel, and the length rollback in wasmTableGrow all exist for that, and
-;; this file used to drive all three by replacing globalThis.Array while an
-;; externref table was built.
+;; another shape. A wasmCheckTableArrays builtin, the writability check in the
+;; table-set funnel, and the length rollback in wasmTableGrow all existed for
+;; that, and this file used to drive all three by replacing globalThis.Array
+;; while an externref table was built.
 ;;
 ;; A funcref table's arrays are internal fields of a genuine WebAssembly.Table,
 ;; and an externref table's now come from the pristine Array under

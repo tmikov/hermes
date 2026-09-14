@@ -78,10 +78,10 @@ print('clear(0); callAsT0(0): ' + callAsT0(inst3, 0));
 //
 // A frozen backing array refuses element writes and reports success while
 // doing so; a non-array, or an array carrying an accessor at an index, is
-// another shape of the same problem. wasmCheckTableArrays, the writability
-// check in the table-set funnel, and the length rollback in wasmTableGrow all
-// exist for that, and this file used to drive all three by replacing
-// globalThis.Array while an externref table was being built.
+// another shape of the same problem. A wasmCheckTableArrays builtin, the
+// writability check in the table-set funnel, and the length rollback in
+// wasmTableGrow all existed for that, and this file used to drive all three by
+// replacing globalThis.Array while an externref table was being built.
 //
 // That route is gone. A funcref table's arrays are internal fields of a
 // genuine WebAssembly.Table, and an externref table's now come from the

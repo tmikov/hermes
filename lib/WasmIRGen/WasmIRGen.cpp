@@ -1444,10 +1444,9 @@ void WasmIRGen::createFunctions() {
           builder_.createStoreFrameInst(
               tlScope, exportedResult, tableExportVars_[importTableIdx]);
 
-          // No wasmCheckTableArrays call: these came out of a table this
-          // engine built, so they are JSArrays by construction. The check
-          // remains on the externref path, where createTables() builds the
-          // arrays itself instead of taking them out of a Table.
+          // These came out of a table this engine built, so they are
+          // JSArrays by construction -- as are the externref path's, which
+          // createTables() allocates from the pristine Array.
 
           ++importTableIdx;
           tlEntry_ = acceptBB;
@@ -7686,8 +7685,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       // the module's actual table -- publishing a fresh Table, or the arrays
       // alone, leaves the exported object's own storage disconnected from the
       // module's. The storage is reached through the same brand check the
-      // import path uses, and the arrays are JSArrays by construction, so no
-      // wasmCheckTableArrays call is needed.
+      // import path uses, and the arrays are JSArrays by construction.
       //
       // The constructor is the pristine WebAssembly.Table out of
       // HermesInternal.intrinsics, so the route that used to make this branch
@@ -7808,10 +7806,12 @@ void WasmIRGen::createTables(Instruction *tlScope) {
           tlScope, exportedArr, tableExportVars_[tblIdx]);
     } else {
       // externref tables are not built by the Table constructor, so keep the
-      // plain-array backing. These come from the pristine Array, so they are
-      // JSArrays by construction; wasmCheckTableArrays stays as the one place
-      // that establishes it, which is what lets call_indirect cast them
-      // without re-checking on every indirect call.
+      // plain-array backing. These come from the pristine Array and are
+      // JSArrays by construction, which is what lets call_indirect cast them
+      // without re-checking on every indirect call. There is no longer a
+      // wasmCheckTableArrays call establishing that: script cannot reach the
+      // constructor, and bytecode is trusted, so the check had no way left to
+      // fail. See dz 01a0904b-398b.
       auto *arrayCtor = loadIntrinsic(tlScope, "Array");
       funcsArr = emitNew(arrayCtor, {sizeVal});
       builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
@@ -7820,9 +7820,6 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       exportedArr = emitNew(arrayCtor, {sizeVal});
       builder_.createStoreFrameInst(
           tlScope, exportedArr, tableExportVars_[tblIdx]);
-      builder_.createCallBuiltinInst(
-          BuiltinMethod::HermesBuiltin_wasmCheckTableArrays,
-          {funcsArr, typesArr, exportedArr});
     }
   }
 

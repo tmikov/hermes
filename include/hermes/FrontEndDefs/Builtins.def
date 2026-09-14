@@ -323,14 +323,6 @@ WASM_BUILTIN(wasmLinkError)
 // process-wide stable integer id, so call_indirect can compare type identity
 // across modules with a plain integer compare.
 WASM_BUILTIN(wasmInternType)
-// wasmCheckTableArrays(funcsArr, typesArr, exportedArr): raise a LinkError
-// unless all three are genuine JSArrays. Called once per table at
-// instantiation so that the hot call_indirect path can cast them without
-// re-checking. Only externref tables still need it: their backing arrays come
-// from globalThis.Array, which script can replace. A funcref table's arrays
-// are the internal fields of a genuine WebAssembly.Table, which wasmLinkTable
-// establishes.
-WASM_BUILTIN(wasmCheckTableArrays)
 // wasmLinkTable(importVal, declaredIsFuncRef): the brand check that replaced
 // the __wasm_funcs__/__wasm_types__/__wasm_exported__ publications. Returns
 // the table's three backing arrays and its own maximum as
@@ -378,9 +370,10 @@ WASM_BUILTIN(wasmGlobalSet)
 // wasmSetFuncInfo(exportedFn, closure, typeId): stamp the two internal
 // properties that make `exportedFn` a WebAssembly Exported Function -- the
 // internal closure it wraps and the interned id of its signature. Script
-// cannot name either property, so the pair is unforgeable BY SCRIPT. (A
-// PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin with
-// its index, so wasmSetFuncInfo type-checks its arguments.)
+// cannot name either property, so the pair is unforgeable BY SCRIPT.
+// wasmSetFuncInfo type-checks its arguments anyway, which guards against this
+// compiler emitting the wrong thing rather than against an attacker: bytecode
+// is trusted, so a CallBuiltin reaching it is one the compiler emitted.
 WASM_BUILTIN(wasmSetFuncInfo)
 // wasmMakeGlobal(valTypeCode, isMutable, valueOrGetter, setterOrUndefined):
 // build the WebAssembly.Global a module publishes for an exported global,

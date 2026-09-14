@@ -954,16 +954,14 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
 /// internal fields of a genuine WebAssembly.Table, established by
 /// wasmLinkTable's brand check. Both kinds are JSArrays by construction.
 ///
-/// The checked cast stays anyway, at one branch on a cold path. It was put
-/// here when `new Array(n)` came off globalThis.Array and script could hand
-/// these builtins anything; that route is closed, which also means nothing
-/// tests this any more (dz 01a0904b-398b).
-/// \return the array, or nullptr after raising a TypeError.
-static JSArray *wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
-  auto *arr = dyn_vmcast<JSArray>(v);
-  if (LLVM_UNLIKELY(!arr))
-    runtime.raiseTypeError(msg);
-  return arr;
+/// The cast is ASSERTED rather than checked. It was a checked cast raising a
+/// TypeError, put here when `new Array(n)` came off globalThis.Array and
+/// script could hand these builtins anything. That route is closed: every
+/// array reaching them is engine-allocated, and bytecode is trusted, so the
+/// check had no way left to fail and no test could construct one. See dz
+/// 01a0904b-398b.
+static JSArray *wasmArrayArg(HermesValue v) {
+  return vmcast<JSArray>(v);
 }
 
 /// Wasm call_indirect helper (J.2).
@@ -983,9 +981,11 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   //    `GCPointer<JSArray>` -- JSArrays by their static type, not by a check
   //    that ran earlier and might not run again.
   //  * EXTERNREF, which a valid module cannot name here but an INVALID one
-  //    can. `wasmCheckTableArrays` validates that table's three arrays once at
-  //    instantiation (`WasmIRGen::createTables`), which is what keeps this
-  //    cast safe for it. Do not delete that call believing it dead.
+  //    can. Its three arrays come from the pristine Array under
+  //    HermesInternal.intrinsics, so they are JSArrays by construction and
+  //    this cast is safe for them too. A wasmCheckTableArrays builtin used to
+  //    establish that at instantiation; it was removed once script could no
+  //    longer reach the constructor (dz 01a0904b-398b).
   //
   // The second bullet used to not be hypothetical: `WebAssembly.Module`
   // validates (`validateWasmBinary` runs `wabt::ValidateModule`), but
@@ -1200,10 +1200,7 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
       runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
   if (LLVM_UNLIKELY(!heapu8))
     return ExecutionStatus::EXCEPTION;
-  auto *arr13 = wasmArrayArg(
-      runtime, args.getArg(1), "Wasm data segment array is not an array");
-  if (LLVM_UNLIKELY(!arr13))
-    return ExecutionStatus::EXCEPTION;
+  auto *arr13 = wasmArrayArg(args.getArg(1));
   auto *dataSegs = arr13;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
@@ -1268,10 +1265,7 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr12 = wasmArrayArg(
-      runtime, args.getArg(0), "Wasm data segment array is not an array");
-  if (LLVM_UNLIKELY(!arr12))
-    return ExecutionStatus::EXCEPTION;
+  auto *arr12 = wasmArrayArg(args.getArg(0));
   lv.dataSegs = arr12;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
@@ -1504,11 +1498,13 @@ bool isWasmExportedFunction(Runtime &runtime, Handle<> value) {
 /// the native argument registers, which the GC scans and updates in place,
 /// and no raw pointer is derived from it before or after.
 ///
-/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
-/// with its index, so this must have an answer for every argument rather than
-/// a precondition. It does: a predicate refuses nothing, and anything that is
-/// not a branded object -- a primitive, a plain function, a missing argument,
-/// which reads as undefined -- is simply false.
+/// It has an answer for every argument rather than a precondition, because it
+/// is a PREDICATE: the funcref admission tests ask it about arbitrary values
+/// and branch on the answer, so "not branded" has to be false rather than an
+/// error. A primitive, a plain function and a missing argument are all false.
+/// That is about what the callers need, not about untrusted input -- bytecode
+/// is trusted, so the only CallBuiltin reaching this is one the compiler
+/// emitted.
 CallResult<HermesValue> wasmIsExportedFunction(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   return HermesValue::encodeBoolValue(
@@ -1531,10 +1527,11 @@ CallResult<HermesValue> wasmIsExportedFunction(void *, Runtime &runtime) {
 /// readWasmFuncInfo reaches HiddenClass::findPropertyNoMap, which initializes
 /// a missing property map. Nothing of this builtin's survives the call.
 ///
-/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
-/// with its index, so this answers for every argument rather than carrying a
-/// precondition: anything unbranded -- a primitive, a plain function, a
-/// missing argument -- is undefined.
+/// It answers for every argument rather than carrying a precondition, because
+/// the value it is asked about is an IMPORT -- whatever the embedder put in
+/// the import object, which is genuinely arbitrary. Anything unbranded is
+/// undefined, and the caller treats that as "a plain callable", not as an
+/// error.
 CallResult<HermesValue> wasmFuncTypeId(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   struct : public Locals {
@@ -1545,13 +1542,10 @@ CallResult<HermesValue> wasmFuncTypeId(void *, Runtime &runtime) {
   if (!readWasmFuncInfo(runtime, args.getArgHandle(0), lv.closure, lv.typeId))
     return HermesValue::encodeUndefinedValue();
   // wasmSetFuncInfo refuses a non-Number type id, so a branded value always
-  // carries a Number here. That is all the writer establishes: it cannot say
-  // the number came from wasmInternType, because a PRIVATE_BUILTIN is
-  // reachable from any bytecode and a hand-written call could stamp any
-  // number at all. Compiler-generated calls pass interned ids. An importer
-  // compares for numeric equality, not provenance, so a forged id is refused
-  // only when it differs from the one the importer interned -- stamping the
-  // right number is stamping the right number.
+  // carries a Number here. Every writer is a call this compiler emitted --
+  // bytecode is trusted -- and those pass wasmInternType results, so the
+  // number is an interned id in practice. The assert says only what the
+  // writer enforces.
   assert(
       lv.typeId.getHermesValue().isNumber() &&
       "wasmSetFuncInfo refuses a non-Number type id");
@@ -1569,10 +1563,13 @@ CallResult<HermesValue> wasmFuncTypeId(void *, Runtime &runtime) {
 /// safepoint, which is why wasmCheckTagType may hold a raw JSWebAssemblyTag*
 /// across the call.
 ///
-/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
-/// with its index, so the codes are validated rather than assumed. Generated
-/// code only ever passes globalValTypeCode results, which the static_assert in
-/// JSWebAssemblyTag.h ties to this enum.
+/// The codes are validated rather than asserted, and that is a compiler-bug
+/// guard rather than a threat model one: bytecode is trusted, so the only
+/// caller is code this compiler emitted, and it passes globalValTypeCode
+/// results that the static_assert in JSWebAssemblyTag.h ties to this enum.
+/// The cost is a branch on a path taken once per tag at instantiation, and
+/// the failure it catches -- an enum value with no member -- is otherwise
+/// undefined behaviour rather than a wrong answer.
 static bool readWasmTagParams(
     NativeArgs &args,
     unsigned first,
@@ -1623,9 +1620,10 @@ CallResult<HermesValue> wasmMakeTag(void *, Runtime &runtime) {
 /// The tag import check: a genuine tag, with exactly this signature. The
 /// dyn_vmcast is the brand, the same shape wasmLinkGlobal/Memory/Table use.
 ///
-/// Answers rather than throws for every argument except a malformed code
-/// list, which only bytecode this compiler did not emit can produce: anything
-/// that is not a Tag is simply false.
+/// Answers rather than throws for the value being checked, because that value
+/// is an IMPORT and so is arbitrary: anything that is not a Tag is simply
+/// false. The code list beside it is compiler-emitted and is the one thing
+/// here that can only be malformed by a compiler bug.
 CallResult<HermesValue> wasmCheckTagType(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   auto *tag = dyn_vmcast<JSWebAssemblyTag>(args.getArg(0));
@@ -1763,15 +1761,21 @@ CallResult<HermesValue> wasmMakeResultArray(void *, Runtime &runtime) {
   return lv.out.getHermesValue();
 }
 
-/// Store one element of one table array, and REPORT A REFUSED WRITE.
-/// `JSArray::setElementAt` throws the answer away: a frozen array returns
-/// `false` from `_setOwnIndexedImpl` with no exception raised, so the status
-/// alone cannot tell a store that happened from one that was silently
-/// dropped. For ordinary array code that only loses a value; for a table slot,
-/// which is a triple, it DESYNCHRONIZES -- freezing the closure array lets the
-/// type id and the wrapper land while the closure stays put, and
-/// call_indirect then accepts a function of the wrong signature. So the bool
-/// is checked, and a refusal is an error rather than a silent no-op.
+/// Store one element of one table array.
+///
+/// `setOwnIndexed` answers a bool that `JSArray::setElementAt` throws away: a
+/// frozen array returns false with no exception raised. For a table slot,
+/// which is a triple, believing that would DESYNCHRONIZE -- a frozen closure
+/// array lets the type id and the wrapper land while the closure stays put,
+/// and call_indirect then accepts a function of the wrong signature.
+///
+/// It is asserted rather than reported. A table's three arrays are
+/// engine-allocated -- an externref table's from the pristine Array, a
+/// funcref table's out of a genuine WebAssembly.Table -- and nothing hands
+/// them to script before they are filled, so none of them is ever frozen or
+/// sealed. That used to be reachable, by replacing globalThis.Array before
+/// instantiation, and the diagnostic it raised was "Wasm table storage is not
+/// writable". See dz 01a0904b-398b for why the reported form went.
 static ExecutionStatus wasmStoreTableElement(
     Runtime &runtime,
     Handle<JSArray> arr,
@@ -1780,8 +1784,8 @@ static ExecutionStatus wasmStoreTableElement(
   auto res = JSObject::setOwnIndexed(arr, runtime, index, value);
   if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
-  if (LLVM_UNLIKELY(!*res))
-    return runtime.raiseTypeError("Wasm table storage is not writable");
+  assert(*res && "Wasm table storage must be writable");
+  (void)res;
   return ExecutionStatus::RETURNED;
 }
 
@@ -1899,26 +1903,11 @@ static bool wasmTableArrayArgs(
     PinnedValue<JSArray> &funcsArr,
     PinnedValue<JSArray> &typesArr,
     PinnedValue<JSArray> &exportedArr) {
-  auto *funcs = wasmArrayArg(
-      runtime,
-      args.getArg(firstArg),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!funcs))
-    return false;
+  auto *funcs = wasmArrayArg(args.getArg(firstArg));
   funcsArr = funcs;
-  auto *types = wasmArrayArg(
-      runtime,
-      args.getArg(firstArg + 1),
-      "Wasm table type array is not an array");
-  if (LLVM_UNLIKELY(!types))
-    return false;
+  auto *types = wasmArrayArg(args.getArg(firstArg + 1));
   typesArr = types;
-  auto *exported = wasmArrayArg(
-      runtime,
-      args.getArg(firstArg + 2),
-      "Wasm table exported-function array is not an array");
-  if (LLVM_UNLIKELY(!exported))
-    return false;
+  auto *exported = wasmArrayArg(args.getArg(firstArg + 2));
   exportedArr = exported;
   return true;
 }
@@ -1953,12 +1942,7 @@ readWasmTableSlot(Runtime &runtime, JSArray *exportedArr, uint32_t index) {
 
 CallResult<HermesValue> wasmTableGetSlot(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *exportedArr = wasmArrayArg(
-      runtime,
-      args.getArg(0),
-      "Wasm table exported-function array is not an array");
-  if (LLVM_UNLIKELY(!exportedArr))
-    return ExecutionStatus::EXCEPTION;
+  auto *exportedArr = wasmArrayArg(args.getArg(0));
   // The index arrives as a signed i32 off the Wasm value stack, so the
   // negative case is handled here, where a negative value can actually occur,
   // rather than by narrowing into the unsigned helper.
@@ -2217,8 +2201,8 @@ CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
   // fields, so two funcref tables share all six or none, and an EXTERNREF
   // table's are three independent allocations from the pristine Array, which
   // nothing can make return the same object twice. It WAS constructible --
-  // `new Array(n)` came off globalThis.Array, wasmCheckTableArrays only checks
-  // that each is an array and not that they are distinct, and a replaced
+  // `new Array(n)` came off globalThis.Array, nothing checked that the three
+  // were distinct, and a replaced
   // constructor handed two externref tables a shared array for one role and
   // private ones for the others; a forward copy then smeared and `table.get`
   // handed out the wrong reference. That probe is gone with its route (dz
@@ -2332,10 +2316,7 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!wasmTableArrayArgs(
           runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
     return ExecutionStatus::EXCEPTION;
-  auto *arr2 = wasmArrayArg(
-      runtime, args.getArg(3), "Wasm element segment array is not an array");
-  if (LLVM_UNLIKELY(!arr2))
-    return ExecutionStatus::EXCEPTION;
+  auto *arr2 = wasmArrayArg(args.getArg(3));
   lv.elemSegs = arr2;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
@@ -2360,12 +2341,7 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
     // The segment entry is reachable from script-controlled state, so use a
     // checked cast: dyn_vmcast also tolerates a non-pointer value, which
     // getObject() would assert on.
-    auto *segArr = wasmArrayArg(
-        runtime,
-        segVal.unboxToHV(runtime),
-        "Wasm element segment entry is not an array");
-    if (LLVM_UNLIKELY(!segArr))
-      return ExecutionStatus::EXCEPTION;
+    auto *segArr = wasmArrayArg(segVal.unboxToHV(runtime));
     lv.segArr = segArr;
     // One slot per entry: the reference value that entry lowered to.
     segLen = JSArray::getLength(segArr, runtime);
@@ -2414,10 +2390,7 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr1 = wasmArrayArg(
-      runtime, args.getArg(0), "Wasm element segment array is not an array");
-  if (LLVM_UNLIKELY(!arr1))
-    return ExecutionStatus::EXCEPTION;
+  auto *arr1 = wasmArrayArg(args.getArg(0));
   lv.elemSegs = arr1;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
@@ -2469,54 +2442,12 @@ static Handle<JSObject> wasmLinkErrorProto(Runtime &runtime) {
 #endif
 }
 
-/// Raise a WebAssembly.LinkError with the ASCII message \p msg.
-static ExecutionStatus raiseWasmLinkError(Runtime &runtime, const char *msg) {
-  struct : public Locals {
-    PinnedValue<> msgHandle;
-    PinnedValue<JSError> err;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
-
-  auto strRes = StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
-  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION))
-    return ExecutionStatus::EXCEPTION;
-  lv.msgHandle = *strRes;
-
-  lv.err = JSError::create(runtime, wasmLinkErrorProto(runtime));
-  if (LLVM_UNLIKELY(
-          JSError::setMessage(lv.err, runtime, lv.msgHandle) ==
-          ExecutionStatus::EXCEPTION))
-    return ExecutionStatus::EXCEPTION;
-  JSError::recordStackTrace(lv.err, runtime, true);
-  return runtime.setThrownValue(lv.err.getHermesValue());
-}
 
 /// Validate that a table's backing arrays are genuine JSArrays. Called once
 /// per table during instantiation, which establishes the invariant that lets
 /// wasmCallIndirect -- on the indirect-call hot path -- cast them without
 /// re-checking.
 ///
-/// Only EXTERNREF tables are checked here. Their three arrays used to be built
-/// with `new Array(n)` off globalThis.Array, which script could replace with
-/// anything at all; they now come from the pristine Array under
-/// HermesInternal.intrinsics, so the check has no way left to fail and no test
-/// left to prove it can (dz 01a0904b-398b). A funcref table's arrays are the
-/// internal fields of a genuine WebAssembly.Table, which wasmLinkTable below
-/// establishes by brand check, so they are JSArrays by construction.
-/// wasmCheckTableArrays(funcsArr, typesArr, exportedArr).
-CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(0))))
-    return raiseWasmLinkError(
-        runtime, "table function storage is not an array");
-  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(1))))
-    return raiseWasmLinkError(runtime, "table type storage is not an array");
-  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(2))))
-    return raiseWasmLinkError(
-        runtime, "table exported-function storage is not an array");
-  return HermesValue::encodeUndefinedValue();
-}
-
 /// The link-time brand check for a table, and the only route by which a
 /// table's backing storage leaves the engine.
 /// wasmLinkTable(importVal, declaredIsFuncRef)
@@ -2786,10 +2717,12 @@ CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
 ///   -> a JSWebAssemblyGlobal.
 ///
 /// See the note in Builtins.def for why the export path does not use the
-/// public constructor. A PRIVATE_BUILTIN is reachable from any bytecode
-/// emitting a CallBuiltin with its index, so every argument is checked here
-/// rather than asserted: the compiler's contract is not a guarantee about
-/// what reaches this function.
+/// public constructor. The arguments are checked rather than asserted, which
+/// is a compiler-bug guard and not a threat model one: bytecode is trusted,
+/// so the only caller is a CallBuiltin this compiler emitted. Some of what
+/// arrives IS arbitrary even so -- an exported global's initial value can be
+/// an imported one the embedder supplied -- and that part has to be checked
+/// whatever the caller is.
 ///
 /// `isMutable` selects what arguments 2 and 3 mean -- see the comment on the
 /// mode below, which is the reason an immutable funcref global export can be
@@ -4526,11 +4459,6 @@ void createHermesBuiltins(Runtime &runtime) {
 
   defineInternMethod(
       B::HermesBuiltin_wasmInternType, P::wasmInternType, wasmInternType, 1);
-  defineInternMethod(
-      B::HermesBuiltin_wasmCheckTableArrays,
-      P::wasmCheckTableArrays,
-      wasmCheckTableArrays,
-      3);
   defineInternMethod(
       B::HermesBuiltin_wasmLinkTable, P::wasmLinkTable, wasmLinkTable, 2);
   defineInternMethod(
