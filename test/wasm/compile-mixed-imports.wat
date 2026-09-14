@@ -65,41 +65,41 @@
 ;; CHECK-NEXT:   %6 = CallInst (:any) %4: any, empty: any, false: boolean, empty: any, %4: any, %5: any, 2: number
 ;; CHECK-NEXT:   %7 = GetConstructedObjectInst (:object) %5: any, %6: any
 ;; CHECK-NEXT:   %8 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:        StorePropertyStrictInst "run": string, %8: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %8: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %8: object, %7: object, 0: number
+;; CHECK-NEXT:        DefineOwnPropertyInst "run": string, %8: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %8: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %8: object, %7: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %12 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "helper": string, %12: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %12: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %12: object, %7: object, 1: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "helper": string, %12: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %12: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %12: object, %7: object, 1: number, true: boolean
 ;; CHECK-NEXT:   %16 = LoadPropertyInst (:any) %3: any, "Array": string
 ;; CHECK-NEXT:   %17 = CreateThisInst (:any) %16: any, %16: any, empty: any
 ;; CHECK-NEXT:   %18 = CallInst (:any) %16: any, empty: any, false: boolean, empty: any, %16: any, %17: any, 4: number
 ;; CHECK-NEXT:   %19 = GetConstructedObjectInst (:object) %17: any, %18: any
 ;; CHECK-NEXT:   %20 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %20: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "log": string, %20: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %20: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %20: object, %19: object, 0: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %20: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "log": string, %20: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %20: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %20: object, %19: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %25 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "config": string, %25: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "max_size": string, %25: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "global": string, %25: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %25: object, %19: object, 1: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "config": string, %25: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "max_size": string, %25: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "global": string, %25: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %25: object, %19: object, 1: number, true: boolean
 ;; CHECK-NEXT:   %30 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %30: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "memory": string, %30: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "memory": string, %30: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %30: object, %19: object, 2: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %30: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "memory": string, %30: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "memory": string, %30: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %30: object, %19: object, 2: number, true: boolean
 ;; CHECK-NEXT:   %35 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "math": string, %35: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "square": string, %35: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %35: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %35: object, %19: object, 3: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "math": string, %35: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "square": string, %35: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %35: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %35: object, %19: object, 3: number, true: boolean
 ;; CHECK-NEXT:   %40 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %40: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %40: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %19: object, %40: object, "importDescs": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %1: object, %40: object, "instantiate": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %7: object, %40: object, "exportDescs": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %19: object, %40: object, "importDescs": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %40: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -455,9 +455,9 @@
 ;; CHECK-NEXT:   %247 = CallInst (:any) %246: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:   %248 = AllocObjectLiteralInst (:object) empty: any
 ;; CHECK-NEXT:   %249 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:          StorePropertyStrictInst %249: any, %248: object, "run": string
+;; CHECK-NEXT:          DefineOwnPropertyInst %249: any, %248: object, "run": string, true: boolean
 ;; CHECK-NEXT:   %251 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:          StorePropertyStrictInst %251: any, %248: object, "helper": string
+;; CHECK-NEXT:          DefineOwnPropertyInst %251: any, %248: object, "helper": string, true: boolean
 ;; CHECK-NEXT:          ReturnInst %248: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:

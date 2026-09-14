@@ -61,33 +61,33 @@
 ;; CHECK-NEXT:   %6 = CallInst (:any) %4: any, empty: any, false: boolean, empty: any, %4: any, %5: any, 5: number
 ;; CHECK-NEXT:   %7 = GetConstructedObjectInst (:object) %5: any, %6: any
 ;; CHECK-NEXT:   %8 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:        StorePropertyStrictInst "add_i32": string, %8: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %8: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %8: object, %7: object, 0: number
+;; CHECK-NEXT:        DefineOwnPropertyInst "add_i32": string, %8: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %8: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %8: object, %7: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %12 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "void_func": string, %12: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %12: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %12: object, %7: object, 1: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "void_func": string, %12: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %12: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %12: object, %7: object, 1: number, true: boolean
 ;; CHECK-NEXT:   %16 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "add_f64": string, %16: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %16: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %16: object, %7: object, 2: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "add_f64": string, %16: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %16: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %16: object, %7: object, 2: number, true: boolean
 ;; CHECK-NEXT:   %20 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "mixed": string, %20: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %20: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %20: object, %7: object, 3: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "mixed": string, %20: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %20: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %20: object, %7: object, 3: number, true: boolean
 ;; CHECK-NEXT:   %24 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "id_i64": string, %24: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %24: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %24: object, %7: object, 4: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "id_i64": string, %24: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %24: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %24: object, %7: object, 4: number, true: boolean
 ;; CHECK-NEXT:   %28 = LoadPropertyInst (:any) %3: any, "Array": string
 ;; CHECK-NEXT:   %29 = CreateThisInst (:any) %28: any, %28: any, empty: any
 ;; CHECK-NEXT:   %30 = CallInst (:any) %28: any, empty: any, false: boolean, empty: any, %28: any, %29: any, 0: number
 ;; CHECK-NEXT:   %31 = GetConstructedObjectInst (:object) %29: any, %30: any
 ;; CHECK-NEXT:   %32 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %32: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %32: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %31: object, %32: object, "importDescs": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %1: object, %32: object, "instantiate": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %7: object, %32: object, "exportDescs": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %31: object, %32: object, "importDescs": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %32: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -251,15 +251,15 @@
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %61: object, [%VS0.exported_func_4]: any
 ;; CHECK-NEXT:   %66 = AllocObjectLiteralInst (:object) empty: any
 ;; CHECK-NEXT:   %67 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %67: any, %66: object, "add_i32": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %67: any, %66: object, "add_i32": string, true: boolean
 ;; CHECK-NEXT:   %69 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_1]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %69: any, %66: object, "void_func": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %69: any, %66: object, "void_func": string, true: boolean
 ;; CHECK-NEXT:   %71 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_2]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %71: any, %66: object, "add_f64": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %71: any, %66: object, "add_f64": string, true: boolean
 ;; CHECK-NEXT:   %73 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_3]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %73: any, %66: object, "mixed": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %73: any, %66: object, "mixed": string, true: boolean
 ;; CHECK-NEXT:   %75 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %75: any, %66: object, "id_i64": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %75: any, %66: object, "id_i64": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %66: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:

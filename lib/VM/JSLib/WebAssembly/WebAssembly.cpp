@@ -974,20 +974,22 @@ wasmInstantiate(void *context, Runtime &runtime) {
   // Create the result object {module, instance}.
   lv.resultObj = JSObject::create(runtime);
 
-  auto putRes = JSObject::putNamed_RJS(
-      lv.resultObj,
-      runtime,
-      Predefined::getSymbolID(Predefined::module),
-      lv.mod);
+  auto putRes = JSObject::defineOwnProperty(
+        lv.resultObj,
+        runtime,
+        Predefined::getSymbolID(Predefined::module),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
+        lv.mod);
   if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
 
-  putRes = JSObject::putNamed_RJS(
-      lv.resultObj,
-      runtime,
-      Predefined::getSymbolID(Predefined::instance),
-      lv.instanceVal);
+  putRes = JSObject::defineOwnProperty(
+        lv.resultObj,
+        runtime,
+        Predefined::getSymbolID(Predefined::instance),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
+        lv.instanceVal);
   if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -1231,10 +1233,11 @@ wasmModuleExports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*nameRes);
-    auto putRes = JSObject::putNamed_RJS(
+    auto putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::name),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1243,10 +1246,11 @@ wasmModuleExports(void *context, Runtime &runtime) {
     // Set 'kind' property.
     lv.strVal = HermesValue::encodeStringValue(
         runtime.getPredefinedString(kindToPredefined(exp.kind)));
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::kind),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1327,10 +1331,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*modRes);
-    auto putRes = JSObject::putNamed_RJS(
+    auto putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::module),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1343,10 +1348,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*nameRes);
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::name),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1355,10 +1361,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
     // Set 'kind' property.
     lv.strVal = HermesValue::encodeStringValue(
         runtime.getPredefinedString(kindToPredefined(imp.kind)));
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::kind),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;

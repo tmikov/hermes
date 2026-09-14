@@ -64,9 +64,9 @@
 ;; CHECK-NEXT:   %10 = CallInst (:any) %8: any, empty: any, false: boolean, empty: any, %8: any, %9: any, 0: number
 ;; CHECK-NEXT:   %11 = GetConstructedObjectInst (:object) %9: any, %10: any
 ;; CHECK-NEXT:   %12 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %12: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %12: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %11: object, %12: object, "importDescs": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %1: object, %12: object, "instantiate": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %7: object, %12: object, "exportDescs": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %11: object, %12: object, "importDescs": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %12: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:

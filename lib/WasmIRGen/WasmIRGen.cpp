@@ -1793,15 +1793,21 @@ void WasmIRGen::createFunctions() {
   for (uint32_t i = 0; i < moduleInfo_.exports.size(); ++i) {
     const auto &exp = moduleInfo_.exports[i];
     auto *desc = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(exp.name), desc,
-        builder_.getLiteralString("name"));
-    builder_.createStorePropertyStrictInst(
-        kindToString(exp.kind), desc,
-        builder_.getLiteralString("kind"));
-    builder_.createStorePropertyStrictInst(
-        desc, exportDescsArr,
-        builder_.getLiteralNumber(static_cast<double>(i)));
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(exp.name),
+        desc,
+        builder_.getLiteralString("name"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        kindToString(exp.kind),
+        desc,
+        builder_.getLiteralString("kind"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        desc,
+        exportDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Build importDescs array.
@@ -1812,31 +1818,53 @@ void WasmIRGen::createFunctions() {
   for (uint32_t i = 0; i < moduleInfo_.imports.size(); ++i) {
     const auto &imp = moduleInfo_.imports[i];
     auto *desc = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(imp.moduleName), desc,
-        builder_.getLiteralString("module"));
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(imp.fieldName), desc,
-        builder_.getLiteralString("name"));
-    builder_.createStorePropertyStrictInst(
-        kindToString(imp.kind), desc,
-        builder_.getLiteralString("kind"));
-    builder_.createStorePropertyStrictInst(
-        desc, importDescsArr,
-        builder_.getLiteralNumber(static_cast<double>(i)));
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(imp.moduleName),
+        desc,
+        builder_.getLiteralString("module"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(imp.fieldName),
+        desc,
+        builder_.getLiteralString("name"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        kindToString(imp.kind),
+        desc,
+        builder_.getLiteralString("kind"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        desc,
+        importDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Build module info object: {instantiate, exportDescs, importDescs}.
   auto *moduleInfoObj = builder_.createAllocObjectLiteralInst({});
-  builder_.createStorePropertyStrictInst(
-      instClosure, moduleInfoObj,
-      builder_.getLiteralString("instantiate"));
-  builder_.createStorePropertyStrictInst(
-      exportDescsArr, moduleInfoObj,
-      builder_.getLiteralString("exportDescs"));
-  builder_.createStorePropertyStrictInst(
-      importDescsArr, moduleInfoObj,
-      builder_.getLiteralString("importDescs"));
+  // Defined, not assigned, and this one is not merely about losing a value.
+  // An Object.prototype.instantiate setter swallowed this store and its getter
+  // then supplied the function the JS API calls: that replacement can invoke
+  // the real closure, rewrite the exports object it returns, and hand back the
+  // rewritten one, which the JS API then FREEZES. Measured on a module whose
+  // f() returns 42: exports.f() came back 1337, frozen. So "the exports object
+  // is frozen before the Instance is returned" says nothing about integrity on
+  // its own -- the freeze preserves whatever the interposer left.
+  builder_.createDefineOwnPropertyInst(
+      instClosure,
+      moduleInfoObj,
+      builder_.getLiteralString("instantiate"),
+      IRBuilder::PropEnumerable::Yes);
+  builder_.createDefineOwnPropertyInst(
+      exportDescsArr,
+      moduleInfoObj,
+      builder_.getLiteralString("exportDescs"),
+      IRBuilder::PropEnumerable::Yes);
+  builder_.createDefineOwnPropertyInst(
+      importDescsArr,
+      moduleInfoObj,
+      builder_.getLiteralString("importDescs"),
+      IRBuilder::PropEnumerable::Yes);
   builder_.createReturnInst(moduleInfoObj);
 }
 
@@ -2049,10 +2077,11 @@ bool WasmIRGen::finalizeModule() {
       const auto &seg = moduleInfo_.dataSegments[si];
       if (seg.data.empty()) {
         // Empty segment: store null (same as dropped).
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             segsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         // Still advance binaryDataOffset for consistency with the blob.
         binaryDataOffset += seg.data.size();
         continue;
@@ -2071,10 +2100,11 @@ bool WasmIRGen::finalizeModule() {
               static_cast<double>(seg.data.size())),
           builder_.getLiteralNumber(0));
       binaryDataOffset += seg.data.size();
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           segArr,
           segsArr,
-          builder_.getLiteralNumber(static_cast<double>(si)));
+          builder_.getLiteralNumber(static_cast<double>(si)),
+          IRBuilder::PropEnumerable::Yes);
     }
   } else {
     // Even when dataSegVar_ is not set, we still need to advance
@@ -2234,10 +2264,11 @@ bool WasmIRGen::finalizeModule() {
       if (dataSegVar_) {
         auto *dataSegsArr = builder_.createLoadFrameInst(
             tlScope, dataSegVar_);
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             dataSegsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
       }
     }
   }
@@ -2262,19 +2293,21 @@ bool WasmIRGen::finalizeModule() {
 
       // Declarative segments are immediately dropped.
       if (seg.mode == WasmElemSegment::Mode::Declarative) {
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         continue;
       }
 
       if (seg.items.empty()) {
         // Empty segment: store null (same as dropped).
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         continue;
       }
 
@@ -2285,24 +2318,27 @@ bool WasmIRGen::finalizeModule() {
           {builder_.getLiteralNumber(static_cast<double>(numEntries))});
 
       for (uint32_t i = 0; i < numEntries; ++i) {
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             emitElemItem(seg.items[i], tlScope),
             segArr,
-            builder_.getLiteralNumber(static_cast<double>(i)));
+            builder_.getLiteralNumber(static_cast<double>(i)),
+            IRBuilder::PropEnumerable::Yes);
       }
 
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           segArr,
           elemsArr,
-          builder_.getLiteralNumber(static_cast<double>(si)));
+          builder_.getLiteralNumber(static_cast<double>(si)),
+          IRBuilder::PropEnumerable::Yes);
 
       // Active segments are dropped after their contents have been applied
       // (applied in createTables during createFunctions).
       if (seg.mode == WasmElemSegment::Mode::Active) {
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
       }
     }
   }
@@ -2330,6 +2366,22 @@ bool WasmIRGen::finalizeModule() {
   // the same object under all of them. Function, global, tag, memory, and
   // table exports are handled.
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});
+
+  // Every name below is DEFINED on this object, not assigned into it, and the
+  // same goes for the description objects the module factory builds.
+  //
+  // An ordinary store walks the prototype chain, and an object literal's
+  // prototype is Object.prototype, so an accessor installed there under an
+  // export's name intercepted the store: user JS ran inside instantiation with
+  // the half-built exports object as `this`, and the store was SWALLOWED, so
+  // the export was missing from the object entirely. Measured on a module
+  // exporting one of each kind: 25 accessor calls and not one export present.
+  //
+  // This is not the __wasm_type__ problem. That one also needed the published
+  // value to be unforgeable afterwards, which is why it needed an internal
+  // property; the exports object is handed to script by design and is frozen
+  // before the Instance is returned. All that was wrong here is the store
+  // consulting the prototype chain. See e2e-export-store-accessor.wat.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Function)
       continue;
@@ -2338,10 +2390,11 @@ bool WasmIRGen::finalizeModule() {
     assert(
         exp.index < exportedFuncVars_.size() && exportedFuncVars_[exp.index] &&
         "every exported function index must have a canonical wrapper");
-    builder_.createStorePropertyStrictInst(
+    builder_.createDefineOwnPropertyInst(
         builder_.createLoadFrameInst(tlScope, exportedFuncVars_[exp.index]),
         exportsObj,
-        builder_.getLiteralString(exp.name));
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add global exports as WebAssembly.Global objects. Each exported global is
@@ -2377,8 +2430,11 @@ bool WasmIRGen::finalizeModule() {
     if (importedMutableGlobals_.count(exp.index)) {
       auto *globalObj = builder_.createLoadFrameInst(
           tlScope, importGlobalVals_[exp.index]);
-      builder_.createStorePropertyStrictInst(
-          globalObj, exportsObj, builder_.getLiteralString(exp.name));
+      builder_.createDefineOwnPropertyInst(
+          globalObj,
+          exportsObj,
+          builder_.getLiteralString(exp.name),
+          IRBuilder::PropEnumerable::Yes);
       continue;
     }
 
@@ -2429,8 +2485,11 @@ bool WasmIRGen::finalizeModule() {
         builder_.getLiteralBool(gType.mutable_),
         valueOrGetter,
         setterOrUndefined);
-    builder_.createStorePropertyStrictInst(
-        globalObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        globalObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Publish the tag exports. Each is the WebAssembly.Tag createTagObjects
@@ -2442,8 +2501,11 @@ bool WasmIRGen::finalizeModule() {
     // importer compares identity against it, so a copy would never match.
     assert(exp.index < tagVars_.size() && "tag index out of range");
     auto *tagObj = builder_.createLoadFrameInst(tlScope, tagVars_[exp.index]);
-    builder_.createStorePropertyStrictInst(
-        tagObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        tagObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add memory exports. There is nothing to construct: the module already
@@ -2457,10 +2519,11 @@ bool WasmIRGen::finalizeModule() {
     // Export that same object. Re-exporting an import this way also gives
     // the identity the spec requires, and its limits are its own, so nothing
     // can understate them.
-    builder_.createStorePropertyStrictInst(
+    builder_.createDefineOwnPropertyInst(
         builder_.createLoadFrameInst(tlScope, memObjVar_),
         exportsObj,
-        builder_.getLiteralString(exp.name));
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add table exports as WebAssembly.Table objects. A funcref table -- one the
@@ -2509,21 +2572,30 @@ bool WasmIRGen::finalizeModule() {
     // what the spec says and the only way the storage can still be shared now
     // that it lives in internal fields.
     if (tType.elemType == WasmValType::FuncRef) {
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           builder_.createLoadFrameInst(tlScope, tableObjVars_[exp.index]),
           exportsObj,
-          builder_.getLiteralString(exp.name));
+          builder_.getLiteralString(exp.name),
+          IRBuilder::PropEnumerable::Yes);
       continue;
     }
 
     // An EXTERNREF table has no WebAssembly.Table -- the constructor accepts
-    // only "anyfunc"/"funcref" -- so exporting one raises a TypeError from
-    // the constructor below at instantiate time. That is pre-existing and
+    // only "anyfunc"/"funcref" -- so exporting one NORMALLY raises a TypeError
+    // from the constructor below at instantiate time. That is pre-existing and
     // unchanged here; the code is kept rather than turned into a compile-time
-    // diagnostic because the diagnostic belongs with the rest of the
-    // externref work, not with this change. An IMPORTED externref table
-    // cannot link at all (no object can satisfy the declaration), so only the
-    // declared limits are used.
+    // diagnostic because the diagnostic belongs with the rest of the externref
+    // work, not with this change.
+    //
+    // "Normally" is doing work in that sentence. The element type goes into
+    // the descriptor with an ordinary store, so an Object.prototype accessor
+    // named `element` swallows "externref" and answers "anyfunc" instead. The
+    // module then LINKS and publishes a genuine funcref Table for a table it
+    // declared as externref, whose storage has nothing to do with the module's
+    // externref arrays. Measured. Filed as 01a09e43-b6b6.
+    //
+    // An IMPORTED externref table cannot link at all (no object can satisfy
+    // the declaration), so only the declared limits are used.
     if (!wasmTableCtor)
       wasmTableCtor = loadWasmIntrinsic(tlScope, "Table");
     auto *descriptor = builder_.createAllocObjectLiteralInst({});
@@ -2546,8 +2618,11 @@ bool WasmIRGen::finalizeModule() {
 
     // Construct: new WebAssembly.Table(descriptor)
     auto *tableObj = emitNew(wasmTableCtor, {descriptor});
-    builder_.createStorePropertyStrictInst(
-        tableObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        tableObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   builder_.createReturnInst(exportsObj);

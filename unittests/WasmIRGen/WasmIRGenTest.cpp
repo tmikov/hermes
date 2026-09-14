@@ -3038,7 +3038,9 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
   for (auto &inst : bb) {
     if (llvh::isa<CreateFunctionInst>(&inst))
       hasCreateFunctionInst = true;
-    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+    // Defined, not stored: an ordinary store would walk the prototype
+    // chain and let an accessor intercept the publication.
+    if (auto *s = llvh::dyn_cast<DefineOwnPropertyInst>(&inst)) {
       if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
         auto name = propLit->getValue().str();
         if (name == "instantiate")
@@ -3086,7 +3088,9 @@ TEST(WasmIRGenTest, CreateFunctionsNoExports) {
   ReturnInst *ret = nullptr;
 
   for (auto &inst : bb) {
-    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+    // Defined, not stored: an ordinary store would walk the prototype
+    // chain and let an accessor intercept the publication.
+    if (auto *s = llvh::dyn_cast<DefineOwnPropertyInst>(&inst)) {
       if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
         auto name = propLit->getValue().str();
         if (name == "instantiate")
@@ -3146,7 +3150,9 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   bool hasImportDescsProp = false;
 
   for (auto &inst : bb) {
-    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+    // Defined, not stored: an ordinary store would walk the prototype
+    // chain and let an accessor intercept the publication.
+    if (auto *s = llvh::dyn_cast<DefineOwnPropertyInst>(&inst)) {
       if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
         auto name = propLit->getValue().str();
         if (name == "instantiate")

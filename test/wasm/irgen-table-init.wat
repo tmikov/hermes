@@ -49,17 +49,17 @@
 ;; CHECK-NEXT:   %6 = CallInst (:any) %4: any, empty: any, false: boolean, empty: any, %4: any, %5: any, 1: number
 ;; CHECK-NEXT:   %7 = GetConstructedObjectInst (:object) %5: any, %6: any
 ;; CHECK-NEXT:   %8 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:        StorePropertyStrictInst "f0": string, %8: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %8: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %8: object, %7: object, 0: number
+;; CHECK-NEXT:        DefineOwnPropertyInst "f0": string, %8: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %8: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %8: object, %7: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %12 = LoadPropertyInst (:any) %3: any, "Array": string
 ;; CHECK-NEXT:   %13 = CreateThisInst (:any) %12: any, %12: any, empty: any
 ;; CHECK-NEXT:   %14 = CallInst (:any) %12: any, empty: any, false: boolean, empty: any, %12: any, %13: any, 0: number
 ;; CHECK-NEXT:   %15 = GetConstructedObjectInst (:object) %13: any, %14: any
 ;; CHECK-NEXT:   %16 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %16: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %16: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %15: object, %16: object, "importDescs": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %1: object, %16: object, "instantiate": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %7: object, %16: object, "exportDescs": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %15: object, %16: object, "importDescs": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %16: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -167,7 +167,7 @@
 ;; CHECK-NEXT:   %74 = CallBuiltinInst (:any) [HermesBuiltin.wasmTableSetSlot]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %66: any, %67: any, %68: any, %72: any, %73: any, 1: number
 ;; CHECK-NEXT:   %75 = AllocObjectLiteralInst (:object) empty: any
 ;; CHECK-NEXT:   %76 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
-;; CHECK-NEXT:         StorePropertyStrictInst %76: any, %75: object, "f0": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %76: any, %75: object, "f0": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %75: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:

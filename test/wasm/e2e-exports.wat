@@ -32,9 +32,13 @@
 ;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
-;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "instantiate"
-;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "exportDescs"
-;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "importDescs"
+;; DEFINED, not stored: an ordinary store walks the prototype chain, and an
+;; Object.prototype.instantiate setter swallowed this one and then supplied the
+;; function the JS API calls -- which could wrap the real closure and rewrite
+;; the exports it returns, after which the JS API froze the rewritten object.
+;; CHECK:   DefineOwnPropertyInst {{.*}}, {{.*}}, "instantiate"
+;; CHECK:   DefineOwnPropertyInst {{.*}}, {{.*}}, "exportDescs"
+;; CHECK:   DefineOwnPropertyInst {{.*}}, {{.*}}, "importDescs"
 ;; CHECK-NEXT:   ReturnInst
 
 ;; The internal "add" function.

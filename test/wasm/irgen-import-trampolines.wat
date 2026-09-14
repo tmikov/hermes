@@ -78,42 +78,42 @@
 ;; CHECK-NEXT:   %6 = CallInst (:any) %4: any, empty: any, false: boolean, empty: any, %4: any, %5: any, 1: number
 ;; CHECK-NEXT:   %7 = GetConstructedObjectInst (:object) %5: any, %6: any
 ;; CHECK-NEXT:   %8 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:        StorePropertyStrictInst "test": string, %8: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %8: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %8: object, %7: object, 0: number
+;; CHECK-NEXT:        DefineOwnPropertyInst "test": string, %8: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %8: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %8: object, %7: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %12 = LoadPropertyInst (:any) %3: any, "Array": string
 ;; CHECK-NEXT:   %13 = CreateThisInst (:any) %12: any, %12: any, empty: any
 ;; CHECK-NEXT:   %14 = CallInst (:any) %12: any, empty: any, false: boolean, empty: any, %12: any, %13: any, 5: number
 ;; CHECK-NEXT:   %15 = GetConstructedObjectInst (:object) %13: any, %14: any
 ;; CHECK-NEXT:   %16 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %16: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "log": string, %16: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %16: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %16: object, %15: object, 0: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %16: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "log": string, %16: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %16: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %16: object, %15: object, 0: number, true: boolean
 ;; CHECK-NEXT:   %21 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %21: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "add": string, %21: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %21: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %21: object, %15: object, 1: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %21: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "add": string, %21: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %21: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %21: object, %15: object, 1: number, true: boolean
 ;; CHECK-NEXT:   %26 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %26: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "init": string, %26: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %26: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %26: object, %15: object, 2: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %26: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "init": string, %26: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %26: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %26: object, %15: object, 2: number, true: boolean
 ;; CHECK-NEXT:   %31 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %31: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "f64_add": string, %31: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %31: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %31: object, %15: object, 3: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %31: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "f64_add": string, %31: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %31: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %31: object, %15: object, 3: number, true: boolean
 ;; CHECK-NEXT:   %36 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "env": string, %36: object, "module": string
-;; CHECK-NEXT:         StorePropertyStrictInst "i64_id": string, %36: object, "name": string
-;; CHECK-NEXT:         StorePropertyStrictInst "function": string, %36: object, "kind": string
-;; CHECK-NEXT:         StorePropertyStrictInst %36: object, %15: object, 4: number
+;; CHECK-NEXT:         DefineOwnPropertyInst "env": string, %36: object, "module": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "i64_id": string, %36: object, "name": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst "function": string, %36: object, "kind": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %36: object, %15: object, 4: number, true: boolean
 ;; CHECK-NEXT:   %41 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %41: object, "instantiate": string
-;; CHECK-NEXT:         StorePropertyStrictInst %7: object, %41: object, "exportDescs": string
-;; CHECK-NEXT:         StorePropertyStrictInst %15: object, %41: object, "importDescs": string
+;; CHECK-NEXT:         DefineOwnPropertyInst %1: object, %41: object, "instantiate": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %7: object, %41: object, "exportDescs": string, true: boolean
+;; CHECK-NEXT:         DefineOwnPropertyInst %15: object, %41: object, "importDescs": string, true: boolean
 ;; CHECK-NEXT:         ReturnInst %41: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -408,7 +408,7 @@
 ;; CHECK-NEXT:          StoreFrameInst %0: environment, %169: object, [%VS0.exported_func_5]: any
 ;; CHECK-NEXT:   %174 = AllocObjectLiteralInst (:object) empty: any
 ;; CHECK-NEXT:   %175 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_5]: any
-;; CHECK-NEXT:          StorePropertyStrictInst %175: any, %174: object, "test": string
+;; CHECK-NEXT:          DefineOwnPropertyInst %175: any, %174: object, "test": string, true: boolean
 ;; CHECK-NEXT:          ReturnInst %174: object
 ;; CHECK-NEXT: %BB36:
 ;; CHECK-NEXT:   %178 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import env.i64_id is not a function": string
