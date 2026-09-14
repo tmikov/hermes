@@ -3656,6 +3656,14 @@ void WasmIRGen::onReturn() {
   if (unreachable_)
     return;
 
+  // A return leaves every protected region it is inside, so it closes all of
+  // them rather than a branch's crossed subset. The verifier enforces this
+  // one directly: a ReturnInst under an open try is "Try %0 has not been
+  // closed". This runs before the return sequence is emitted so that none of
+  // it sits inside a region the function is done with.
+  if (!controlStack_.empty())
+    emitBranchTryEnds(controlStack_.size() - 1);
+
   const WasmFuncType &funcType =
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
@@ -4409,6 +4417,11 @@ void WasmIRGen::onBr(uint32_t depth) {
   ControlEntry &entry = getControlEntry(depth);
   entry.branchTargeted = true;
 
+  // Leave every protected region the branch crosses. This moves the insertion
+  // point, so it has to happen before the phi operands are recorded: they
+  // must name the block that actually branches to the continuation.
+  emitBranchTryEnds(depth);
+
   // Add phi operands for the branch target.
   addBranchPhiOperands(entry);
 
@@ -4436,12 +4449,22 @@ void WasmIRGen::onBrIf(uint32_t depth) {
   // Create a fallthrough block for when the condition is false.
   auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
 
-  // If the block has results, peek at the value stack (don't pop) and add
-  // phi operands from the branch-taken path. Values stay for fallthrough.
-  peekBranchPhiOperands(entry);
-
-  // Emit conditional branch: non-zero condition branches to target.
-  builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
+  // Peek rather than pop: the values stay on the stack for the fallthrough.
+  if (branchLeavesTryBody(depth)) {
+    // The regions are left only on the TAKEN edge, so the chain needs a block
+    // of its own for the condition to select. The phi operands are recorded
+    // at the end of it, which is where the branch to the continuation is.
+    auto *takenBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(cond, takenBlock, fallthroughBlock);
+    builder_.setInsertionBlock(takenBlock);
+    emitBranchTryEnds(depth);
+    peekBranchPhiOperands(entry);
+    builder_.createBranchInst(entry.contBlock);
+  } else {
+    peekBranchPhiOperands(entry);
+    // Emit conditional branch: non-zero condition branches to target.
+    builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
+  }
 
   // Continue generating code in the fallthrough block.
   builder_.setInsertionBlock(fallthroughBlock);
@@ -4503,10 +4526,14 @@ void WasmIRGen::onBrTable(
 
     builder_.setInsertionBlock(trampoline);
 
+    // Each target leaves its own set of regions, so the chain goes inside the
+    // trampoline rather than before the dispatch.
+    emitBranchTryEnds(depth);
+
     // Peek rather than pop: every trampoline reads the same values, and they
     // are still on the stack because only the index was popped. The insertion
-    // block is this trampoline, so that is the predecessor the operands are
-    // recorded against.
+    // block is wherever the chain above ended, so that is the predecessor the
+    // operands are recorded against.
     //
     // This used to be two loops written out here, and they had drifted: they
     // admitted Block and If but not Try, so a br_table targeting a `try`
@@ -6327,6 +6354,39 @@ std::vector<PhiInst *> WasmIRGen::createResultPhis(
   }
   builder_.setInsertionBlock(savedBlock);
   return phis;
+}
+
+bool WasmIRGen::crossingLeavesTryBody(const ControlEntry &entry) {
+  // catchBlock is null for the dummy entry pushed in unreachable code, which
+  // has no region at all.
+  return entry.kind == ControlEntry::Try && !entry.inCatch && entry.catchBlock;
+}
+
+bool WasmIRGen::branchLeavesTryBody(uint32_t depth) {
+  for (uint32_t i = 0; i <= depth; ++i) {
+    if (crossingLeavesTryBody(getControlEntry(i)))
+      return true;
+  }
+  return false;
+}
+
+void WasmIRGen::emitBranchTryEnds(uint32_t depth) {
+  // Up to and INCLUDING the target: a br whose target is the try itself
+  // leaves its body too, since the target is the try's continuation.
+  //
+  // Innermost first. A TryEndInst ends exactly one level, and both consumers
+  // read the chain that way: the verifier tracks the innermost enclosing try
+  // per block and requires each TryEndInst's catch target to match it, and
+  // Exceptions.cpp hands the block after a TryEndInst back to the enclosing
+  // level, which then meets the next one.
+  for (uint32_t i = 0; i <= depth; ++i) {
+    ControlEntry &crossed = getControlEntry(i);
+    if (!crossingLeavesTryBody(crossed))
+      continue;
+    auto *next = builder_.createBasicBlock(currentFunc_);
+    builder_.createTryEndInst(crossed.catchBlock, next);
+    builder_.setInsertionBlock(next);
+  }
 }
 
 void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {

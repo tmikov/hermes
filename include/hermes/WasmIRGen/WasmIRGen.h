@@ -953,6 +953,22 @@ class WasmIRGen {
   /// end of the stack, or onto a slot belonging to an enclosing block.
   void pushUndefinedResults(const std::vector<WasmValType> &resultTypes);
 
+  /// \return true if a branch crossing \p entry has to close a protected
+  /// region: it is a try, and we are still inside its body rather than in one
+  /// of its handlers, where onCatch or onCatchAll has already closed it.
+  static bool crossingLeavesTryBody(const ControlEntry &entry);
+
+  /// \return true if a branch to \p depth leaves the body of at least one
+  /// try, and so needs emitBranchTryEnds.
+  bool branchLeavesTryBody(uint32_t depth);
+
+  /// Emit one TryEndInst per protected region a branch to \p depth leaves,
+  /// innermost first, each in its own block, and leave the builder inserting
+  /// into the block the branch itself must be emitted from. That block is the
+  /// continuation's actual predecessor, so it is also the one a branch's phi
+  /// operands have to be recorded against.
+  void emitBranchTryEnds(uint32_t depth);
+
   /// Peek at (don't pop) the result values on the value stack for the given
   /// control entry and add them as phi incoming edges from the current block.
   /// Used by br_if and br_table where values must remain on the stack.

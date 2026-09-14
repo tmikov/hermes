@@ -1,0 +1,106 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-br-out-of-try.wat.
+
+var throwing = false;
+var e = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(
+    hermescli.loadFile(hermescli.getScriptArgs()[0])),
+  {e: {boom: function() { if (throwing) throw [e.t, 77]; }}}).exports;
+
+// Each function either returns a number or lets an exception escape, and the
+// two must not be confused: the whole point of most of these rows is that a
+// value came back where the exception should have. An escaping exception is
+// identified by its payload, so a handler swallowing one and raising its own
+// would not read as the same thing.
+function run(label, fn) {
+  try {
+    print(label + ': ' + fn());
+  } catch (err) {
+    print(label + ': ' +
+        (Array.isArray(err) && err[0] === e.t
+            ? 'escaped with ' + err[1]
+            : 'UNEXPECTED ' + err));
+  }
+}
+
+// The branch is taken. Nothing needs to throw for these: the exception that
+// must escape is raised by the module itself, after the try.
+throwing = false;
+run('brSelf(1)', function() { return e.brSelf(1); });
+run('brOuter(1)', function() { return e.brOuter(1); });
+run('brTwo(1)', function() { return e.brTwo(1); });
+
+// The branch is not taken and the import throws, so the handlers run.
+throwing = true;
+run('brSelf(0) throwing', function() { return e.brSelf(0); });
+run('brOuter(0) throwing', function() { return e.brOuter(0); });
+run('brTwo(0) throwing', function() { return e.brTwo(0); });
+run('brFromHandler() throwing', function() { return e.brFromHandler(); });
+
+// The branch is not taken and nothing throws, so the bodies fall through.
+throwing = false;
+run('brSelf(0) quiet', function() { return e.brSelf(0); });
+run('brOuter(0) quiet', function() { return e.brOuter(0); });
+run('brTwo(0) quiet', function() { return e.brTwo(0); });
+run('brFromHandler() quiet', function() { return e.brFromHandler(); });
+
+run('brValue(1) quiet', function() { return e.brValue(1); });
+run('brValue(0) quiet', function() { return e.brValue(0); });
+throwing = true;
+run('brValue(0) throwing', function() { return e.brValue(0); });
+throwing = false;
+run('brValueU() quiet', function() { return e.brValueU(); });
+throwing = true;
+run('brValueU() throwing', function() { return e.brValueU(); });
+throwing = false;
+run('brTableOut(0) quiet', function() { return e.brTableOut(0); });
+run('brTableOut(1) quiet', function() { return e.brTableOut(1); });
+throwing = true;
+run('brTableOut(0) throwing', function() { return e.brTableOut(0); });
+throwing = false;
+run('brValueTwo(1) quiet', function() { return e.brValueTwo(1); });
+run('brValueTwo(0) quiet', function() { return e.brValueTwo(0); });
+throwing = true;
+run('brValueTwo(0) throwing', function() { return e.brValueTwo(0); });
+throwing = false;
+run('brValueUTwo() quiet', function() { return e.brValueUTwo(); });
+throwing = true;
+run('brValueUTwo() throwing', function() { return e.brValueUTwo(); });
+throwing = false;
+run('brTableTwo(0) quiet', function() { return e.brTableTwo(0); });
+throwing = true;
+run('brTableTwo(0) throwing', function() { return e.brTableTwo(0); });
+throwing = false;
+run('brInner(1) quiet', function() { return e.brInner(1); });
+throwing = true;
+run('brInner(1) throwing', function() { return e.brInner(1); });
+run('brInner(0) throwing', function() { return e.brInner(0); });
+throwing = false;
+run('brTableDepths(0) quiet', function() { return e.brTableDepths(0); });
+throwing = true;
+run('brTableDepths(0) throwing', function() { return e.brTableDepths(0); });
+throwing = false;
+run('brTableDepths(1) quiet', function() { return e.brTableDepths(1); });
+throwing = true;
+run('brTableDepths(1) throwing', function() { return e.brTableDepths(1); });
+
+run('retTwo()', function() { return e.retTwo(); });
+run('retBuf()', function() { return e.retBuf(); });
+
+throwing = false;
+run('brTableValues(0) quiet', function() { return e.brTableValues(0); });
+run('brTableValues(1) quiet', function() { return e.brTableValues(1); });
+throwing = true;
+run('brTableValues(0) throwing', function() { return e.brTableValues(0); });
+
+throwing = false;
+run('plain(1)', function() { return e.plain(1); });
+run('plain(0)', function() { return e.plain(0); });
+
+print('done');
