@@ -4238,15 +4238,7 @@ void WasmIRGen::onEnd() {
       // Try was pushed in unreachable context — no real IR generated.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -4299,19 +4291,12 @@ void WasmIRGen::onEnd() {
     if (entry.outerUnreachable) {
       // This block/if was entered in unreachable context (e.g., inside dead
       // code after a br/return). No real IR was generated. Just restore state
-      // and remain unreachable. Push placeholder values for the result types
-      // so the value stack has the right shape for outer code.
+      // and remain unreachable. The pushUndefinedResults call below is a
+      // no-op while unreachable_, as it is here; the enclosing live construct
+      // restores the stack and its own results later.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -4365,15 +4350,7 @@ void WasmIRGen::onEnd() {
       // Loop entered in unreachable context — no real IR generated.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -6439,6 +6416,24 @@ void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
       }
       entry.paramPhis[i]->addEntry(val, currentBlock);
     }
+  }
+}
+
+void WasmIRGen::pushUndefinedResults(
+    const std::vector<WasmValType> &resultTypes) {
+  for (auto t : resultTypes) {
+    push(builder_.getLiteralUndefined());
+    if (t != WasmValType::I64)
+      continue;
+    push(builder_.getLiteralUndefined());
+    // Only when the push actually landed. push() is a no-op while
+    // unreachable_, which every caller is, and then the top of the stack is
+    // not this pair's high word: it is either nothing at all, where back() is
+    // an invalid access on an empty vector, or a slot belonging to an
+    // enclosing block, which marking would label an i64 high word for
+    // whatever reads it later.
+    if (!unreachable_)
+      valueStackIsI64Hi_.back() = true;
   }
 }
 

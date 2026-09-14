@@ -943,6 +943,16 @@ class WasmIRGen {
   /// onEnd's fall-through path, never from here.
   void addBranchPhiOperands(ControlEntry &entry);
 
+  /// Push one placeholder per slot of \p resultTypes, marking the high slot
+  /// of each i64 pair. Every caller today is an onEnd path for a construct
+  /// entered in unreachable code, where push() is a no-op and this therefore
+  /// does nothing at all: the enclosing live construct restores the stack and
+  /// its own results later. It exists so the marking stays correct if a
+  /// reachable caller is ever added. The three copies it replaced marked
+  /// unconditionally, so on those same unreachable paths they wrote past the
+  /// end of the stack, or onto a slot belonging to an enclosing block.
+  void pushUndefinedResults(const std::vector<WasmValType> &resultTypes);
+
   /// Peek at (don't pop) the result values on the value stack for the given
   /// control entry and add them as phi incoming edges from the current block.
   /// Used by br_if and br_table where values must remain on the stack.
