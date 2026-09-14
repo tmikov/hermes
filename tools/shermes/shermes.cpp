@@ -93,6 +93,12 @@ static cl::opt<std::string> OutputFilename(
     cl::desc("Output file name"),
     cl::cat(CompilerCategory));
 
+static cl::opt<std::string> SourceName(
+    "source-name",
+    cl::desc("Override the name recorded for the input file in source "
+             "locations and stack traces. Single input file only."),
+    cl::cat(CompilerCategory));
+
 static cl::opt<bool> Verbose(
     "v",
     cl::desc("Enable verbose mode"),
@@ -956,11 +962,23 @@ bool compileFromCommandLineOptions() {
   flow::FlowContext flowContext{};
   std::vector<std::unique_ptr<llvh::MemoryBuffer>> fileBufs{};
 
+  if (!cli::SourceName.empty() && cli::InputFilenames.size() != 1) {
+    llvh::errs()
+        << "Error: -source-name can only be used with a single input file.\n";
+    return false;
+  }
+
   for (llvh::StringRef filename : cli::InputFilenames) {
     std::unique_ptr<llvh::MemoryBuffer> fileBuf =
         memoryBufferFromFile(filename, "input file", true);
     if (!fileBuf)
       return false;
+    if (!cli::SourceName.empty()) {
+      // A copy rather than a re-wrap: getMemBuffer() would alias the bytes
+      // of a buffer about to be destroyed at the end of this iteration.
+      fileBuf = llvh::MemoryBuffer::getMemBufferCopy(
+          fileBuf->getBuffer(), cli::SourceName);
+    }
     fileBufs.push_back(std::move(fileBuf));
   }
 
