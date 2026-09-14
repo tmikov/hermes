@@ -4526,38 +4526,15 @@ void WasmIRGen::onBrTable(
 
     builder_.setInsertionBlock(trampoline);
 
-    // Add phi operands. For Block/If entries, peek at the value stack and
-    // add values as phi incoming edges (the values were on the stack before
-    // the index was popped, so they're still there).
-    if ((entry.kind == ControlEntry::Block ||
-         entry.kind == ControlEntry::If) &&
-        !entry.resultPhis.empty()) {
-      size_t numPhis = entry.resultPhis.size();
-      size_t available = valueStack_.size();
-      for (size_t i = 0; i < numPhis; ++i) {
-        Value *val;
-        if (available >= numPhis) {
-          val = valueStack_[available - numPhis + i];
-        } else {
-          val = builder_.getLiteralUndefined();
-        }
-        entry.resultPhis[i]->addEntry(val, trampoline);
-      }
-    }
-    // For Loop entries, br targets the header and passes param values.
-    if (entry.kind == ControlEntry::Loop && !entry.paramPhis.empty()) {
-      size_t numPhis = entry.paramPhis.size();
-      size_t available = valueStack_.size();
-      for (size_t i = 0; i < numPhis; ++i) {
-        Value *val;
-        if (available >= numPhis) {
-          val = valueStack_[available - numPhis + i];
-        } else {
-          val = builder_.getLiteralUndefined();
-        }
-        entry.paramPhis[i]->addEntry(val, trampoline);
-      }
-    }
+    // Peek rather than pop: every trampoline reads the same values, and they
+    // are still on the stack because only the index was popped. The insertion
+    // block is this trampoline, so that is the predecessor the operands are
+    // recorded against.
+    //
+    // This used to be two loops written out here, and they had drifted: they
+    // admitted Block and If but not Try, so a br_table targeting a `try`
+    // reached its continuation contributing nothing.
+    peekBranchPhiOperands(entry);
 
     builder_.createBranchInst(entry.contBlock);
   }
