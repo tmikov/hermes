@@ -25,6 +25,19 @@ inline SHRuntime *getSHRuntime(Runtime &runtime) {
 /// Free the \p unit, and all associated data.
 void sh_unit_done(Runtime &runtime, SHUnit *unit);
 
+/// Ensure \p runtime's unit array can be indexed by \p index, growing it and
+/// null-initializing the new slots.
+///
+/// Called unconditionally before every lookup and store, NOT only when an
+/// index is first assigned. Unit indices are process-wide and the arrays are
+/// not, so a unit that was assigned index 900 by one runtime and is then
+/// initialized in another would otherwise index past the second runtime's
+/// array.
+///
+/// \return false on integer overflow or allocation failure, with the
+/// existing array untouched.
+bool shUnitEnsureCapacity(Runtime &runtime, uint32_t index);
+
 /// Calculate the size of allocated memory not tracked by GC.
 size_t sh_unit_additional_memory_size(const SHUnit *unit);
 

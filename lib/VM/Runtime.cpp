@@ -249,8 +249,10 @@ RuntimeBase::RuntimeBase() {
   segmentMap[0] = nullptr;
 #endif
 
-  // Zero-initialize the unit pointers.
-  std::fill(std::begin(units), std::end(units), nullptr);
+  // The unit array is heap-allocated and grown on demand; see
+  // shUnitEnsureCapacity().
+  units = nullptr;
+  units_size = 0;
 
   shCurJmpBuf = nullptr;
   stackPointer = nullptr;
@@ -550,9 +552,12 @@ Runtime::~Runtime() {
       !formattingStackTrace_ &&
       "Runtime is being destroyed while exception is being formatted");
 
-  for (auto *unit : units)
-    if (unit)
+  for (uint32_t i = 0; i < units_size; ++i)
+    if (SHUnit *unit = units[i])
       sh_unit_done(*this, unit);
+  free(units);
+  units = nullptr;
+  units_size = 0;
 
   // Unwatch the runtime from the time limit monitor in case the latter still
   // has any references to this.
@@ -662,8 +667,8 @@ void Runtime::markRoots(RootAcceptorWithNames &acceptor, bool markLongLived) {
   {
     MarkRootsPhaseTimer timer(*this, RootAcceptor::Section::SHUnits);
     acceptor.beginRootSection(RootAcceptor::Section::SHUnits);
-    for (auto *unit : units)
-      if (unit)
+    for (uint32_t i = 0; i < units_size; ++i)
+      if (SHUnit *unit = units[i])
         sh_unit_mark_roots(unit, acceptor, markLongLived);
     acceptor.endRootSection();
   }
@@ -807,8 +812,8 @@ void Runtime::markWeakRoots(WeakRootAcceptor &acceptor, bool markLongLived) {
   }
   for (auto &rm : runtimeModuleList_)
     rm.markWeakRoots(acceptor, markLongLived);
-  for (SHUnit *unit : units)
-    if (unit)
+  for (uint32_t i = 0; i < units_size; ++i)
+    if (SHUnit *unit = units[i])
       sh_unit_mark_weak_roots(unit, acceptor, markLongLived);
   for (auto &fn : customMarkWeakRootFuncs_)
     fn(&getHeap(), acceptor);
@@ -1059,9 +1064,11 @@ const void *Runtime::getStringForSymbol(SymbolID id) {
 
 size_t Runtime::mallocSize() const {
   size_t shSize = 0;
-  for (const SHUnit *unit : units)
-    if (unit)
+  for (uint32_t i = 0; i < units_size; ++i)
+    if (const SHUnit *unit = units[i])
       shSize += sh_unit_additional_memory_size(unit);
+  // The array itself, not just what the units point to.
+  shSize += (size_t)units_size * sizeof(SHUnit *);
 
   // Register stack uses mmap and RuntimeModules are tracked by their owning
   // Domains. So this only considers IdentifierTable size.
