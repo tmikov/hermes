@@ -72,6 +72,8 @@ void BCProviderFromSrc::setBytecodeModuleRefs() {
   regExpStorage_ = module_->getRegExpStorage();
   regExpTable_ = module_->getRegExpTable();
 
+  binaryDataStorage_ = module_->getBinaryDataStorage();
+
   literalValueBuffer_ = module_->getLiteralValueBuffer();
   objKeyBuffer_ = module_->getObjectKeyBuffer();
   objShapeTable_ = module_->getObjectShapeTable();

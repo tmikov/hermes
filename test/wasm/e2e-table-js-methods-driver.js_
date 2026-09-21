@@ -1,0 +1,128 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-js-methods.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
+var inst = new WebAssembly.Instance(mod);
+var tbl = inst.exports.tbl;
+
+// Report the trap MESSAGE, not just the fact of a trap: a correct type
+// mismatch must not be able to pass as an "uninitialized element" trap from a
+// slot that got cleared instead of written, and returning undefined instead of
+// trapping must not be able to pass as either.
+function callAsT0(instance, i) {
+  try {
+    return String(instance.exports.callAsT0(i));
+  } catch (e) {
+    return 'trap: ' + e.message;
+  }
+}
+
+// `set` returns undefined on success, so "accepted" is reported rather than a
+// value. `args` is spread by apply so that the OMITTED-value case is a genuine
+// one-argument call and not a call passing `undefined`.
+function set(t, args) {
+  try {
+    t.set.apply(t, args);
+    return 'accepted';
+  } catch (e) {
+    return e.name;
+  }
+}
+
+// The same, reporting the message too. The method names itself, which is what
+// distinguishes its own refusal from the shared table-write funnel's; the two
+// refuse the same values, and only the message says which one ran.
+function setMsg(t, args) {
+  try {
+    t.set.apply(t, args);
+    return 'accepted';
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+print('tbl.get(0) === a: ' + (tbl.get(0) === inst.exports.a));
+print('tbl.get(1) === b: ' + (tbl.get(1) === inst.exports.b));
+print('tbl.get(0)(): ' + tbl.get(0)());
+print('callAsT0(0): ' + callAsT0(inst, 0));
+
+// Nothing but null and an Exported Function gets in.
+print('set(0, plainFn): ' + setMsg(tbl, [0, function () { return 1; }]));
+print('set(0, arrowFn): ' + set(tbl, [0, () => 1]));
+print('set(0, undefined): ' + set(tbl, [0, undefined]));
+print('set(0, 42): ' + set(tbl, [0, 42]));
+print('set(0, {}): ' + set(tbl, [0, {}]));
+print('set(0, Math.max): ' + set(tbl, [0, Math.max]));
+print('after refusals, tbl.get(0) === a: ' + (tbl.get(0) === inst.exports.a));
+print('after refusals, callAsT0(0): ' + callAsT0(inst, 0));
+
+// The value is converted before the write, so an out-of-range index with a bad
+// value reports the VALUE's TypeError, and an out-of-range index with a good
+// one reports the index's RangeError.
+print('set(oob, plainFn): ' + set(tbl, [99, function () {}]));
+print('set(oob, a): ' + set(tbl, [99, inst.exports.a]));
+
+// A real funcref of the wrong signature: accepted, but it brings its own type
+// id, so the indirect call through $t0 must trap.
+print('set(0, tbl.get(1)): ' + set(tbl, [0, tbl.get(1)]));
+print('tbl.get(0) === b: ' + (tbl.get(0) === inst.exports.b));
+print('callAsT0(0): ' + callAsT0(inst, 0));
+
+print('set(0, a): ' + set(tbl, [0, inst.exports.a]));
+print('callAsT0(0): ' + callAsT0(inst, 0));
+
+print('set(0, null): ' + set(tbl, [0, null]));
+print('tbl.get(0): ' + tbl.get(0));
+print('callAsT0(0): ' + callAsT0(inst, 0));
+
+// Omitting the value is DefaultValue(funcref) = null, unlike the explicit
+// `undefined` refused above.
+set(tbl, [0, inst.exports.a]);
+print('set(0, a) then set(0) [omitted]: ' + set(tbl, [0]) +
+      ', tbl.get(0): ' + tbl.get(0));
+
+// A second instance's Exported Function is a funcref like any other, and its
+// type id is interned, so a matching signature is callable and a mismatching
+// one traps.
+var inst2 = new WebAssembly.Instance(mod);
+set(tbl, [0, inst2.exports.a]);
+print('set(0, inst2.a); callAsT0(0): ' + callAsT0(inst, 0));
+set(tbl, [0, inst2.exports.b]);
+print('set(0, inst2.b); callAsT0(0): ' + callAsT0(inst, 0));
+
+// grow appends cleared slots.
+set(tbl, [0, inst.exports.a]);
+set(tbl, [1, inst.exports.a]);
+var oldLen = tbl.grow(2);
+print('grow(2) -> ' + oldLen + ', length: ' + tbl.length);
+print('tbl.get(2): ' + tbl.get(2));
+print('tbl.get(3): ' + tbl.get(3));
+print('callAsT0(2): ' + callAsT0(inst, 2));
+set(tbl, [2, inst.exports.a]);
+print('set(2, a); callAsT0(2): ' + callAsT0(inst, 2));
+print('entries below the growth point survived: ' +
+      (tbl.get(0) === inst.exports.a && tbl.get(1) === inst.exports.a &&
+       callAsT0(inst, 1) === '7'));
+
+// The frozen-array cases that used to be here are gone: they reached the
+// backing arrays through tbl.__wasm_funcs__ and its siblings, and a
+// WebAssembly.Table no longer publishes anything. See the note at the top of
+// the .wat, and the externref version of the same scenario at the end of
+// e2e-table-slot-invariant-driver.js_.
+
+// The same rules on a table built purely from the JS API.
+var jsTbl = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+print('jsTbl.get(0): ' + jsTbl.get(0));
+print('jsTbl.set(0, plainFn): ' + set(jsTbl, [0, function () {}]));
+print('jsTbl.set(0, a): ' + set(jsTbl, [0, inst.exports.a]) +
+      ', jsTbl.get(0) === a: ' + (jsTbl.get(0) === inst.exports.a));
+print('jsTbl.grow(1) -> ' + jsTbl.grow(1) + ', jsTbl.get(1): ' + jsTbl.get(1));
+
+print('done');

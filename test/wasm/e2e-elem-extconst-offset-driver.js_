@@ -1,0 +1,26 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-elem-extconst-offset.wat.
+// An active element segment offset by the extended constant expression
+// (i32.add (i32.const 2) (i32.const 0)) must place its two functions at
+// table slots 2 and 3, leaving every other slot uninitialized.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+for (var i = 0; i < 6; ++i) {
+  try {
+    print('slot ' + i + ': ' + exports.call(i));
+  } catch (e) {
+    print('slot ' + i + ': ' + e.message);
+  }
+}
+print('done');

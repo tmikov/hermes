@@ -183,6 +183,19 @@ list(APPEND source_files
   JSLib/DebuggerInternal.cpp
 )
 
+if (HERMES_ENABLE_WASM)
+  list(APPEND source_files
+    JSLib/WebAssembly/WebAssembly.cpp
+    JSWebAssemblyGlobal.cpp
+    JSWebAssemblyTag.cpp
+    JSWebAssemblyException.cpp
+    JSWebAssemblyInstance.cpp
+    JSWebAssemblyMemory.cpp
+    JSWebAssemblyModule.cpp
+    JSWebAssemblyTable.cpp
+  )
+endif()
+
 # HostModel.cpp defines an abstract base class HostObjectProxy.
 # This can be (and is) implemented by code which uses rtti, and
 # therefore expects the base class to have typeinfo, so

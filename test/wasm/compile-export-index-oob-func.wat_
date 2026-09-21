@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion of compile-export-index-oob.wat; see that file. The export
+;; section must be the LAST section and its index the LAST byte, so there is
+;; deliberately no code section here.
+
+;; The function is IMPORTED rather than defined: a defined function
+;; produces a code section, which would come after the export section.
+(module (import "e" "f" (func)) (export "ff" (func 0)))

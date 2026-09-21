@@ -1,0 +1,13 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-reexport-limits.wat. Supplies a 2-page memory with a
+;; maximum of 3 and a 2-entry table with a maximum of 5.
+
+(module
+  (memory (export "mem") 2 3)
+  (table (export "tbl") 2 5 funcref)
+  (func $f42 (result i32) i32.const 42)
+  (elem (i32.const 0) $f42))

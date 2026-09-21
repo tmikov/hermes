@@ -1,0 +1,94 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-import-mutable-hijack.wat.
+
+var mod = WebAssembly.Module.fromHermesBytecode(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+
+var g = new WebAssembly.Global({value: 'i32', mutable: true}, 77);
+var b = new WebAssembly.Global({value: 'i64', mutable: true}, 0x100000000n);
+var f = new WebAssembly.Global({value: 'f64', mutable: true}, 2.5);
+
+var saved =
+    Object.getOwnPropertyDescriptor(WebAssembly.Global.prototype, 'value');
+var getCalls = 0;
+var setCalls = 0;
+
+function hijack() {
+  Object.defineProperty(WebAssembly.Global.prototype, 'value', {
+    get: function () {
+      ++getCalls;
+      // An i64 global's value crosses as a BigInt; handing the module a
+      // Number there would fail loudly instead of quietly, which is not the
+      // defect being demonstrated.
+      return this === b ? 999n : 999;
+    },
+    set: function (v) { ++setCalls; },
+    configurable: true,
+  });
+}
+function restore() {
+  Object.defineProperty(WebAssembly.Global.prototype, 'value', saved);
+}
+
+// --- Instantiate with the accessor replaced -------------------------------
+hijack();
+var hijackInForce = g.value;
+getCalls = 0;
+setCalls = 0;
+var e = new WebAssembly.Instance(mod, {e: {g: g, b: b, f: f}}).exports;
+var getsDuringInstantiate = getCalls;
+var setsDuringInstantiate = setCalls;
+restore();
+
+print('hijacked accessor was in force: ' + hijackInForce);
+print('value getter calls during instantiate: ' + getsDuringInstantiate);
+print('value setter calls during instantiate: ' + setsDuringInstantiate);
+
+// --- global.get under the hijack ------------------------------------------
+hijack();
+getCalls = 0;
+var i32Seen = e.get();
+var f64Seen = e.get_f();
+var lo = e.get_big_lo();
+var hi = e.get_big_hi();
+var getsForGets = getCalls;
+restore();
+
+print('i32 global.get with hijacked getter: ' + i32Seen);
+print('f64 global.get with hijacked getter: ' + f64Seen);
+print('i64 global.get with hijacked getter lo/hi: ' + lo + '/' + hi);
+// get_big_lo and get_big_hi are two separate global.gets of the same i64
+// global, so four in total.
+print('value getter calls for four global.gets: ' + getsForGets);
+
+// --- global.set under the hijack ------------------------------------------
+hijack();
+setCalls = 0;
+e.set(5);
+e.set_f(0.25);
+e.set_big(-1n);
+var setsForSets = setCalls;
+restore();
+
+print('after wasm set(5) under hijack, real value: ' + g.value);
+print('after wasm set_f(0.25) under hijack, real value: ' + f.value);
+print('after wasm set_big(-1) under hijack, real value: ' + b.value);
+print('value setter calls for three global.sets: ' + setsForSets);
+
+// --- H12 guard: nothing replaced, sharing works both ways -----------------
+g.value = 100;
+print('honest: host writes 100, wasm reads: ' + e.get());
+e.set(7);
+print('honest: wasm writes 7, host reads: ' + g.value);
+b.value = 0x200000000n;
+print('honest i64: host writes 2^33, wasm reads lo/hi: ' +
+      e.get_big_lo() + '/' + e.get_big_hi());
+e.set_big(-2n);
+print('honest i64: wasm writes -2, host reads: ' + b.value);
+print('done');

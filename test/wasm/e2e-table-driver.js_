@@ -1,0 +1,17 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table.wat.
+// Loads a compiled Wasm module via WebAssembly API and calls its exports.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+print("table size:", exports.get_size());

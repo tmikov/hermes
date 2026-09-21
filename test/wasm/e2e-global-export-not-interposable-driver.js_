@@ -1,0 +1,27 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-export-not-interposable.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+var real = WebAssembly.Global;
+WebAssembly.Global = function Fake(desc, v) {
+  this.hijacked = true;
+  this.desc = desc;
+  this.v = v;
+};
+var ex = new WebAssembly.Instance(mod).exports;
+WebAssembly.Global = real;
+
+print('g is a genuine Global = ' + (ex.g instanceof real));
+print('g was not hijacked = ' + (ex.g.hijacked === undefined));
+print('g.value = ' + ex.g.value);
+print('c is a genuine Global = ' + (ex.c instanceof real));
+print('c.value = ' + ex.c.value);
+print('done');

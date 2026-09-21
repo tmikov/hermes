@@ -1,0 +1,189 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-no-closure-escape.wat -- the J4 escape-route enumeration.
+// Read that file's header for what this is proving and why.
+
+var args = hermescli.getScriptArgs();
+
+// ---------------------------------------------------------------------------
+// The oracle.
+//
+// WebAssembly.Table.prototype.set accepts null or a genuine WebAssembly
+// Exported Function and refuses everything else. The brand it tests is an
+// internal property written only by the wasmSetFuncInfo builtin; script can
+// neither name it nor write it, so a plain function, a copy, a Proxy and a
+// forged object all fail. That makes this the strongest question script can
+// ask about a function value, and it is the question this file asks 20 times.
+//
+// It is deliberately NOT a name check or a property check: the wrapper's name
+// and its __wasm_type__ string are both ordinary and both forgeable, so a test
+// built on them would keep passing if a raw closure were ever handed out under
+// a wrapper's name.
+var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+function brand(v) {
+  if (typeof v !== 'function')
+    return 'not a function (' + typeof v + ')';
+  try {
+    oracle.set(0, v);
+  } catch (e) {
+    return 'not an Exported Function (' + e.name + ')';
+  }
+  return 'wrapper';
+}
+
+// `same` is identity against the ONE canonical Exported Function of that
+// function index. brand() says the value is a wrapper; this says it is the
+// same wrapper every other route yields, which is what makes the enumeration
+// exhaustive rather than 20 unrelated facts.
+function report(label, v, ref) {
+  var s = brand(v);
+  if (ref !== undefined)
+    s += ' same=' + (v === ref);
+  print(label + ': ' + s);
+}
+
+print('oracle refuses a plain JS function: ' + brand(function () {}));
+print('oracle refuses a non-function: ' + brand({}));
+
+// ---------------------------------------------------------------------------
+// Instantiate.
+
+function load(path) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(path));
+}
+
+// Every funcref the module hands to an imported JS function lands here.
+var handedToJs = [];
+var imports = {
+  env: {
+    sink: function (f) { handedToJs.push(f); },
+    jsF: function (x) { return x + x; },
+  },
+};
+
+var inst = new WebAssembly.Instance(load(args[0]), imports);
+var E = inst.exports;
+var tbl = E.tbl;
+
+var consumer = new WebAssembly.Instance(
+    load(args[1]), {exporter: {tbl: tbl}});
+
+print('=== routes to a Wasm function value ===');
+
+// The reference objects. Each is itself vouched for by brand() on the line
+// that produces it, so nothing below rests on an unchecked assumption.
+var REF64 = E.addf64;             // $addf64, which IS exported by name
+var REF32 = tbl.get(1);           // $addf32, which is NOT exported
+
+report('01 exports.addf64', REF64);
+report('02 tbl.get(0) elem segment, exported func', tbl.get(0), REF64);
+report('03 tbl.get(1) elem segment, unexported func', REF32);
+report('04 tbl.get(2) elem segment, i64 signature', tbl.get(2));
+report('05 tbl.get(3) elem segment, import trampoline', tbl.get(3));
+
+report('06 wasm table.get -> funcref result', E.getAt(1), REF32);
+report('07 wasm table.get -> multi-value ref slot', E.mvAt(1)[1], REF32);
+// A funcref global CANNOT be exported: finalizeModule's export loop has no
+// case for a reference type and aborts the compiler on one (llvm_unreachable
+// at WasmIRGen.cpp, "unsupported global export type"). global.get is
+// therefore the only way its value is observed, and it is covered here.
+report('08 funcref global -> global.get', E.fromGlobal(), REF32);
+
+E.sendToJs(1);
+report('09 import trampoline argument', handedToJs[0], REF32);
+
+var payload = null;
+try {
+  E.throwAt(1);
+} catch (e) {
+  // The exception array is [tag, ...payload], so the i32 is at 1 and the
+  // funcref at 2.
+  payload = e[2];
+}
+report('10 exception payload', payload, REF32);
+
+E.setAt(5, 1);
+report('11 wasm table.set, read back', tbl.get(5), REF32);
+
+E.setFromGlobal(6);
+report('12 wasm table.set of global.get, read back', tbl.get(6), REF32);
+
+E.copy(7, 0, 1);
+report('13 wasm table.copy, read back', tbl.get(7), REF64);
+
+E.initSeg1(8, 0, 1);
+report('14 wasm table.init, read back', tbl.get(8), REF32);
+
+E.fillFrom(9, 1, 1);
+report('15 wasm table.fill, read back', tbl.get(9), REF32);
+
+// Grows to 12; slots 10 and 11 get the fill value.
+E.growFrom(1, 2);
+report('16 wasm table.grow fill value, read back', tbl.get(10), REF32);
+
+tbl.set(4, REF64);
+report('17 JS Table.prototype.set, read back', tbl.get(4), REF64);
+
+// Grows to 13. Hermes's Table.prototype.grow does NOT implement the spec's
+// optional second argument -- it always fills with DefaultValue(funcref),
+// which is null -- so the fill value is not a route into a slot at all, and
+// this line records that rather than pretending to exercise one. (The missing
+// argument is a JS-API conformance gap, not a J4 one; it is reported with this
+// task, not fixed by it.) If it is ever implemented, the value goes through
+// the same funnel every other writer uses and this line becomes route 18
+// proper.
+tbl.grow(1, REF64);
+print('18 JS Table.prototype.grow ignores its fill value, slot is: ' +
+      tbl.get(12));
+
+report('19 cross-module: importer of the table, wasm table.get',
+       consumer.exports.getAt(1), REF32);
+report('20 cross-module: importer\'s own Table.prototype.get',
+       consumer.exports.tbl.get(1), REF32);
+
+// ---------------------------------------------------------------------------
+// The publications are gone, so there is no array of closures to read.
+
+print('=== no published ABI ===');
+print('tbl.__wasm_funcs__: ' + tbl.__wasm_funcs__);
+print('tbl.__wasm_types__: ' + tbl.__wasm_types__);
+print('tbl.__wasm_exported__: ' + tbl.__wasm_exported__);
+function nameList(a) { return a.length ? a.join(',') : '(none)'; }
+print('own property names of tbl: ' +
+      nameList(Object.getOwnPropertyNames(tbl)));
+print('own property symbols of tbl: ' +
+      nameList(Object.getOwnPropertySymbols(tbl).map(String)));
+
+// ---------------------------------------------------------------------------
+// The J4 crash repro itself, driven through the value each route hands out.
+//
+// The raw closure declares its f32/f64 parameters :number and the float
+// backend reads their raw bits, so `f('x', 'y')` was an assert in Debug and a
+// segfault in Release. A wrapper coerces, so the answer is NaN by ordinary JS
+// rules. This block is what makes "it is a wrapper" mean something.
+
+print('=== J4 repro: a float parameter given a non-number ===');
+print('addf64 via exports("x", "y"): ' + REF64('x', 'y'));
+print('addf64 via tbl.get("x", "y"): ' + tbl.get(0)('x', 'y'));
+print('addf64 via table.copy slot("x", "y"): ' + tbl.get(7)('x', 'y'));
+print('addf32 via tbl.get({}, 1): ' + REF32({}, 1));
+print('addf32 via global.get({}, 1): ' + E.fromGlobal()({}, 1));
+print('addf32 via exception payload({}, 1): ' + payload({}, 1));
+print('addf32 via import argument({}, 1): ' + handedToJs[0]({}, 1));
+print('addf32 via cross-module get({}, 1): ' + consumer.exports.getAt(1)({}, 1));
+
+print('=== and the same values still work ===');
+print('addf64 via exports(2.5, 4): ' + REF64(2.5, 4));
+print('addf64 via tbl.get(2.5, 4): ' + tbl.get(0)(2.5, 4));
+print('addf32 via tbl.get(1.5, 2.25): ' + REF32(1.5, 2.25));
+print('addf32 via global.get(1.5, 2.25): ' + E.fromGlobal()(1.5, 2.25));
+// Not a float parameter: the wrapper is also what makes the i64 convention
+// and the return buffer invisible to script.
+print('inc64 via tbl.get(5n): ' + tbl.get(2)(5n));
+print('jsF via tbl.get(2.5): ' + tbl.get(3)(2.5));
+print('done');

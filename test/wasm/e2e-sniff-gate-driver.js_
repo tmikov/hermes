@@ -1,0 +1,22 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+var hbc = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+try {
+  var mod = new WebAssembly.Module(hbc);
+  var inst = new WebAssembly.Instance(mod, {});
+  print('hbc bytes to WebAssembly.Module: loaded, f() = ' + inst.exports.f());
+} catch (e) {
+  // Distinguish the two ways this can throw: the bytes were sniffed as .hbc
+  // and deliberately refused, versus the bytes were never sniffed and so
+  // failed as an invalid .wasm binary.
+  var why =
+    String(e.message).indexOf('refusing to load Hermes bytecode') >= 0
+      ? 'refused'
+      : 'other';
+  print('hbc bytes to WebAssembly.Module: ' + e.name + ' (' + why + ')');
+}
+print('done');

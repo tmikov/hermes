@@ -284,6 +284,10 @@ Runtime::Runtime(
       optimizedEval(runtimeConfig.getOptimizedEval()),
       asyncBreakCheckInEval(runtimeConfig.getAsyncBreakCheckInEval()),
       test262(runtimeConfig.getTest262()),
+      enableUntrustedBytecodeFromJS(
+          runtimeConfig.getEnableUntrustedBytecodeFromJS()),
+      enableWasmBytecodeContentSniffing(
+          runtimeConfig.getEnableWasmBytecodeContentSniffing()),
       traceMode(runtimeConfig.getSynthTraceMode()),
       serializationValues_(
           runtimeConfig.getGCConfig().getOccupancyTarget(),

@@ -128,6 +128,9 @@ class BCProviderBase {
   llvh::ArrayRef<RegExpTableEntry> regExpTable_{};
   llvh::ArrayRef<uint8_t> regExpStorage_{};
 
+  /// Binary data storage blob (e.g. Wasm data segments).
+  llvh::ArrayRef<uint8_t> binaryDataStorage_{};
+
   /// The number of StringSwitchImm instructions in the bytecode
   /// module.  Needed to size a table of per-instruction hash tables
   /// used at runtime.
@@ -212,6 +215,9 @@ class BCProviderBase {
   }
   llvh::ArrayRef<unsigned char> getRegExpStorage() const {
     return regExpStorage_;
+  }
+  llvh::ArrayRef<uint8_t> getBinaryDataStorage() const {
+    return binaryDataStorage_;
   }
   uint32_t getNumStringSwitchImmInstrs() const {
     return numStringSwitchImmInstrs_;
