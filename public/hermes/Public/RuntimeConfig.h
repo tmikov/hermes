@@ -73,6 +73,16 @@ using ThreadRunner = std::function<void(std::function<void()>)>;
   /* Whether to emit async break check instructions in eval code */    \
   F(constexpr, bool, AsyncBreakCheckInEval, true)                      \
                                                                        \
+  /* Whether JS APIs may load untrusted (JS-supplied) Hermes           \
+     bytecode: WebAssembly.Module.fromHermesBytecode and a Worker      \
+     bytecode script. */                                               \
+  F(constexpr, bool, EnableUntrustedBytecodeFromJS, false)             \
+                                                                       \
+  /* Whether WebAssembly.Module/compile/instantiate may content-sniff  \
+     .hbc out of their bytes instead of always treating them as        \
+     .wasm. */                                                         \
+  F(constexpr, bool, EnableWasmBytecodeContentSniffing, false)         \
+                                                                       \
   /* Support for ES6 Proxy. */                                         \
   F(constexpr, bool, ES6Proxy, true)                                   \
                                                                        \

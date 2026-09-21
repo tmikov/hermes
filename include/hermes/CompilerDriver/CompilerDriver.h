@@ -74,6 +74,12 @@ struct CompileResult {
   /// loaded from a file, that is, bytecodeProvider is a BCProviderFromBuffer.
   BytecodeBufferInfo bytecodeBufferInfo{};
 
+  /// True if the input is a WebAssembly module, that is, -wasm was given.
+  /// Such bytecode does not run the module: its top level only builds and
+  /// returns {instantiate, exportDescs, importDescs}, and calling
+  /// instantiate() is what actually instantiates it.
+  bool isWasmModule{false};
+
   /* implicit */ CompileResult(CompileStatus status) : status(status) {}
 };
 

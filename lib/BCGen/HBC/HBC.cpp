@@ -67,6 +67,15 @@ std::unique_ptr<BytecodeModule> generateBytecodeModule(
           *bm, M, debugIdCache, options, std::move(baseBCProvider)}
           .generate(entryPoint, segment);
 
+  // Transfer binary data storage (e.g. Wasm data segments) from the IR Module
+  // to the BytecodeModule.
+  if (success) {
+    auto binaryData = M->getBinaryDataStorage();
+    if (!binaryData.empty()) {
+      bm->appendBinaryData(binaryData);
+    }
+  }
+
   return success ? std::move(bm) : nullptr;
 }
 

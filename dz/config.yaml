@@ -1,3 +1,5 @@
 name: Hermes
 components:
+  - bytecode
   - gc
+  - wasm

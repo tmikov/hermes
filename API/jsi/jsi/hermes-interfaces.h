@@ -79,6 +79,97 @@ struct JSI_EXPORT ISetEventLoopControl : public jsi::ICast {
   ~ISetEventLoopControl() = default;
 };
 
+/// Integrator-provided interface for resolving a Wasm module URL to trusted
+/// precompiled Hermes bytecode (.hbc). The integrator implements it (deriving
+/// from jsi::ICast) and registers it via IWasmModuleProvider. Hermes never
+/// takes ownership of it and never frees it, so it must outlive the runtime it
+/// was registered on.
+///
+/// URL semantics live entirely here: Hermes has no notion of URL, and the only
+/// meaning `WebAssembly.Module.fromHermesURL(url)` attaches to the string is
+/// "whatever the integrator's resolver and registry make of it".
+///
+/// The bytes are TRUSTED and are loaded as Hermes bytecode without validation
+/// or content-sniffing, exactly like any other precompiled .hbc the embedder
+/// ships. Returning bytes that are not .hbc produced by this Hermes version, or
+/// bytes derived from an untrusted source, is an embedder bug with the same
+/// consequences as handing untrusted bytes to any other .hbc entry point.
+class JSI_EXPORT IWasmModuleResolver : public jsi::ICast {
+ public:
+  static constexpr jsi::UUID uuid{
+      0x0705e06d,
+      0xa80f,
+      0x4ad5,
+      0x94c1,
+      0x89eb3082f244};
+
+  /// Resolve \p url to precompiled Hermes bytecode for a Wasm module. On
+  /// failure, return nullptr and set \p error to a human-readable message;
+  /// declining is not an error condition for the caller, which then falls back
+  /// to the bytecode registry. Called on the runtime thread from inside a live
+  /// JS frame: it must not perform operations on the runtime, and any C++
+  /// exception it throws is caught and treated as declining (Hermes is built
+  /// without exception support, so nothing may unwind through the VM).
+  ///
+  /// The returned buffer only needs to stay valid until resolve() returns to
+  /// its caller; Hermes copies the bytes out before doing anything else and
+  /// does not retain the shared_ptr.
+  virtual std::shared_ptr<const jsi::Buffer> resolve(
+      const std::string& url,
+      std::string& error) = 0;
+
+ protected:
+  ~IWasmModuleResolver() = default;
+};
+
+/// Interface on the Runtime for supplying the trusted Wasm module bytecode
+/// that `WebAssembly.Module.fromHermesURL(url)` loads. Two mechanisms, both
+/// dealing only in precompiled Hermes bytecode (.hbc):
+///
+///   - a registry, for the common case where the embedder knows up front which
+///     modules it ships and picks their URLs, and
+///   - an optional resolver (IWasmModuleResolver) for full control.
+///
+/// On each fromHermesURL(url), the resolver -- if one is registered -- is asked
+/// first, and its answer wins. If there is no resolver, or it declines, the
+/// registry is consulted. If neither yields bytes, fromHermesURL throws a
+/// TypeError.
+struct JSI_EXPORT IWasmModuleProvider : public jsi::ICast {
+ public:
+  static constexpr jsi::UUID uuid{
+      0xa7969a69,
+      0x3e48,
+      0x4488,
+      0x98fd,
+      0xefa9452c6dc5};
+
+  /// Register \p bytecode (precompiled Hermes bytecode for a Wasm module) under
+  /// \p url, replacing any previous registration for that URL. The runtime
+  /// keeps a shared_ptr to the buffer, so it stays alive at least until the
+  /// runtime is destroyed or the URL is re-registered; the bytes are copied out
+  /// of it on each fromHermesURL() call. Must be called on the runtime thread.
+  virtual void registerWasmBytecode(
+      std::string url,
+      std::shared_ptr<const jsi::Buffer> bytecode) = 0;
+
+  /// Register \p resolver, replacing any previous one; pass nullptr to remove
+  /// it. \p resolver is an opaque jsi::ICast* (so additional resolver
+  /// capabilities can be added later as new cast interfaces without changing
+  /// this ABI) which must be castable to IWasmModuleResolver. Hermes never
+  /// frees it, so it must outlive the runtime. Must be called on the runtime
+  /// thread, and not from inside a resolve() callback.
+  virtual void setWasmModuleResolver(jsi::ICast* resolver) = 0;
+
+  /// Return the resolver previously registered via setWasmModuleResolver, or
+  /// nullptr. The result is an opaque jsi::ICast*; cast it to
+  /// IWasmModuleResolver (or a future resolver interface) with
+  /// jsi::castInterface.
+  virtual jsi::ICast* getWasmModuleResolver() = 0;
+
+ protected:
+  ~IWasmModuleProvider() = default;
+};
+
 /// Interface for Hermes-specific runtime methods.The actual implementations of
 /// the pure virtual methods are provided by Hermes API.
 class JSI_EXPORT IHermes : public jsi::ICast {

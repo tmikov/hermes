@@ -1,0 +1,55 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-imported-mutable-global.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+var counter = new WebAssembly.Global({value: 'i32', mutable: true}, 5);
+var ratio = new WebAssembly.Global({value: 'f64', mutable: true}, 2.5);
+var big = new WebAssembly.Global({value: 'i64', mutable: true}, 0x100000000n);
+
+var inst = new WebAssembly.Instance(mod, {
+  e: {imm: 42, counter: counter, ratio: ratio, big: big},
+});
+var ex = inst.exports;
+
+print('imm = ' + ex.get_imm());
+print('local = ' + ex.get_local());
+
+// i32: both directions must be visible.
+print('counter seen by wasm = ' + ex.get_counter());
+ex.bump_counter(10);
+print('after wasm bump, host sees = ' + counter.value);
+counter.value = 100;
+print('after host set, wasm sees = ' + ex.get_counter());
+
+// f64: same, with a type that is not an integer.
+print('ratio seen by wasm = ' + ex.get_ratio());
+ex.scale_ratio(4);
+print('after wasm scale, host sees = ' + ratio.value);
+ratio.value = 0.5;
+print('after host set, wasm sees = ' + ex.get_ratio());
+
+// i64: crosses the boundary as a BigInt and must keep both words.
+print('big lo/hi seen by wasm = ' + ex.get_big_lo() + '/' + ex.get_big_hi());
+ex.add_big(1n);
+print('after wasm add, host sees = ' + big.value + ' ' + typeof big.value);
+big.value = -1n;
+print('after host set, wasm sees lo/hi = ' +
+      ex.get_big_lo() + '/' + ex.get_big_hi());
+
+// A module-local mutable global is unaffected by any of the above.
+ex.bump_local(3);
+print('local after bump = ' + ex.get_local());
+
+// Re-exporting the imported global hands back the same global.
+print('export aliases the imported global = ' +
+      (ex.counter_export === counter));
+print('export value = ' + ex.counter_export.value);
+print('done');

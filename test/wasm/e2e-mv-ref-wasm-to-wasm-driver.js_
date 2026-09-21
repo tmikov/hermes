@@ -1,0 +1,26 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-wasm-to-wasm.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)));
+
+// svGet never touches the return buffer, so it is the reference answer.
+var sv = inst.exports.svGet();
+print('svGet: ' + typeof sv + ' calls -> ' + sv());
+
+// mvGet routes the same closure through the buffer. Calling it proves it is a
+// closure; comparing it to sv proves it is the RIGHT closure.
+var mv = inst.exports.mvGet();
+print('mvGet: ' + typeof mv + ' calls -> ' + mv() + ' same=' + (mv === sv));
+
+print('mvNum: ' + inst.exports.mvNum());
+
+var token = {tag: 'host'};
+print('mvExternGet: same=' + (inst.exports.mvExternGet(token) === token));

@@ -1,0 +1,15 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-memory-import-metadata.wat: a memory import with
+;; NO declared maximum. Nothing in the declaration bounds growth, so the
+;; ceiling memory.grow enforces can only come from the supplied memory itself
+;; -- which is what this module is here to show. (It used to come from a
+;; __wasm_max__ property nothing validated, which then reached a native
+;; builtin that calls getNumber() on it.)
+
+(module
+  (import "e" "m" (memory 1))
+  (func (export "grow") (result i32) (memory.grow (i32.const 1))))

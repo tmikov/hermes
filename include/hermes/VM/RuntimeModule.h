@@ -275,6 +275,9 @@ class RuntimeModule final : public llvh::ilist_node<RuntimeModule> {
   llvh::ArrayRef<uint8_t> getRegExpBytecodeFromRegExpID(
       uint32_t regExpId) const;
 
+  /// \return the binary data storage blob from the bytecode provider.
+  llvh::ArrayRef<uint8_t> getBinaryDataStorage() const;
+
   /// \return the number of functions in the function map.
   uint32_t getNumCodeBlocks() const {
     return functionMap_.size();

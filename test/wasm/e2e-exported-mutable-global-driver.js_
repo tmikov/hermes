@@ -1,0 +1,102 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-exported-mutable-global.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var ex = new WebAssembly.Instance(mod).exports;
+
+// i32: both directions must be visible.
+print('counter starts at ' + ex.counter.value);
+ex.bump_counter(10);
+print('after wasm bump, host sees ' + ex.counter.value);
+ex.counter.value = 100;
+print('after host set, wasm sees ' + ex.get_counter());
+ex.bump_counter(1);
+print('after another wasm bump, host sees ' + ex.counter.value);
+
+// f64: same, with a type that is not an integer.
+print('ratio starts at ' + ex.ratio.value);
+ex.scale_ratio(4);
+print('after wasm scale, host sees ' + ex.ratio.value);
+ex.ratio.value = 0.5;
+print('after host set, wasm sees ' + ex.get_ratio());
+
+// f32: the setter must narrow through Math.fround, not keep the double the
+// assignment coerced ToNumber to. get_scale reads the frame slot directly
+// (global.get on a defined global trusts it is already narrowed), so an
+// unnarrowed store is visible there without any further Wasm arithmetic.
+print('scale starts at ' + ex.scale.value);
+ex.bump_scale(2.5);
+print('after wasm bump, host sees ' + ex.scale.value);
+ex.scale.value = 1.1;
+print('after host set, host sees ' + ex.scale.value);
+print('after host set, wasm sees ' + ex.get_scale());
+print('host value narrowed like Math.fround = ' +
+      (ex.scale.value === Math.fround(1.1)));
+
+// i64: crosses the boundary as a BigInt and must keep both words.
+print('big starts at ' + ex.big.value + ' ' + typeof ex.big.value);
+ex.add_big(1n);
+print('after wasm add, host sees ' + ex.big.value);
+ex.big.value = -1n;
+print('after host set, wasm sees lo/hi = ' +
+      ex.get_big_lo() + '/' + ex.get_big_hi());
+
+// An immutable export is a snapshot, and refuses writes.
+print('konst is ' + ex.konst.value);
+try {
+  ex.konst.value = 9;
+  print('writing konst was allowed');
+} catch (e) {
+  print('writing konst threw ' + e.constructor.name);
+}
+
+// An immutable i64 export goes through wasmMakeGlobal's snapshot arm, which
+// recombines the lo/hi pair into a BigInt and stores it with setI64Value --
+// distinct from the live i64 accessor's frame read/write above.
+print('bigkonst is ' + ex.bigkonst.value + ' ' + typeof ex.bigkonst.value);
+
+// A module-local mutable global is unaffected by any of the above.
+ex.bump_local(3);
+print('local after bump = ' + ex.get_local());
+
+// The export is a genuine Global with no own properties, as the spec
+// requires and as an importing module's brand check depends on.
+print('counter is a WebAssembly.Global = ' +
+      (ex.counter instanceof WebAssembly.Global));
+print('counter has no own properties = ' +
+      (Object.getOwnPropertyNames(ex.counter).length === 0));
+
+// STORAGE coherence across two export names of one global. Deliberately not
+// an identity assertion: `ex.counter === ex.counter2` is false here and in
+// Node, and that discrepancy is deferred. What must hold is that all three
+// routes reach one cell.
+ex.counter.value = 55;
+var a = ex.counter2.value === 55;
+ex.counter2.value = 66;
+var b = ex.get_counter() === 66;
+ex.bump_counter(1);
+var c = ex.counter.value === 67 && ex.counter2.value === 67;
+print('two export names, one storage cell = ' + a + ' ' + b + ' ' + c);
+
+// ToNumber runs exactly once and its side effects are not rolled back: a
+// valueOf that mutates the global and THEN throws keeps its mutation, and
+// the assignment that triggered it does not commit.
+ex.counter.value = 0;
+try {
+  ex.counter.value = {valueOf: function () {
+    ex.counter.value = 777;
+    throw new TypeError('from valueOf');
+  }};
+  print('valueOf that mutates then throws: no exception');
+} catch (e) {
+  print('valueOf that mutates then throws: caught ' + e.constructor.name);
+}
+print('mutation from the throwing valueOf survived = ' + ex.get_counter());
+print('done');

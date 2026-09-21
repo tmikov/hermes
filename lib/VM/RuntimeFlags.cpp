@@ -31,6 +31,9 @@ vm::RuntimeConfig buildRuntimeConfig(const RuntimeFlags &flags) {
               .build())
       .withMaxNumRegisters(flags.MaxNumRegisters)
       .withEnableEval(flags.EnableEval)
+      .withEnableUntrustedBytecodeFromJS(flags.EnableUntrustedBytecodeFromJS)
+      .withEnableWasmBytecodeContentSniffing(
+          flags.EnableWasmBytecodeContentSniffing)
       .withVerifyEvalIR(flags.VerifyIR)
       .withOptimizedEval(flags.OptimizedEval)
       .withAsyncBreakCheckInEval(flags.EmitAsyncBreakCheck)

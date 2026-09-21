@@ -1,0 +1,19 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; The cross-module half of e2e-no-closure-escape.wat. This module imports the
+;; exporter's table, so its slot storage is ADOPTED rather than constructed:
+;; the funcref it hands back travels through a second module's link path
+;; before it reaches script. Two ways out, because they are two different
+;; readers -- the Wasm `table.get` opcode, and the JS API on the re-exported
+;; WebAssembly.Table.
+
+(module
+  (import "exporter" "tbl" (table $tbl 10 funcref))
+
+  (func (export "getAt") (param i32) (result funcref)
+    (table.get $tbl (local.get 0)))
+
+  (export "tbl" (table $tbl)))

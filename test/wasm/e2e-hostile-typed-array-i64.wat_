@@ -1,0 +1,11 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-hostile-typed-array.wat: an i64 export whose
+;; return marshalling writes through the compiler-supplied return buffer.
+
+(module
+  (func (export "add") (param i64 i64) (result i64)
+    (i64.add (local.get 0) (local.get 1))))
