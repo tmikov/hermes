@@ -15,6 +15,8 @@
 #include "llvh/ADT/DenseMap.h"
 #include "llvh/Support/Casting.h"
 
+#include <string>
+
 using llvh::dyn_cast;
 using llvh::isa;
 using llvh::raw_null_ostream;
@@ -159,6 +161,21 @@ class Verifier : public InstructionVisitor<Verifier, bool> {
     // before we ask it for the inst number.
     printer.namer_.restoreFunctionState(I.getParent()->getParent());
     return llvh::format("%%%u", printer.namer_.getInstNumber(&I));
+  }
+
+  /// Helper function to name the try a block is enclosed by, where \p
+  /// tryStart may be null. iLabel cannot be used for that: null means
+  /// "outside all tries", which blockToEnclosingTry legitimately holds --
+  /// the function entry is recorded that way, and so is anything reached
+  /// without entering a try body -- and it is one of the two sides whenever
+  /// a block is reached both from within a try and from outside one. That is
+  /// one case of the mismatch reported below; the other is two different
+  /// tries, where neither side is null.
+  std::string enclosingTryLabel(const TryStartInst *tryStart) {
+    if (!tryStart)
+      return "none";
+    printer.namer_.restoreFunctionState(tryStart->getParent()->getParent());
+    return "%" + std::to_string(printer.namer_.getInstNumber(tryStart));
   }
 };
 
@@ -417,8 +434,8 @@ bool Verifier::verifyTryStructure(const Function &F) {
             enclosingInfo->second == succEnclosingTry,
             bbLabel(*succ)
                 << " is reachable from multiple different TryStartInsts: "
-                << iLabel(*succEnclosingTry) << " and "
-                << iLabel(*enclosingInfo->second));
+                << enclosingTryLabel(succEnclosingTry) << " and "
+                << enclosingTryLabel(enclosingInfo->second));
       } else {
         // Only expore this BB if we haven't visited it before.
         stack.push_back({succ, succEnclosingTry});
