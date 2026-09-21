@@ -14,7 +14,11 @@
 // RUN: %hermesc -emit-binary -out %t.hbc %t.body.js
 // RUN: %python %S/Inputs/hbc_to_js.py %t.hbc %t.pre.js
 // RUN: cat %t.pre.js %s > %t.run.js
-// RUN: %hermes %t.run.js | %FileCheck %s --match-full-lines
+// RUN: %hermes -Xenable-untrusted-bytecode-from-js %t.run.js | %FileCheck %s --match-full-lines
+
+// The flag is required, not incidental: Hermes bytecode is trusted by
+// construction, so a Worker will not take it from JS unless the embedder has
+// opened that boundary. worker-bytecode-gate.js pins the refusal.
 
 // `BC` is prepended by the RUN pipeline: the bytecode of the worker body above.
 var worker = new Worker(BC.buffer);
