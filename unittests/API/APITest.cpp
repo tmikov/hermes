@@ -3462,11 +3462,46 @@ TEST_P(HermesWorkerTest, WorkerFromBytecode) {
   }
   rt->global().setProperty(*rt, "__bc", arr);
 
-  // Constructing from the bytecode bytes must succeed (worker thread starts
-  // and evaluateJavaScript takes the bytecode path).
+  // Bytecode reaching the Worker constructor from JS is a trust boundary:
+  // bytecode is trusted by construction rather than re-validated the way
+  // source is. This fixture's runtime uses the default config, where
+  // EnableUntrustedBytecodeFromJS is off, so it must be refused.
+  EXPECT_THROW(eval("var w = new Worker(__bc); w;"), JSError);
+}
+
+/// The opt-in half of WorkerFromBytecode: with EnableUntrustedBytecodeFromJS
+/// on, the same bytes are accepted and the worker runs them. Kept as a
+/// separate fixture because only HermesRuntimeCustomConfigTest can choose the
+/// RuntimeConfig.
+class HermesWorkerBytecodeAllowedTest : public HermesRuntimeCustomConfigTest {
+ public:
+  HermesWorkerBytecodeAllowedTest()
+      : HermesRuntimeCustomConfigTest(::hermes::vm::RuntimeConfig::Builder()
+                                          .withEnableUntrustedBytecodeFromJS(
+                                              true)
+                                          .build()) {}
+};
+
+#if HERMES_ENABLE_CORE_EXTENSIONS
+TEST_F(HermesWorkerBytecodeAllowedTest, WorkerFromBytecodeWhenEnabled) {
+  std::string bytecode;
+  ASSERT_TRUE(hermes::compileJS("var x = 1;", bytecode));
+
+  auto u8ctor = rt->global().getPropertyAsFunction(*rt, "Uint8Array");
+  auto arr =
+      u8ctor.callAsConstructor(*rt, (double)bytecode.size()).asObject(*rt);
+  for (size_t i = 0; i < bytecode.size(); ++i) {
+    arr.setProperty(
+        *rt,
+        PropNameID::forUtf8(*rt, std::to_string(i)),
+        (double)(uint8_t)bytecode[i]);
+  }
+  rt->global().setProperty(*rt, "__bc", arr);
+
   auto worker = eval("var w = new Worker(__bc); w;").asObject(*rt);
   worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
 }
+#endif
 
 INSTANTIATE_TEST_CASE_P(
     Runtimes,
