@@ -1,0 +1,49 @@
+=== ICU4X Timezone Conversion Demo ===
+
+1. Converting 2025-07-04 10:30 AM New York (EDT, -04:00):
+
+  -> America/Los_Angeles       2025-07-04 06:30:00 (UTC-08:00)
+  -> Europe/London             2025-07-04 14:30:00 (UTC+00:00)
+  -> Europe/Berlin             2025-07-04 15:30:00 (UTC+01:00)
+  -> Asia/Tokyo                2025-07-04 23:30:00 (UTC+09:00)
+  -> Asia/Shanghai             2025-07-04 22:30:00 (UTC+08:00)
+  -> Australia/Sydney          2025-07-05 00:30:00 (UTC+10:00)
+
+World clocks (epoch: 1736942400000):
+------------------------------------------------------------
+  UTC                            2025-01-15 12:00:00 (UTC+00:00)
+  America/New_York               2025-01-15 07:00:00 (UTC-05:00)
+  America/Chicago                2025-01-15 06:00:00 (UTC-06:00)
+  America/Denver                 2025-01-15 05:00:00 (UTC-07:00)
+  America/Los_Angeles            2025-01-15 04:00:00 (UTC-08:00)
+  Europe/London                  2025-01-15 12:00:00 (UTC+00:00)
+  Europe/Paris                   2025-01-15 13:00:00 (UTC+01:00)
+  Asia/Kolkata                   2025-01-15 17:30:00 (UTC+05:30)
+  Asia/Shanghai                  2025-01-15 20:00:00 (UTC+08:00)
+  Asia/Tokyo                     2025-01-15 21:00:00 (UTC+09:00)
+  Australia/Sydney               2025-01-15 22:00:00 (UTC+10:00)
+  Pacific/Auckland               2025-01-16 00:00:00 (UTC+12:00)
+
+World clocks (epoch: 1752580800000):
+------------------------------------------------------------
+  UTC                            2025-07-15 12:00:00 (UTC+00:00)
+  America/New_York               2025-07-15 07:00:00 (UTC-05:00)
+  America/Chicago                2025-07-15 06:00:00 (UTC-06:00)
+  America/Denver                 2025-07-15 05:00:00 (UTC-07:00)
+  America/Los_Angeles            2025-07-15 04:00:00 (UTC-08:00)
+  Europe/London                  2025-07-15 12:00:00 (UTC+00:00)
+  Europe/Paris                   2025-07-15 13:00:00 (UTC+01:00)
+  Asia/Kolkata                   2025-07-15 17:30:00 (UTC+05:30)
+  Asia/Shanghai                  2025-07-15 20:00:00 (UTC+08:00)
+  Asia/Tokyo                     2025-07-15 21:00:00 (UTC+09:00)
+  Australia/Sydney               2025-07-15 22:00:00 (UTC+10:00)
+  Pacific/Auckland               2025-07-16 00:00:00 (UTC+12:00)
+
+4. UTC offset lookup (March 15, 2025 12:00 UTC):
+
+  America/New_York          UTC-05:00 (-18000s)
+  America/Los_Angeles       UTC-08:00 (-28800s)
+  Europe/London             UTC+00:00 (0s)
+  Asia/Tokyo                UTC+09:00 (32400s)
+
+Done.
