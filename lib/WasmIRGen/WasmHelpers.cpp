@@ -506,11 +506,20 @@ Instruction *WasmHelpers::emitTableInit(
     Value *segIdx,
     Value *dst,
     Value *src,
-    Value *count) {
+    Value *count,
+    Value *isFuncRef) {
   // No meaningful return value.
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmTableInit,
-      {funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count});
+      {funcsArr,
+       typesArr,
+       exportedArr,
+       elemSegs,
+       segIdx,
+       dst,
+       src,
+       count,
+       isFuncRef});
 }
 
 Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
@@ -583,6 +592,72 @@ Instruction *WasmHelpers::emitLinkGlobal(
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmLinkGlobal,
       {importVal, expectedValType, expectedMutable});
+}
+
+Instruction *WasmHelpers::emitIsExportedFunction(Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmIsExportedFunction, {value});
+}
+
+Instruction *WasmHelpers::emitFuncTypeId(Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmFuncTypeId, {value});
+}
+
+Instruction *WasmHelpers::emitMakeTag(llvh::ArrayRef<Value *> typeCodes) {
+  llvh::SmallVector<Value *, 4> callArgs(typeCodes.begin(), typeCodes.end());
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMakeTag, callArgs);
+  inst->setType(Type::createObject());
+  return inst;
+}
+
+Instruction *WasmHelpers::emitCheckTagType(
+    Value *value,
+    llvh::ArrayRef<Value *> typeCodes) {
+  llvh::SmallVector<Value *, 5> callArgs;
+  callArgs.push_back(value);
+  callArgs.append(typeCodes.begin(), typeCodes.end());
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmCheckTagType, callArgs);
+}
+
+Instruction *WasmHelpers::emitAllocRefBuf(Value *slots) {
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmAllocRefBuf, {slots});
+  // An ArrayStorage is a GC cell, not a JSObject. This function emits no
+  // operation on the result: it becomes a call argument and an argument to
+  // wasmRefBufGet/wasmRefBufSet.
+  //
+  // `any` buys less than it looks like it buys. TypeContext.h defines it as
+  // the union of JS-OBSERVABLE types, so it neither describes an opaque
+  // internal cell nor forbids a consumer from applying a property operation;
+  // what it does is stop a pass from NARROWING the value to something it is
+  // not. That the representation rests on an unenforced boundary -- and that
+  // HermesValue::isObject() answers true for a cell that is not a JSObject --
+  // is dz 01a08953-c401, which carries two alternative representations.
+  inst->setType(Type::createAnyType());
+  return inst;
+}
+
+Instruction *WasmHelpers::emitRefBufGet(Value *buf, Value *index) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmRefBufGet, {buf, index});
+}
+
+Instruction *WasmHelpers::emitRefBufSet(
+    Value *buf,
+    Value *index,
+    Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmRefBufSet, {buf, index, value});
+}
+
+Instruction *WasmHelpers::emitMakeResultArray(llvh::ArrayRef<Value *> values) {
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMakeResultArray, values);
+  inst->setType(Type::createObject());
+  return inst;
 }
 
 Instruction *WasmHelpers::emitGlobalGet(Value *globalObj) {

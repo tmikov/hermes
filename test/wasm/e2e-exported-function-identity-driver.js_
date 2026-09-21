@@ -32,8 +32,9 @@ print('c() = ' + inst.exports.c());
 
 // The Exported Function's linking state (its backing closure and its interned
 // type id) lives in named internal properties, which script can neither read
-// nor enumerate. Nothing below may name them. `__wasm_type__` is a separate,
-// still-published property and is expected here until it is removed.
+// nor enumerate. Nothing below may name them, and nothing else is published
+// either: `__wasm_type__` used to appear here and is gone, so a wrapper now
+// carries exactly what any function carries. Node reports the same three.
 print('names: ' + Object.getOwnPropertyNames(inst.exports.a).join(','));
 print('keys: ' + Object.keys(inst.exports.a).join(','));
 print('symbols: ' + Object.getOwnPropertySymbols(inst.exports.a).length);

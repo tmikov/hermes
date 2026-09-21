@@ -1,0 +1,276 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-construct.wat.
+//
+// The descriptor table for reference-typed globals, measured against node
+// v24.13.1: "externref" and "anyfunc" are accepted, "funcref" and "v128" are
+// refused. "funcref" being refused while "anyfunc" is accepted is not a typo
+// -- the JS API's ToValueType lists `anyfunc` -- and it matters because an
+// importing module brand-checks against whatever this constructor produced.
+//
+// Only the funcref rows validate anything. An externref admits ANY JS value,
+// so a case here that refused one would be asserting a bug.
+//
+// EVERYTHING THAT NEEDS NO MODULE COMES FIRST, and the module is instantiated
+// half way down. That ordering is deliberate: the module imports a mutable
+// externref global from this file, so a defect in the constructor's
+// mutability would stop it instantiating, and a test that instantiated first
+// would report every earlier assertion as missing output instead of reporting
+// the one that broke.
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// ===========================================================================
+// The descriptor table, which needs nothing from a module.
+// ===========================================================================
+
+// --- Row 1: "externref" is accepted and defaults to undefined ---
+var gExt = new WebAssembly.Global({value: 'externref'});
+print('externref default: ' + String(gExt.value) + ' / ' + typeof gExt.value);
+
+// --- Row 2: "anyfunc" is accepted and defaults to null ---
+var gFn = new WebAssembly.Global({value: 'anyfunc'});
+print('anyfunc default: ' + String(gFn.value) + ' / ' + typeof gFn.value);
+
+// --- Row 3: "funcref" is a TypeError, deliberately ---
+print('funcref: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'funcref'});
+}));
+
+// --- Row 4: "v128" is a TypeError whose message names SIMD ---
+// This is the DESCRIPTOR path only. A module exporting a v128 global is
+// refused elsewhere and with a different message.
+print('v128: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'v128'});
+}));
+
+// An unknown name still names every type that IS accepted.
+print('bogus: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyref'});
+}));
+
+// --- An explicit funcref value: null or an Exported Function, nothing else.
+// The Exported Function half needs the module and is below.
+// Identity, not the string form: a global holding the STRING "null" passes a
+// stringified check.
+print('anyfunc null is null: ' +
+      (new WebAssembly.Global({value: 'anyfunc'}, null).value === null));
+
+// A plain JS function is a HOST REFERENCE, not a funcref.
+print('anyfunc from a plain function: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, function () {});
+}));
+
+// Omitting the argument is DefaultValue(funcref), which is null; passing
+// `undefined` explicitly is an ordinary value that fails the check. The two
+// are different, as they are for WebAssembly.Table.prototype.set.
+print('anyfunc explicit undefined: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, undefined);
+}));
+
+print('anyfunc from an object: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, {});
+}));
+
+// --- An externref takes every JS value there is, unchanged ---
+var externrefCases =
+    [undefined, null, 0, -0, NaN, '', 'x', true, {a: 1}, [1, 2],
+     function () {}, 7n, Symbol('s')];
+var storedAsIs = true;
+for (var i = 0; i < externrefCases.length; i++) {
+  var want = externrefCases[i];
+  var got = new WebAssembly.Global({value: 'externref'}, want).value;
+  // NaN is not === itself, and -0 === 0, so compare on Object.is terms.
+  var same = got === want ? (want !== 0 || 1 / got === 1 / want)
+                          : (got !== got && want !== want);
+  if (!same) {
+    storedAsIs = false;
+    print('externref changed case ' + i + ': ' + String(got));
+  }
+}
+print('externref stores every JS value as it stands: ' + storedAsIs);
+
+// --- Mutable reference SNAPSHOTS exist and must keep working ---
+// "A snapshot is always immutable" is a property of wasmMakeGlobal's callers,
+// not of Global: this constructor takes mutability from the descriptor, and
+// getting that wrong is the trap this change is warned about.
+//
+// A reference snapshot's mutability is observable as a round trip through
+// `.value`: a global built mutable but recorded immutable refuses the write
+// below for being immutable instead of storing it.
+var refVal = {tag: 'stored'};
+var gmExt = new WebAssembly.Global({value: 'externref', mutable: true}, refVal);
+var gmFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, null);
+print('mutable reference snapshots hold their value: ' +
+      (gmExt.value === refVal) + ' ' + (gmFn.value === null));
+
+var giExt = new WebAssembly.Global({value: 'externref'}, refVal);
+print('immutable externref write: ' + attempt(function () {
+  giExt.value = null;
+  return 'wrote';
+}));
+// The write direction. Identity against a value the slot did NOT already
+// hold: gmExt starts out holding refVal, so a setter that stored nothing
+// would leave refVal there and read false here. Nothing is coerced -- an
+// object assigned to an externref global used to become NaN.
+var rewritten = {tag: 'rewritten'};
+gmExt.value = rewritten;
+print('mutable externref write: ' + (gmExt.value === rewritten));
+// `null` is an ordinary externref value and must replace the object above.
+// Compared with ===, not stringified: the string "null" passes String(x).
+gmExt.value = null;
+print('mutable externref write null: ' + (gmExt.value === null));
+// An 'anyfunc' global admits null or an Exported Function and nothing else,
+// with the setter's message rather than the constructor's. The Exported
+// Function half needs the module and is below.
+print('mutable anyfunc write a plain function: ' + attempt(function () {
+  gmFn.value = function () {};
+  return 'wrote';
+}));
+
+// Compared against a typed literal rather than printed: string concatenation
+// reads the same for 2, 2n and "2".
+var gNum = new WebAssembly.Global({value: 'i32', mutable: true}, 1);
+gNum.value = 2;
+print('mutable numeric snapshot round-trips: ' + (gNum.value === 2) + ' ' +
+      typeof gNum.value);
+
+// --- An externref value is a GC pointer in the value slot ---
+// The loop allocates between constructions, so under -gc-sanitize-handles=1
+// the heap has moved by the time the next construction reads its argument and
+// the next read-back reads the slot.
+var N = 40;
+var objects = [];
+var extGlobals = [];
+for (var i = 0; i < N; i++) {
+  var o = {n: i, pad: [i, i]};
+  objects.push(o);
+  extGlobals.push(new WebAssembly.Global({value: 'externref'}, o));
+}
+var ok = true;
+for (var i = 0; i < N; i++) {
+  var v = extGlobals[i].value;
+  if (v !== objects[i] || v.n !== i) {
+    ok = false;
+    print('externref mismatch at ' + i + ': ' + JSON.stringify(v));
+    break;
+  }
+}
+print('externref values traced across collections: ' + ok);
+
+// ===========================================================================
+// The module, for the one value a pure-JS test cannot build.
+// ===========================================================================
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+// The module imports a mutable externref global, which a JS-built one
+// satisfies. Instantiating at all is therefore already an assertion: a
+// reference-typed Global links against a reference-typed declaration.
+var hostValue = {tag: 'host'};
+var hostRef =
+    new WebAssembly.Global({value: 'externref', mutable: true}, hostValue);
+var ex = new WebAssembly.Instance(mod, {e: {ref: hostRef}}).exports;
+// A real Exported Function: an ordinary JS closure that WasmIRGen built and
+// the module's own generated code branded.
+var add = ex.add;
+print('fixture: ' + typeof add + ' ' + (add(2, 3) === 5));
+
+print('anyfunc from a real export: ' +
+      (new WebAssembly.Global({value: 'anyfunc'}, add).value === add));
+// An Exported Function is also an ordinary JS value, so it is a perfectly
+// good externref.
+print('externref holds an export too: ' +
+      (new WebAssembly.Global({value: 'externref'}, add).value === add));
+
+// --- The brand check is a safepoint ---
+// isWasmExportedFunction allocates, so each construction below is one, and
+// the loop allocates between them.
+var funcGlobals = [];
+for (var i = 0; i < N; i++) {
+  funcGlobals.push(new WebAssembly.Global({value: 'anyfunc'}, add));
+  var junk = {i: i, a: [i, i + 1, i + 2]};
+}
+ok = true;
+for (var i = 0; i < N; i++) {
+  if (funcGlobals[i].value !== add) {
+    ok = false;
+    print('funcref mismatch at ' + i + ': ' + String(funcGlobals[i].value));
+    break;
+  }
+}
+print('funcref constructions intact: ' + ok);
+
+// The funcref setter's positive half, which needs a real Exported Function.
+// gmFn holds null to begin with, so the write is what makes it hold `add`,
+// and the write back to null is what makes it stop.
+gmFn.value = add;
+print('anyfunc write an export: ' + (gmFn.value === add));
+gmFn.value = null;
+print('anyfunc write back to null: ' + (gmFn.value === null));
+
+// --- The numeric global exports, through the compiler ---
+// wasmMakeGlobal now selects its mode on isMutable: g_const takes the
+// snapshot arm, g_mut the live one. A live global is a two-way view, so the
+// write below is visible to the module's own global.get.
+print('g_const: ' + (ex.g_const.value === 42) + ' ' + attempt(function () {
+  ex.g_const.value = 1;
+  return 'wrote';
+}));
+print('g_mut: ' + (ex.g_mut.value === 100) + ' ' + (ex.get_mut() === 100));
+ex.g_mut.value = 7;
+print('g_mut after a host write: ' + (ex.g_mut.value === 7) + ' ' +
+      (ex.get_mut() === 7));
+
+// --- The imported mutable externref global, through generated code ---
+// The READ direction works today: global.get on the import hands back the
+// host's own value, unchanged and identical.
+print('global.get sees the host value: ' + (ex.get_ref() === hostValue));
+// The write direction through generated code. hostRef is a JS-built SNAPSHOT
+// Global, so global.set reaches the internal setter's own storage path rather
+// than a live setter closure. Each write is checked on both sides -- the
+// module's global.get and the host's `.value` -- because they are the same
+// storage, and a setter writing only one of them would be caught.
+var putObj = {tag: 'put'};
+ex.put_ref(putObj);
+print('put_ref an object: ' + (ex.get_ref() === putObj) + ' ' +
+      (hostRef.value === putObj));
+// A NUMBER is the case that matters: an object was caught by the internal
+// setter's "requires a Number value" check, while a Number passed it and
+// reached the numeric funnel, whose reference arms assert. It is an ordinary
+// externref value and is stored as a Number, not narrowed and not refused.
+ex.put_ref(5);
+print('put_ref a number: ' + (ex.get_ref() === 5) + ' ' +
+      (hostRef.value === 5));
+// `undefined` likewise, and it must REPLACE the 5 rather than be skipped.
+ex.put_ref(undefined);
+print('put_ref undefined: ' + (ex.get_ref() === undefined));
+// hostRef is a snapshot, so this is the internal setter's storage arm, and
+// the count is the assertion: an implementation that ran ToNumber and then
+// stored the original reference anyway would pass an identity check alone.
+var coerceCalls = 0;
+var probe = {
+  valueOf: function () { coerceCalls++; return 99; },
+  toString: function () { coerceCalls++; return 'probe'; },
+};
+ex.put_ref(probe);
+print('put_ref never coerces: ' + (ex.get_ref() === probe) + ' ' +
+      (hostRef.value === probe) + ' ' + (coerceCalls === 0));
+
+// The identity round trip in the other direction: the host writes an object
+// through `.value` and the module's own global.get hands back that same
+// object. A coerced or copied value fails this.
+var jsWritten = {tag: 'js'};
+hostRef.value = jsWritten;
+print('.value write is seen by global.get: ' + (ex.get_ref() === jsWritten));

@@ -1,0 +1,42 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-catch-non-array.wat.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+var thrown = null;
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes),
+  {e: {boom: function() { throw thrown; }}});
+var e = inst.exports;
+
+function probe(label, value) {
+  thrown = value;
+  try {
+    e.run();
+    print(label + ': not thrown at all');
+  } catch (err) {
+    print(label + ': escaped as the same ' +
+          (err === value ? (typeof err === 'object' ? 'object' : 'value')
+                         : 'DIFFERENT value'));
+  }
+}
+
+probe('plain object', {not: 'an array'});
+probe('array with a non-tag at 0', [{}, 1]);
+probe('empty array', []);
+probe('a string', 'not an object at all');
+// This one IS a Wasm exception, on this module's own tag. It escapes because
+// the matcher only knows the array representation -- see 01a09db0-a02b -- and
+// what matters here is that it escapes instead of crashing.
+probe('a WebAssembly.Exception', new WebAssembly.Exception(e.t, [7]));
+
+// The handler still works: the module's own tag, thrown as the array a Wasm
+// exception travels as, is caught and its payload read.
+thrown = [e.t, 99];
+print('the module\'s own tag: caught, payload ' + e.run());
+print('done');

@@ -268,6 +268,8 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
 
   struct : public Locals {
     PinnedValue<JSObject> tempHandle;
+    PinnedValue<JSObject> intrinsics;
+    PinnedValue<JSObject> wasmIntrinsics;
     PinnedValue<> value;
   } lv;
   LocalsRAII lraii(runtime, &lv);
@@ -842,6 +844,35 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
   }
 #endif
 
+  // Recover the pristine-constructor holder that createHermesInternalObject
+  // built and deliberately left extensible, so that constructors created
+  // after it -- the WebAssembly ones below -- can still join it.
+  //
+  // The re-fetch is safe rather than merely conventional: HermesInternal and
+  // its `intrinsics` property are both non-writable and non-configurable, and
+  // no JS has run yet -- runInternalJavaScript() is called only after
+  // initGlobalObject returns -- so this can only find the object
+  // createHermesInternalObject built.
+  {
+    auto internRes = JSObject::getNamed_RJS(
+        runtime.getGlobal(),
+        runtime,
+        Predefined::getSymbolID(Predefined::HermesInternal));
+    assert(
+        internRes != ExecutionStatus::EXCEPTION &&
+        "Failed to get HermesInternal.");
+    lv.tempHandle.castAndSetHermesValue<JSObject>(internRes->getHermesValue());
+    auto intrinsicsRes = JSObject::getNamed_RJS(
+        lv.tempHandle,
+        runtime,
+        Predefined::getSymbolID(Predefined::intrinsics));
+    assert(
+        intrinsicsRes != ExecutionStatus::EXCEPTION &&
+        "Failed to get HermesInternal.intrinsics.");
+    lv.intrinsics.castAndSetHermesValue<JSObject>(
+        intrinsicsRes->getHermesValue());
+  }
+
 #ifdef HERMES_ENABLE_WASM
   // Define the global WebAssembly namespace object.
   createWebAssemblyObject(runtime, lv.tempHandle);
@@ -852,7 +883,57 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
           Predefined::getSymbolID(Predefined::WebAssembly),
           normalDPF,
           lv.tempHandle));
+
+  // Pristine WebAssembly constructors, under their own sub-holder so that the
+  // names stay unambiguous -- `Global` and `Module` mean something else at the
+  // top level of the holder.
+  //
+  // These are the CONSTRUCTORS, not the namespace object. Stashing the
+  // namespace would not help: its properties are defined with
+  // getNewNonEnumerableFlags(), so `WebAssembly.Memory = evil` would change
+  // what a stashed reference resolves to.
+  {
+    lv.wasmIntrinsics = JSObject::create(runtime);
+    auto defineWasmIntrinsic = [&](Predefined::Str symID,
+                                   Handle<NativeConstructor> ctor) {
+      GCScopeMarkerRAII marker{gcScope};
+      runtime.ignoreAllocationFailure(
+          JSObject::defineOwnProperty(
+              lv.wasmIntrinsics,
+              runtime,
+              Predefined::getSymbolID(symID),
+              constantDPF,
+              ctor));
+    };
+    defineWasmIntrinsic(Predefined::Module, runtime.wasmModuleConstructor);
+    defineWasmIntrinsic(Predefined::Instance, runtime.wasmInstanceConstructor);
+    defineWasmIntrinsic(Predefined::Memory, runtime.wasmMemoryConstructor);
+    defineWasmIntrinsic(Predefined::Table, runtime.wasmTableConstructor);
+    defineWasmIntrinsic(Predefined::Global, runtime.wasmGlobalConstructor);
+    defineWasmIntrinsic(Predefined::Tag, runtime.wasmTagConstructor);
+    defineWasmIntrinsic(
+        Predefined::Exception, runtime.wasmExceptionConstructor);
+    defineWasmIntrinsic(
+        Predefined::CompileError, runtime.wasmCompileErrorConstructor);
+    defineWasmIntrinsic(
+        Predefined::LinkError, runtime.wasmLinkErrorConstructor);
+    defineWasmIntrinsic(
+        Predefined::RuntimeError, runtime.wasmRuntimeErrorConstructor);
+    JSObject::preventExtensions(*lv.wasmIntrinsics);
+    runtime.ignoreAllocationFailure(
+        JSObject::defineOwnProperty(
+            lv.intrinsics,
+            runtime,
+            Predefined::getSymbolID(Predefined::WebAssembly),
+            constantDPF,
+            lv.wasmIntrinsics));
+  }
 #endif
+
+  // KEEP THIS LAST. A constructor defined below this point cannot be added to
+  // the holder, and initGlobalObject has no early return, so reaching the end
+  // of the function is the same as reaching this seal.
+  JSObject::preventExtensions(*lv.intrinsics);
 }
 
 } // namespace vm

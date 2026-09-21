@@ -3,9 +3,9 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; The return buffer's reference slots, exercised across a wasm->wasm call --
-;; the path where the silent 0 actually originated, and the one the export
-;; wrapper test cannot reach.
+;; The reference slots of a multi-value result, exercised across a wasm->wasm
+;; call -- the path where the silent 0 actually originated, and the one the
+;; export wrapper test cannot reach.
 ;;
 ;; $mv is NOT exported. Its multi-value result crosses only an internal
 ;; boundary: emitRetBufStores writes the results, the caller's emitRetBufLoads
@@ -14,8 +14,8 @@
 ;; then pushed that 0 onto the value stack and returned it as a funcref. No
 ;; JS-visible marshalling was involved, so nothing warned.
 ;;
-;; svGet is the control: a single funcref result bypasses the buffer entirely,
-;; so it must return the same closure mvGet does.
+;; svGet is the control: a single funcref result bypasses the transport
+;; entirely, so it must return the same closure mvGet does.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-mv-ref-wasm-to-wasm-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s

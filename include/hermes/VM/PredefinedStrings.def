@@ -448,6 +448,7 @@ STR(revocable, "revocable")
 STR(revoke, "revoke")
 
 STR(HermesInternal, "HermesInternal")
+STR(intrinsics, "intrinsics")
 STR(detachArrayBuffer, "detachArrayBuffer")
 STR(createHeapSnapshot, "createHeapSnapshot")
 STR(hasPromise, "hasPromise")
@@ -479,10 +480,20 @@ STR(checkedTypeCast, "checkedTypeCast")
 STR(setFunctionName, "setFunctionName")
 STR(fastArrayPop, "fastArrayPop")
 STR(fastArraySlice, "fastArraySlice")
-// The 71 wasm builtin names. These are PRIVATE_BUILTINs: not properties of
-// any object, never looked up by name, and unreachable without Wasm, where
-// every one of their ids resolves to a single shared body instead. So with
-// Wasm off they need no predefined string at all.
+// The wasm builtin names. These are PRIVATE_BUILTINs: not properties of any
+// object, never looked up by name, and unreachable without Wasm, where their
+// ids resolve to a single shared body instead. So with Wasm off they need no
+// predefined string at all.
+//
+// A name missing from this block is a build error rather than a silent gap:
+// HermesBuiltin.cpp registers each wasm builtin as
+// defineInternMethod(B::HermesBuiltin_N, P::N, ...), which does not compile
+// without P::N, and a wasm builtin left unregistered trips the
+// "native builtin not initialized" assertion in Runtime::initNativeBuiltins
+// at startup -- in a Debug build; it is compiled out under NDEBUG.
+//
+// (This block used to open with a count of the names below it. Nothing
+// checked the count, and it was wrong by the time anyone read it.)
 #ifdef HERMES_ENABLE_WASM
 STR(wasmTrap, "wasmTrap")
 STR(wasmI32DivS, "wasmI32DivS")
@@ -545,7 +556,6 @@ STR(wasmTableInit, "wasmTableInit")
 STR(wasmElemDrop, "wasmElemDrop")
 STR(wasmTableGrow, "wasmTableGrow")
 STR(wasmInternType, "wasmInternType")
-STR(wasmCheckTableArrays, "wasmCheckTableArrays")
 STR(wasmLinkTable, "wasmLinkTable")
 STR(wasmLinkMemory, "wasmLinkMemory")
 STR(wasmLinkGlobal, "wasmLinkGlobal")
@@ -556,6 +566,14 @@ STR(wasmMakeGlobal, "wasmMakeGlobal")
 STR(wasmBigIntToI64, "wasmBigIntToI64")
 STR(wasmI64ToBigInt, "wasmI64ToBigInt")
 STR(wasmLinkError, "wasmLinkError")
+STR(wasmIsExportedFunction, "wasmIsExportedFunction")
+STR(wasmAllocRefBuf, "wasmAllocRefBuf")
+STR(wasmRefBufGet, "wasmRefBufGet")
+STR(wasmRefBufSet, "wasmRefBufSet")
+STR(wasmMakeResultArray, "wasmMakeResultArray")
+STR(wasmFuncTypeId, "wasmFuncTypeId")
+STR(wasmMakeTag, "wasmMakeTag")
+STR(wasmCheckTagType, "wasmCheckTagType")
 #endif // HERMES_ENABLE_WASM
 STR(__wasmTag, "__wasmTag")
 STR(__wasmPayload, "__wasmPayload")

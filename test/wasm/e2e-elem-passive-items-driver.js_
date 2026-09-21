@@ -1,0 +1,64 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-elem-passive-items.wat.
+//
+// The table assertions are identity comparisons printed as booleans. An
+// Exported Function stringifies after the Wasm function it wraps, not after
+// the instance, so the value that came in through the funcref global prints
+// the same text as this instance's own f0; only `===` separates them.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+function instantiate(gf, ge) {
+  return new WebAssembly.Instance(mod, {e: {gf: gf, ge: ge}}).exports;
+}
+
+var extObj = {tag: 'ext'};
+
+// A first instantiation, only to obtain a WebAssembly Exported Function for
+// the funcref global of the second. Its f0 is a different object from the
+// second instance's f0.
+var seedFn = instantiate(null, null).f0;
+
+var ex = instantiate(seedFn, extObj);
+var t = ex.t;
+
+print("before init, slot 0 is this instance's f0: " + (t.get(0) === ex.f0));
+print("before init, slot 2 is this instance's f0: " + (t.get(2) === ex.f0));
+
+ex.init(0, 0, 3);
+print('slot 0 is the imported function: ' + (t.get(0) === seedFn));
+print('slot 1 is null: ' + (t.get(1) === null));
+print("slot 2 is this instance's f1: " + (t.get(2) === ex.f1));
+print("slot 3 is this instance's f0: " + (t.get(3) === ex.f0));
+
+for (var i = 0; i <= 2; ++i) {
+  try {
+    print('call(' + i + '): ' + ex.call(i));
+  } catch (e) {
+    print('call(' + i + '): ' + e.message);
+  }
+}
+
+// One entry, taken from the segment's third position.
+ex.init(4, 2, 1);
+print("slot 4 is this instance's f1: " + (t.get(4) === ex.f1));
+
+ex.einit(0, 0, 2);
+print('externref slot 0 is the imported object: ' + (ex.eget(0) === extObj));
+print('externref slot 1 is null: ' + (ex.eget(1) === null));
+
+ex.drop();
+try {
+  ex.init(0, 0, 1);
+  print('init after drop: no error');
+} catch (e) {
+  print('init after drop: ' + e.message);
+}
+print('done');

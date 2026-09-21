@@ -180,6 +180,42 @@ struct WasmGlobal {
   std::vector<InitExprOp> initExpr;
 };
 
+/// One entry of an element segment.
+///
+/// An element expression evaluates to a single reference value, and these are
+/// the constant forms of it that this engine reads. Recording the kind is what
+/// lets an entry that is not a function index still occupy its own position in
+/// the segment: an entry that recorded nothing did not merely lose itself, it
+/// moved every later entry of the segment down by one.
+/// An element expression whose form is not one of these becomes Kind::Null
+/// with a warning, so that the positions still line up -- see
+/// BinaryReaderHermesIRGen::EndElemExpr(), which is what keeps
+/// WasmElemSegment::items in step with the segment's own entry count.
+struct WasmElemItem {
+  enum class Kind : uint8_t {
+    /// `ref.func $f`; \c index is the function index.
+    FuncIndex,
+    /// `ref.null func` or `ref.null extern`; \c index is unused.
+    Null,
+    /// `global.get $g`; \c index is the global index.
+    GlobalGet,
+  };
+  Kind kind = Kind::FuncIndex;
+  /// Function index for Kind::FuncIndex, global index for Kind::GlobalGet.
+  /// Zero and meaningless for Kind::Null.
+  uint32_t index = 0;
+
+  static WasmElemItem makeFuncIndex(uint32_t funcIndex) {
+    return {Kind::FuncIndex, funcIndex};
+  }
+  static WasmElemItem makeNull() {
+    return {Kind::Null, 0};
+  }
+  static WasmElemItem makeGlobalGet(uint32_t globalIndex) {
+    return {Kind::GlobalGet, globalIndex};
+  }
+};
+
 /// A Wasm element segment (populates a table).
 struct WasmElemSegment {
   enum class Mode : uint8_t { Active, Passive, Declarative };
@@ -195,8 +231,10 @@ struct WasmElemSegment {
   /// Offset init expression as a sequence of stack-machine operations.
   /// When size > 1, this replaces offsetKind/offsetValue/offsetGlobalIdx.
   std::vector<InitExprOp> offsetExpr;
-  /// Element values (function indices).
-  std::vector<uint32_t> funcIndices;
+  /// The segment's entries, in order, one per element expression whatever
+  /// its kind, so an entry's position here is its position in the segment.
+  /// EndElemExpr() enforces the one-per-expression part.
+  std::vector<WasmElemItem> items;
 };
 
 /// A Wasm data segment (initializes linear memory).

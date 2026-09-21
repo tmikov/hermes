@@ -33,7 +33,7 @@
 ;;
 ;;   2. PARTIAL aliasing, which is still reachable: an EXTERNREF table's three
 ;;      arrays are three independent `new Array(n)` calls off globalThis.Array,
-;;      and wasmCheckTableArrays checks only that each is an array, not that
+;;      and nothing checked that the three were distinct, only that
 ;;      they are distinct. A replaced Array constructor gives two externref
 ;;      tables a shared array for ONE role and private arrays for the others.
 ;;      This is the case the six-way predicate exists for, and it is a live
@@ -90,12 +90,11 @@
 ;; CHECK-NEXT: getAt after copy: 10 | 10 | 11 | 12
 
 ;; --- Partial aliasing: two externref tables sharing ONE array ---
-;; Only the EXPORTED arrays are shared; the funcs and types arrays are private
-;; to each table. A predicate that compares the funcs pair alone therefore says
-;; "different tables", runs forward, and smears the first entry across the
-;; shared array -- `a,a,a,a` instead of `a,a,b,c`. table.get is the only reader
-;; of that array, so this is a wrong reference handed straight to Wasm code,
-;; with call_indirect none the wiser.
-;; CHECK-NEXT: shared exported before: a,b,c,null
-;; CHECK-NEXT: shared exported after: a,a,b,c
+;; Not constructible any more. Sharing one of the three arrays between two
+;; tables needed a replaced globalThis.Array; an externref table's arrays now
+;; come from the pristine Array under HermesInternal.intrinsics and a funcref
+;; table's are internal fields of a genuine WebAssembly.Table, so no two tables
+;; can be made to share one. table.copy's overlap handling is kept for the
+;; same-table case above, which is ordinary Wasm. The lost probe is recorded on
+;; dz 01a0904b-398b.
 ;; CHECK-NEXT: done

@@ -6,32 +6,44 @@
  */
 
 // JS driver for e2e-hostile-typed-array.wat. Each module is compiled to HBC
-// and loaded AFTER the relevant global is replaced, so the module's own
-// buffers are constructed from the hostile replacement.
+// and loaded AFTER the globals are replaced, which is the timing that used to
+// matter: the buffers are built during instantiation.
 
 var args = hermescli.getScriptArgs();
 var i64Path = args[0];
 var memPath = args[1];
 
-// i64 return buffer built from a hostile Uint32Array.
-globalThis.Uint32Array = function() { return {}; };
+var ctorCalls = 0;
+globalThis.Uint32Array = function () { ctorCalls++; return {}; };
+globalThis.Uint8Array = function () { ctorCalls++; return {}; };
+
+// The replacements are real, so the two results below are not passing because
+// nothing was replaced.
+new globalThis.Uint32Array(0);
+new globalThis.Uint8Array(0);
+print('replacements are live: ' + (ctorCalls === 2));
+
+ctorCalls = 0;
+
+// i64 return buffer.
 try {
   var i64Mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(i64Path));
   var i64Inst = new WebAssembly.Instance(i64Mod, {});
-  i64Inst.exports.add(1n, 2n);
-  print('i64 add with hostile Uint32Array: no error');
+  print('i64 add with hostile Uint32Array: ' + i64Inst.exports.add(1n, 2n));
 } catch (e) {
-  print('i64 add with hostile Uint32Array: ' + e.name);
+  print('i64 add with hostile Uint32Array: ' + e.name + ': ' + e.message);
 }
 
-// Linear-memory view built from a hostile Uint8Array.
-globalThis.Uint8Array = function() { return {}; };
+// Linear-memory view.
 try {
   var memMod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(memPath));
   var memInst = new WebAssembly.Instance(memMod, {});
   memInst.exports.fill();
-  print('memory.fill with hostile Uint8Array: no trap');
+  print('memory.fill with hostile Uint8Array: byte 0 is ' +
+        memInst.exports.peek(0) + ', byte 4 is ' + memInst.exports.peek(4));
 } catch (e) {
-  print('memory.fill with hostile Uint8Array: ' + e.name);
+  print('memory.fill with hostile Uint8Array: ' + e.name + ': ' + e.message);
 }
+
+print('modules called the replaced constructors: ' + ctorCalls);
 print('done');

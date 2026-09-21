@@ -1,0 +1,34 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-unreachable-i64-result.wat.
+//
+// Most of what this file checks is that the module compiles at all -- the
+// defect killed the compiler, so nothing got as far as running. The calls are
+// here to say that the live code around the dead constructs still produces
+// what it produced before.
+
+var e = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(
+    hermescli.loadFile(hermescli.getScriptArgs()[0]))).exports;
+
+function show(label, v) {
+  print(label + ': ' + v);
+}
+
+show('tryI64()', e.tryI64());
+show('blockI64()', e.blockI64());
+show('loopI64()', e.loopI64());
+show('ifI64()', e.ifI64());
+show('mixedI64()', e.mixedI64());
+show('stale(1)', e.stale(1));
+show('stale(0)', e.stale(0));
+show('liveMixed()', e.liveMixed());
+show('ifParam(1)', e.ifParam(1));
+show('ifParam(0)', e.ifParam(0));
+
+print('done');

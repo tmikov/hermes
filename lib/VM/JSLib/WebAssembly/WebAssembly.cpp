@@ -281,13 +281,29 @@ raiseLinkError(Runtime &runtime, const char *msg) {
 
 /// Look up globalThis.Promise.resolve and call it with \p value.
 /// Returns the resolved Promise object.
+///
+/// \p value arrives as a raw HermesValue and can carry a GC pointer: every
+/// caller today passes an object -- a Module, an Instance, or the
+/// {module, instance} result -- but the parameter is untyped, so it is pinned
+/// unconditionally rather than on a property of the current callers.
+/// (Pinning a primitive is harmless.)
+///
+/// It is pinned FIRST, before either lookup below: `globalThis.Promise` and
+/// `Promise.resolve` are both replaceable, so each getNamed_RJS allocates and
+/// can run a user getter, and the value used to be handed to executeCall1
+/// still holding whatever address it had two safepoints earlier.
 static CallResult<HermesValue>
 callPromiseResolve(Runtime &runtime, HermesValue value) {
   struct : public Locals {
+    PinnedValue<> value;
     PinnedValue<> promiseCons;
     PinnedValue<> resolveFn;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+
+  // Rooted before anything allocates. Nothing below may use the `value`
+  // parameter again.
+  lv.value = value;
 
   // Get globalThis.Promise.
   auto promiseRes = JSObject::getNamed_RJS(
@@ -317,12 +333,13 @@ callPromiseResolve(Runtime &runtime, HermesValue value) {
     return runtime.raiseTypeError("Promise.resolve is not callable");
   }
 
-  // Call Promise.resolve(value).
+  // Call Promise.resolve(value), passing the ROOTED copy: the parameter is
+  // two safepoints stale by now.
   auto callRes = Callable::executeCall1(
       Handle<Callable>::vmcast(&lv.resolveFn),
       runtime,
       lv.promiseCons,
-      value);
+      lv.value.getHermesValue());
   if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -331,13 +348,30 @@ callPromiseResolve(Runtime &runtime, HermesValue value) {
 
 /// Look up globalThis.Promise.reject and call it with \p error.
 /// Returns the rejected Promise object.
+///
+/// Same rooting obligation as callPromiseResolve, and more pressing: every
+/// caller reaches here by taking the thrown value out of the runtime and
+/// calling clearThrownValue(), so the exception root is already gone and this
+/// raw parameter may be the only thing referring to the error object across
+/// the two replaceable-property lookups below. Script may happen to be
+/// retaining the same object elsewhere, but nothing here may assume it is.
+///
+/// A thrown value can also be a primitive -- `throw 1` is legal, and this
+/// helper is reachable with whatever a user import threw -- in which case
+/// there is nothing to root. Pinning it anyway is harmless and keeps the rule
+/// unconditional. Pin it first.
 static CallResult<HermesValue>
 callPromiseReject(Runtime &runtime, HermesValue error) {
   struct : public Locals {
+    PinnedValue<> error;
     PinnedValue<> promiseCons;
     PinnedValue<> rejectFn;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+
+  // Rooted before anything allocates. Nothing below may use the `error`
+  // parameter again.
+  lv.error = error;
 
   // Get globalThis.Promise.
   auto promiseRes = JSObject::getNamed_RJS(
@@ -367,12 +401,13 @@ callPromiseReject(Runtime &runtime, HermesValue error) {
     return runtime.raiseTypeError("Promise.reject is not callable");
   }
 
-  // Call Promise.reject(error).
+  // Call Promise.reject(error), passing the ROOTED copy: the parameter is two
+  // safepoints stale by now.
   auto callRes = Callable::executeCall1(
       Handle<Callable>::vmcast(&lv.rejectFn),
       runtime,
       lv.promiseCons,
-      error);
+      lv.error.getHermesValue());
   if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -939,20 +974,22 @@ wasmInstantiate(void *context, Runtime &runtime) {
   // Create the result object {module, instance}.
   lv.resultObj = JSObject::create(runtime);
 
-  auto putRes = JSObject::putNamed_RJS(
-      lv.resultObj,
-      runtime,
-      Predefined::getSymbolID(Predefined::module),
-      lv.mod);
+  auto putRes = JSObject::defineOwnProperty(
+        lv.resultObj,
+        runtime,
+        Predefined::getSymbolID(Predefined::module),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
+        lv.mod);
   if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
 
-  putRes = JSObject::putNamed_RJS(
-      lv.resultObj,
-      runtime,
-      Predefined::getSymbolID(Predefined::instance),
-      lv.instanceVal);
+  putRes = JSObject::defineOwnProperty(
+        lv.resultObj,
+        runtime,
+        Predefined::getSymbolID(Predefined::instance),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
+        lv.instanceVal);
   if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -1156,6 +1193,32 @@ wasmModuleExports(void *context, Runtime &runtime) {
   }
   lv.arr = std::move(*arrRes);
 
+  // `exp` below is a REFERENCE into moduleData->exportDescs, and it is held
+  // across putNamed_RJS, which walks the prototype chain and can run a user
+  // setter on Object.prototype. That is safe here, but only because THREE
+  // conditions all hold. Any one of them going away makes this a
+  // use-after-free:
+  //
+  //  1. STABLE ALLOCATION. WasmModuleData is reached through
+  //     JSWebAssemblyModule::getModuleData(), which returns the pointee of a
+  //     std::unique_ptr member. The struct is separately allocated, so moving
+  //     the Module cell does not move it. Inlining WasmModuleData into the
+  //     cell would break exactly this and turn both this function and
+  //     wasmModuleImports into use-after-frees. That is not hypothetical:
+  //     JSWebAssemblyTag::parameters_ IS stored inline, and holding a
+  //     reference to it across a safepoint was a real defect, fixed by
+  //     copying the vector out in wasmExceptionConstructor.
+  //  2. ROOTED OWNER. The owning Module stays live in native argument zero,
+  //     which Runtime::markRoots scans with the rest of the register stack.
+  //     Without this the storage would be stable but freed.
+  //  3. NO DESCRIPTOR MUTATION. No callback can replace this module's data or
+  //     resize these vectors: setModuleData is called only on a freshly
+  //     created Module before it is handed to script, and the descriptors are
+  //     populated by extractDescriptorsFromModuleInfo into a local
+  //     unique_ptr, before any Module exists. Without this the storage would
+  //     be stable and live but reallocated out from under the reference.
+  //
+  // unique_ptr alone establishes only the first.
   GCScopeMarkerRAII marker{runtime};
   for (uint32_t i = 0, e = moduleData->exportDescs.size(); i < e; ++i) {
     marker.flush();
@@ -1170,10 +1233,11 @@ wasmModuleExports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*nameRes);
-    auto putRes = JSObject::putNamed_RJS(
+    auto putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::name),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1182,10 +1246,11 @@ wasmModuleExports(void *context, Runtime &runtime) {
     // Set 'kind' property.
     lv.strVal = HermesValue::encodeStringValue(
         runtime.getPredefinedString(kindToPredefined(exp.kind)));
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::kind),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1236,6 +1301,22 @@ wasmModuleImports(void *context, Runtime &runtime) {
   }
   lv.arr = std::move(*arrRes);
 
+  // `imp` is a REFERENCE into moduleData->importDescs held across
+  // putNamed_RJS, which can run a user setter -- the same shape as
+  // wasmModuleExports above, safe on the same three conditions, and unsafe
+  // the moment any of them stops holding:
+  //
+  //  1. STABLE ALLOCATION. WasmModuleData is a std::unique_ptr pointee, so it
+  //     does not move when the Module cell moves. Inlining it into the cell
+  //     would break this and make both functions use-after-frees -- the
+  //     mistake JSWebAssemblyTag::parameters_ made, fixed by copying in
+  //     wasmExceptionConstructor.
+  //  2. ROOTED OWNER. The Module is live in native argument zero, which
+  //     Runtime::markRoots scans; otherwise the storage would be stable but
+  //     freed.
+  //  3. NO DESCRIPTOR MUTATION. setModuleData runs only during construction
+  //     and descriptor population precedes publication, so no callback can
+  //     swap the data or resize the vector under the reference.
   GCScopeMarkerRAII marker{runtime};
   for (uint32_t i = 0, e = moduleData->importDescs.size(); i < e; ++i) {
     marker.flush();
@@ -1250,10 +1331,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*modRes);
-    auto putRes = JSObject::putNamed_RJS(
+    auto putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::module),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1266,10 +1348,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     lv.strVal = std::move(*nameRes);
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::name),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1278,10 +1361,11 @@ wasmModuleImports(void *context, Runtime &runtime) {
     // Set 'kind' property.
     lv.strVal = HermesValue::encodeStringValue(
         runtime.getPredefinedString(kindToPredefined(imp.kind)));
-    putRes = JSObject::putNamed_RJS(
+    putRes = JSObject::defineOwnProperty(
         lv.desc,
         runtime,
         Predefined::getSymbolID(Predefined::kind),
+        DefinePropertyFlags::getDefaultNewPropertyFlags(),
         lv.strVal);
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
       return ExecutionStatus::EXCEPTION;
@@ -1645,9 +1729,21 @@ wasmTableConstructor(void *context, Runtime &runtime) {
     return runtime.raiseTypeError(
         "WebAssembly.Table(): 'element' must be a string");
   }
-  auto *elemStr = lv.elementVal->getString();
-  bool isAnyfunc = elemStr->equals(
-      runtime.getPredefinedString(Predefined::anyfunc));
+  // The descriptor's string is re-derived from lv.elementVal for each
+  // comparison rather than hoisted into a raw StringPrimitive*. BOTH
+  // comparisons cross an allocation: getPredefinedString materializes a lazy
+  // identifier if the predefined string has not been built yet, and
+  // StringPrimitive::create obviously allocates. Under
+  // -gc-sanitize-handles=1 the hoisted pointer was a heap-use-after-free in
+  // StringPrimitive::equals on every `new WebAssembly.Table(...)`.
+  //
+  // Each comparison is split across two statements on purpose: the operand
+  // that can allocate is fully evaluated first, and only then is the
+  // descriptor's string read out, so neither pointer is live across the
+  // other's allocation whatever order the compiler picks for the arguments.
+  StringPrimitive *anyfuncStr =
+      runtime.getPredefinedString(Predefined::anyfunc);
+  bool isAnyfunc = lv.elementVal->getString()->equals(anyfuncStr);
   // Also accept "funcref" as an alias for "anyfunc" per the spec.
   if (!isAnyfunc) {
     auto funcrefRes = StringPrimitive::create(
@@ -1656,7 +1752,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     auto *funcrefStr = vmcast<StringPrimitive>(*funcrefRes);
-    if (!elemStr->equals(funcrefStr)) {
+    if (!lv.elementVal->getString()->equals(funcrefStr)) {
       return runtime.raiseTypeError(
           "WebAssembly.Table(): 'element' must be 'anyfunc' or 'funcref'");
     }
@@ -2171,15 +2267,24 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   }
 
   // Parse the value type string by comparing against known type names.
-  auto *typeStr = lv.valueTypeVal->getString();
   JSWebAssemblyGlobal::ValType valType;
 
   // Helper to create a comparison string and check equality.
+  //
+  // The descriptor's string is re-derived from lv.valueTypeVal after the
+  // StringPrimitive::create inside this lambda, rather than hoisted above
+  // the lambda. That create() allocates, which is a safepoint, and a raw
+  // StringPrimitive* taken before it is stale: under -gc-sanitize-handles=1
+  // this was a heap-use-after-free in StringPrimitive::equals on every
+  // `new WebAssembly.Global(...)`.
   auto matchStr = [&](const char *s, size_t len) -> bool {
     auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
     if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
       return false;
-    return typeStr->equals(vmcast<StringPrimitive>(*res));
+    // Two statements, matching parseValTypeString below: the allocation
+    // completes before the descriptor's string is read out.
+    auto *other = vmcast<StringPrimitive>(*res);
+    return lv.valueTypeVal->getString()->equals(other);
   };
 
   if (matchStr("i32", 3)) {
@@ -2190,10 +2295,35 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
     valType = JSWebAssemblyGlobal::ValType::F32;
   } else if (matchStr("f64", 3)) {
     valType = JSWebAssemblyGlobal::ValType::F64;
+  } else if (matchStr("externref", 9)) {
+    valType = JSWebAssemblyGlobal::ValType::ExternRef;
+  } else if (matchStr("anyfunc", 7)) {
+    // "anyfunc" IS the funcref spelling here. The JS API's ToValueType lists
+    // `anyfunc` and not `funcref`, so a JS-built funcref global is spelt this
+    // way and the next arm refuses the other spelling. Measured on node
+    // v24.13.1, which does exactly this.
+    valType = JSWebAssemblyGlobal::ValType::FuncRef;
+  } else if (matchStr("funcref", 7)) {
+    // Refused, not accepted as a synonym, and not a typo: an importing module
+    // brand-checks against whatever this constructor produced, so being
+    // lenient here would admit a Global that node's would have refused
+    // outright. WebAssembly.Table's `element` descriptor is a different
+    // enumeration and does take both spellings.
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'funcref' is not a value type in the JS API; "
+        "use 'anyfunc'");
+  } else if (matchStr("v128", 4)) {
+    // A v128 global cannot be represented: JSWebAssemblyGlobal::ValType has
+    // no arm for it and nothing in this engine can hold a 128-bit vector as
+    // a JS value. This covers the DESCRIPTOR only -- a module EXPORTING a
+    // v128 global is refused elsewhere and with a different message, and
+    // diagnosing v128 comprehensively is still outstanding.
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'v128' requires SIMD, which is not supported");
   } else {
     return runtime.raiseTypeError(
         "WebAssembly.Global(): 'value' must be "
-        "'i32', 'i64', 'f32', or 'f64'");
+        "'i32', 'i64', 'f32', 'f64', 'externref' or 'anyfunc'");
   }
 
   // Read "mutable" property (optional, defaults to false).
@@ -2207,13 +2337,47 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   lv.mutableVal = std::move(*mutableRes);
   bool isMutable = toBoolean(lv.mutableVal.getHermesValue());
 
-  // Read initial value (second argument, optional, defaults to 0).
+  // Read the initial value (second argument, optional). An absent argument
+  // is DefaultValue(valType): 0 for a numeric type, 0n for i64, `undefined`
+  // for externref and `null` for funcref.
+  //
   // An i64 global takes a BigInt, not a Number: a double cannot represent
   // every i64 exactly, and the spec defines Global.prototype.value as a
   // BigInt for i64.
-  double initValue = 0.0;
   int64_t initI64 = 0;
-  if (valType == JSWebAssemblyGlobal::ValType::I64) {
+  const bool isRef = valType == JSWebAssemblyGlobal::ValType::ExternRef ||
+      valType == JSWebAssemblyGlobal::ValType::FuncRef;
+  if (isRef) {
+    if (args.getArgCount() >= 2) {
+      lv.initVal = args.getArg(1);
+    } else {
+      lv.initVal = valType == JSWebAssemblyGlobal::ValType::ExternRef
+          ? HermesValue::encodeUndefinedValue()
+          : HermesValue::encodeNullValue();
+    }
+    // An externref admits ANY JS value, `undefined` and `null` included, so
+    // it is stored with no check at all; a check on this path would be a bug.
+    // A funcref admits `null` or an Exported Function and nothing else: a
+    // plain JS function is a host reference, not a funcref.
+    //
+    // OMITTING the argument differs from passing `undefined` for funcref --
+    // absent is DefaultValue(funcref), which is null, while an explicit
+    // `undefined` is an ordinary value that fails the check. Same rule as
+    // WebAssembly.Table.prototype.set.
+    //
+    // isWasmExportedFunction ALLOCATES: it reaches
+    // HiddenClass::findPropertyNoMap, which initializes a missing property
+    // map, and it roots its own arguments rather than this frame's. Every
+    // value this function still needs across it -- the descriptor and the
+    // initial value -- is a PinnedValue, and the global does not exist yet.
+    if (valType == JSWebAssemblyGlobal::ValType::FuncRef &&
+        !lv.initVal->isNull() &&
+        !isWasmExportedFunction(runtime, lv.initVal)) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Global(): an 'anyfunc' global requires null or a "
+          "WebAssembly exported function");
+    }
+  } else if (valType == JSWebAssemblyGlobal::ValType::I64) {
     if (args.getArgCount() >= 2) {
       lv.initVal = args.getArg(1);
       if (!lv.initVal->isBigInt()) {
@@ -2223,27 +2387,43 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
       initI64 = static_cast<int64_t>(
           lv.initVal->getBigInt()->truncateToSingleDigit());
     }
-  } else if (args.getArgCount() >= 2) {
-    lv.initVal = args.getArg(1);
-    auto initRes = toNumber_RJS(runtime, lv.initVal);
-    if (LLVM_UNLIKELY(initRes == ExecutionStatus::EXCEPTION)) {
-      return ExecutionStatus::EXCEPTION;
+  } else {
+    // Numeric: an absent argument is DefaultValue, which is 0. The slot the
+    // funnel writes below takes the ToNumber RESULT, so it is kept rather
+    // than the argument it came from.
+    lv.initVal = HermesValue::encodeTrustedNumberValue(0);
+    if (args.getArgCount() >= 2) {
+      auto initRes = toNumber_RJS(runtime, args.getArgHandle(1));
+      if (LLVM_UNLIKELY(initRes == ExecutionStatus::EXCEPTION)) {
+        return ExecutionStatus::EXCEPTION;
+      }
+      lv.initVal = *initRes;
     }
-    initValue = initRes->getDouble();
   }
 
   // Create the Global object.
   Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
+  // The type must be set before any store below: setWasmGlobalValue
+  // dispatches on it -- narrowing a Number to an i32 or f32 global's slot,
+  // storing a reference as it stands -- and setI64Value asserts on it.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
-  lv.glob->setI64Value(initI64);
-  // The type must already be set: setWasmGlobalNumber coerces to it, and it
-  // is the one place value_ is written, so an i32 global never holds a
-  // fractional double however it was constructed. i64 keeps initValue at 0
-  // and carries its value in i64Value_ above.
-  if (valType != JSWebAssemblyGlobal::ValType::I64)
-    setWasmGlobalNumber(lv.glob.get(), initValue);
+  if (valType == JSWebAssemblyGlobal::ValType::I64) {
+    // An allocating store now -- the slot holds the BigInt itself rather than
+    // a scalar -- so it needs a rooted destination and can fail. lv.glob is
+    // that root.
+    if (LLVM_UNLIKELY(
+            JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, initI64) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  } else {
+    // lv.initVal holds the value in the form this type's slot takes: the
+    // ToNumber result for a numeric global, the validated reference for a
+    // reference-typed one. It is a PinnedValue, so create() cannot have
+    // staled it, and the funnel allocates nothing.
+    setWasmGlobalValue(runtime, lv.glob.get(), lv.initVal.getHermesValue());
+  }
 
   // NOTHING IS PUBLISHED ON THE GLOBAL. It used to carry one ordinary,
   // writable, enumerable own property, __wasm_type__, holding a string such
@@ -2255,10 +2435,11 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // putNamed_RJS, which walks the prototype chain, so a setter on
   // WebAssembly.Global.prototype ran user JS inside this constructor (H2).
   //
-  // The link path now reads valType_/mutable_ and the value itself through
-  // the wasmLinkGlobal builtin, whose dyn_vmcast is the brand check that
-  // replaced the string comparison. A WebAssembly.Global now has no own
-  // properties at all, which is also what the spec requires of it.
+  // The link path now reads valType_/mutable_ through the wasmLinkGlobal
+  // builtin, whose dyn_vmcast is the brand check that replaced the string
+  // comparison, and reads the value -- where it wants one -- through
+  // wasmGlobalGet. A WebAssembly.Global now has no own properties at all,
+  // which is also what the spec requires of it.
 
   return lv.glob.getHermesValue();
 }
@@ -2291,13 +2472,11 @@ wasmGlobalValueGetter(void *context, Runtime &runtime) {
     return res->getHermesValue();
   }
 
-  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
-    // Exact, and a BigInt as the spec requires. Returning the low 32 bits as
-    // a Number would silently discard the upper half.
-    return BigIntPrimitive::fromSigned(runtime, glob->getI64Value());
-  }
-
-  return HermesValue::encodeTrustedNumberValue(glob->getValue());
+  // The slot is canonical for valType_ -- a Number for i32/f32/f64, for i64
+  // the BigInt the spec requires, and for externref/funcref the reference
+  // itself, each put in that form at store time -- so the answer is the slot,
+  // with no per-type dispatch and nothing allocated here.
+  return glob->getValue();
 }
 
 /// WebAssembly.Global.prototype.value setter.
@@ -2317,72 +2496,107 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
         "WebAssembly.Global.prototype.value: cannot set an immutable global");
   }
 
+  // toNumber_RJS on the numeric arm, isWasmExportedFunction on the funcref
+  // arm, the live path's executeCall1 and the i64 snapshot store each
+  // allocate. (So does raiseTypeError, but its result is returned from
+  // immediately, so nothing has to survive it.) Nothing raw is carried past
+  // this point as a result: lv.glob is the destination, lv.newVal the value,
+  // and lv.fn the live setter closure, taken here because the raw Callable*
+  // would not survive what follows.
   struct : public Locals {
     PinnedValue<> newVal;
     PinnedValue<Callable> fn;
+    PinnedValue<JSWebAssemblyGlobal> glob;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
+  lv.glob = glob;
   lv.newVal = args.getArg(0);
-  // Only a BOOL survives past this point. toNumber_RJS below is a safepoint,
-  // and a raw Callable* held across it is stale even where it is merely
-  // tested for null; lv.fn is what the call uses, and PinnedValue is what the
-  // GC updates.
   bool hasSetter = false;
   if (Callable *setterFn = glob->getSetter(runtime)) {
     lv.fn = setterFn;
     hasSetter = true;
   }
 
-  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
-    if (!lv.newVal->isBigInt()) {
-      return runtime.raiseTypeError(
-          "WebAssembly.Global.prototype.value: an i64 global requires a "
-          "BigInt value");
-    }
-    if (hasSetter) {
-      // The closure splits the BigInt into the lo/hi pair the compiler
-      // represents i64 with; doing it here would put the compiler's storage
-      // layout in the runtime.
-      auto res = Callable::executeCall1(
-          lv.fn,
-          runtime,
-          Runtime::getUndefinedValue(),
-          lv.newVal.getHermesValue());
-      if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+  // Dispatch on the declared type BEFORE any coercion, and leave lv.newVal in
+  // the form the store below takes. Coercing first and dispatching after is
+  // what this used to do, and it turned an externref object into NaN. No
+  // `default:`, so -Wswitch names this site if ValType grows.
+  switch (lv.glob->getValType()) {
+    case JSWebAssemblyGlobal::ValType::I32:
+    case JSWebAssemblyGlobal::ValType::F32:
+    case JSWebAssemblyGlobal::ValType::F64: {
+      // This setter COERCES where the internal one refuses: `.value = "3.7"`
+      // on an i32 global stores 3. The narrowing that follows ToNumber is the
+      // funnel's, or on the live path the closure's.
+      auto numRes = toNumber_RJS(runtime, lv.newVal);
+      if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION))
         return ExecutionStatus::EXCEPTION;
-      return HermesValue::encodeUndefinedValue();
+      lv.newVal = *numRes;
+      break;
     }
-    glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
-    glob->setI64Value(
-        static_cast<int64_t>(lv.newVal->getBigInt()->truncateToSingleDigit()));
-    return HermesValue::encodeUndefinedValue();
+    case JSWebAssemblyGlobal::ValType::I64:
+      if (!lv.newVal->isBigInt()) {
+        return runtime.raiseTypeError(
+            "WebAssembly.Global.prototype.value: an i64 global requires a "
+            "BigInt value");
+      }
+      break;
+    case JSWebAssemblyGlobal::ValType::ExternRef:
+      // Any JS value is a valid externref, `null` and `undefined` included,
+      // so there is nothing to check and a check here would be a bug. In
+      // particular there is no ToNumber: the object assigned is the object
+      // read back.
+      break;
+    case JSWebAssemblyGlobal::ValType::FuncRef:
+      // null, or an Exported Function. A plain JS function is a host
+      // reference rather than a funcref, and is refused.
+      //
+      // isWasmExportedFunction ALLOCATES: it reaches
+      // HiddenClass::findPropertyNoMap, which initializes a missing property
+      // map, and it roots its own arguments rather than this frame's.
+      // lv.glob, lv.newVal and lv.fn are all pinned before it runs, which is
+      // why the raw `glob` above is not read past this switch.
+      if (LLVM_UNLIKELY(
+              !lv.newVal->isNull() &&
+              !isWasmExportedFunction(runtime, lv.newVal)))
+        return runtime.raiseTypeError(
+            "WebAssembly.Global.prototype.value: an 'anyfunc' global "
+            "requires null or a WebAssembly exported function");
+      break;
   }
 
-  auto numRes = toNumber_RJS(runtime, lv.newVal);
-  if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-  // toNumber_RJS is a safepoint and `glob` is a raw pointer, so re-derive it
-  // rather than trusting the one taken before the call.
-  glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
   if (hasSetter) {
-    // ToNumber has run; the closure narrows to the declared Wasm type in IR
-    // with AsInt32Inst for i32 and emitFround for f32 -- the instructions
-    // coerceImportedGlobalValue (WasmIRGen.cpp:7736) uses, NOT the module's
-    // own global.set, which narrows nothing and stores an already-typed
-    // value (WasmIRGen.cpp:7884). A live global and a snapshot one must
-    // coerce identically, and setWasmGlobalNumber is what a snapshot does.
+    // A live global's storage is the module's frame slot and the closure
+    // writes it. For a numeric global ToNumber has already run and the
+    // closure narrows to the declared Wasm type in IR -- AsInt32Inst for i32,
+    // emitFround for f32, matching what the funnel does for a snapshot, so
+    // the two agree. For i64 the closure splits the BigInt into the lo/hi
+    // pair the compiler represents i64 with, and for a reference it stores
+    // the value as it stands; doing either here would put the compiler's
+    // storage layout in the runtime.
     auto res = Callable::executeCall1(
         lv.fn,
         runtime,
         Runtime::getUndefinedValue(),
-        HermesValue::encodeTrustedNumberValue(numRes->getDouble()));
+        lv.newVal.getHermesValue());
     if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
     return HermesValue::encodeUndefinedValue();
   }
-  setWasmGlobalNumber(glob, numRes->getDouble());
+
+  if (lv.glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
+    // The store allocates the BigInt, so the digit is read out of lv.newVal
+    // first and the destination goes in through the pinned handle.
+    int64_t digit =
+        static_cast<int64_t>(lv.newVal->getBigInt()->truncateToSingleDigit());
+    if (LLVM_UNLIKELY(
+            JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, digit) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return HermesValue::encodeUndefinedValue();
+  }
+  setWasmGlobalValue(runtime, lv.glob.get(), lv.newVal.getHermesValue());
   return HermesValue::encodeUndefinedValue();
 }
 
@@ -2398,15 +2612,25 @@ wasmGlobalValueOfMethod(void *context, Runtime &runtime) {
 
 /// Parse a Wasm value type string ("i32", "i64", "f32", "f64") into a
 /// JSWebAssemblyTag::ValType. Returns true on success.
+///
+/// \p str is a HANDLE, not a raw StringPrimitive*, and that is load-bearing:
+/// the lambda below allocates a comparison string on every call, so a raw
+/// pointer the caller copied in is stale by the time equals() dereferences
+/// it. Rooting it on the CALLER's side does not help -- the copy in this
+/// frame is what gets used. Under -gc-sanitize-handles=1 that was a
+/// heap-use-after-free on every `new WebAssembly.Tag(...)`.
 static bool parseValTypeString(
     Runtime &runtime,
-    StringPrimitive *str,
+    Handle<StringPrimitive> str,
     JSWebAssemblyTag::ValType &result) {
   auto matchStr = [&](const char *s, size_t len) -> bool {
     auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
     if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
       return false;
-    return str->equals(vmcast<StringPrimitive>(*res));
+    // Two statements: the allocation completes before `str` is dereferenced,
+    // and Handle re-reads the rooted slot rather than a stale copy.
+    auto *other = vmcast<StringPrimitive>(*res);
+    return str->equals(other);
   };
 
   if (matchStr("i32", 3)) {
@@ -2423,6 +2647,18 @@ static bool parseValTypeString(
   }
   if (matchStr("f64", 3)) {
     result = JSWebAssemblyTag::ValType::F64;
+    return true;
+  }
+  // Spelled exactly as the Global parser above spells them, and refusing
+  // "funcref" for the same reason: the JS API's ToValueType lists `anyfunc`,
+  // an importing module checks against whatever this constructor produced,
+  // and being lenient here would admit a Tag node's constructor refuses.
+  if (matchStr("externref", 9)) {
+    result = JSWebAssemblyTag::ValType::ExternRef;
+    return true;
+  }
+  if (matchStr("anyfunc", 7)) {
+    result = JSWebAssemblyTag::ValType::FuncRef;
     return true;
   }
   return false;
@@ -2451,6 +2687,7 @@ wasmTagConstructor(void *context, Runtime &runtime) {
     PinnedValue<JSObject> paramsObj;
     PinnedValue<> lenVal;
     PinnedValue<> elemVal;
+    PinnedValue<StringPrimitive> elemStr;
     PinnedValue<JSWebAssemblyTag> tag;
   } lv;
   LocalsRAII lraii(runtime, &lv);
@@ -2511,10 +2748,13 @@ wasmTagConstructor(void *context, Runtime &runtime) {
     }
 
     JSWebAssemblyTag::ValType vt;
-    if (!parseValTypeString(runtime, lv.elemVal->getString(), vt)) {
+    // Rooted before the call: parseValTypeString allocates on every
+    // comparison, so it takes a handle rather than a raw pointer.
+    lv.elemStr = lv.elemVal->getString();
+    if (!parseValTypeString(runtime, lv.elemStr, vt)) {
       return runtime.raiseTypeError(
           "WebAssembly.Tag(): parameter type must be "
-          "'i32', 'i64', 'f32', or 'f64'");
+          "'i32', 'i64', 'f32', 'f64', 'externref', or 'anyfunc'");
     }
     paramTypes.push_back(vt);
   }
@@ -2562,7 +2802,14 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
 
   lv.tagHandle = tag;
 
-  const auto &paramTypes = lv.tagHandle->getParameters();
+  // COPIED, not bound by reference. getParameters() returns a reference to a
+  // std::vector living inside the JSWebAssemblyTag CELL, and the cell moves:
+  // the loop below calls getComputed_RJS and toNumber_RJS, each of which runs
+  // arbitrary user JS, and then indexes paramTypes[i] afterwards. A reference
+  // would be reading a stale vector header by then. The vector holds one byte
+  // per Wasm parameter, so the copy is not worth avoiding.
+  const std::vector<JSWebAssemblyTag::ValType> paramTypes =
+      lv.tagHandle->getParameters();
   uint32_t paramCount = paramTypes.size();
 
   // Second arg must be an iterable/array-like with matching length.
@@ -2594,6 +2841,35 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
     }
     lv.elemVal = std::move(*elemRes);
 
+    // A REFERENCE parameter is not a number and must not be run through
+    // ToNumber, which for an object calls valueOf/toString and yields
+    // whatever they produce -- NaN for an ordinary object, some unrelated
+    // number for one with a valueOf, or an exception. Any of those loses the
+    // reference. This arm became
+    // reachable when module-defined tags became JSWebAssemblyTag cells: until
+    // then a tag with a reference parameter could not be a Tag at all, so
+    // this constructor could not be handed one.
+    //
+    // externref admits any JS value. funcref admits null or a WebAssembly
+    // Exported Function and nothing else, which is the same admission the
+    // funcref table and global funnels make -- isWasmExportedFunction is the
+    // one definition of it, deliberately shared.
+    //
+    // This is the narrow fix: stop coercing a reference. It is NOT the wider
+    // validation of this inbound boundary, which is 01a0460b-abb6.
+    if (paramTypes[i] == JSWebAssemblyTag::ValType::ExternRef ||
+        paramTypes[i] == JSWebAssemblyTag::ValType::FuncRef) {
+      if (paramTypes[i] == JSWebAssemblyTag::ValType::FuncRef &&
+          !lv.elemVal->isNull() &&
+          !isWasmExportedFunction(runtime, lv.elemVal)) {
+        return runtime.raiseTypeError(
+            "WebAssembly.Exception(): a funcref payload value must be null "
+            "or a WebAssembly Exported Function");
+      }
+      (void)JSArray::setElementAt(lv.arr, runtime, i, lv.elemVal);
+      continue;
+    }
+
     // Coerce to number.
     lv.numVal = lv.elemVal.getHermesValue();
     auto numRes = toNumber_RJS(runtime, lv.numVal);
@@ -2615,6 +2891,9 @@ wasmExceptionConstructor(void *context, Runtime &runtime) {
       case JSWebAssemblyTag::ValType::F64:
         // Keep full double precision.
         break;
+      case JSWebAssemblyTag::ValType::ExternRef:
+      case JSWebAssemblyTag::ValType::FuncRef:
+        llvm_unreachable("reference parameters returned above");
     }
 
     lv.numVal = HermesValue::encodeTrustedNumberValue(val);
@@ -2675,16 +2954,24 @@ wasmExceptionGetArgMethod(void *context, Runtime &runtime) {
         "WebAssembly.Tag");
   }
 
+  // Both cells are pinned BEFORE the coercion below, which runs a user
+  // `valueOf` and can move or collect anything: this method used to hold both
+  // raw across it and then dereference them, tag->getParameters() for the
+  // bounds check and exc->getPayload() for the answer.
+  struct : public Locals {
+    PinnedValue<> indexVal;
+    PinnedValue<JSWebAssemblyException> exc;
+    PinnedValue<JSWebAssemblyTag> tag;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  lv.exc = exc;
+  lv.tag = tag;
+
   // Tag must identity-match.
-  if (exc->getTag(runtime) != tag) {
+  if (lv.exc->getTag(runtime) != lv.tag.get()) {
     return runtime.raiseTypeError(
         "WebAssembly.Exception.prototype.getArg: tag does not match");
   }
-
-  struct : public Locals {
-    PinnedValue<> indexVal;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
 
   lv.indexVal = args.getArg(1);
   auto indexRes = toNumber_RJS(runtime, lv.indexVal);
@@ -2695,12 +2982,12 @@ wasmExceptionGetArgMethod(void *context, Runtime &runtime) {
   uint32_t index = static_cast<uint32_t>(indexD);
 
   if (static_cast<double>(index) != indexD ||
-      index >= tag->getParameters().size()) {
+      index >= lv.tag->getParameters().size()) {
     return runtime.raiseRangeError("WebAssembly.Exception.prototype.getArg: "
                                    "index out of range");
   }
 
-  auto *payload = exc->getPayload(runtime);
+  auto *payload = lv.exc->getPayload(runtime);
   if (!payload) {
     return HermesValue::encodeUndefinedValue();
   }

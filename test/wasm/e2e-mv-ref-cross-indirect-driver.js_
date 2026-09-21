@@ -1,0 +1,38 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-cross-indirect.wat.
+
+var args = hermescli.getScriptArgs();
+var exporter = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0])));
+
+// The table belongs to neither module: the exporter's functions are placed in
+// it here and the importer calls through it, so the callee's module and the
+// caller's module are genuinely different.
+var tbl = new WebAssembly.Table({element: 'anyfunc', initial: 2});
+tbl.set(0, exporter.exports.mkpair);
+tbl.set(1, exporter.exports.mkext);
+
+var importer = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1])),
+  {env: {tbl: tbl}});
+
+print('callItNum: ' + importer.exports.callItNum());
+
+// The externref half is reported before the funcref half so that both answers
+// are visible: reading a reference that never arrived yields undefined, and
+// calling undefined ends the run.
+var host = {tag: 'host'};
+exporter.exports.put(host);
+print('callExt: is the host object=' + (importer.exports.callExt() === host));
+
+var f = importer.exports.callIt();
+print(
+  'callIt: ' + typeof f + ' calls -> ' + f() +
+    ' same as exporter\'s svGet=' + (f === exporter.exports.svGet()));
+print('done');

@@ -279,6 +279,9 @@ class WasmHelpers {
   /// Emit table.init: copies \p count entries from element segment to table.
   /// The first three arguments are the table's three parallel arrays.
   /// \p elemSegs is the element segments array, \p segIdx is the segment index.
+  /// \p isFuncRef is a literal 1 for a funcref destination table and 0 for an
+  /// externref one, as for emitTableSetSlot: an externref segment's entries
+  /// are arbitrary JS values, which the funcref brand check would refuse.
   Instruction *emitTableInit(
       Value *funcsArr,
       Value *typesArr,
@@ -287,7 +290,8 @@ class WasmHelpers {
       Value *segIdx,
       Value *dst,
       Value *src,
-      Value *count);
+      Value *count,
+      Value *isFuncRef);
 
   /// Emit elem.drop: marks element segment \p segIdx as dropped.
   /// \p elemSegs is the element segments array.
@@ -336,14 +340,68 @@ class WasmHelpers {
   Instruction *emitLinkMemory(Value *importVal);
 
   /// Emit wasmLinkGlobal: brand-check \p importVal as a genuine
-  /// WebAssembly.Global of the declared type and mutability, and yield its
-  /// value. Yields undefined if it is a Global that does not match, and null
-  /// if it is not a Global at all -- the caller needs the two apart, because
-  /// only the second can legitimately be a raw JS value.
+  /// WebAssembly.Global of the declared type and mutability, and yield THE
+  /// MATCHED OBJECT. Yields undefined if it is a Global that does not match,
+  /// and null if it is not a Global at all -- the caller needs the two apart,
+  /// because only the second can legitimately be a raw JS value. The value of
+  /// a matched global is not yielded here and is fetched with emitGlobalGet
+  /// where a caller wants one; a reference-typed global's value can be `null`
+  /// or `undefined`, which the two refusals already spell.
   Instruction *emitLinkGlobal(
       Value *importVal,
       Value *expectedValType,
       Value *expectedMutable);
+
+  /// Emit wasmIsExportedFunction: yield a boolean saying whether \p value is a
+  /// WebAssembly Exported Function -- the brand wasmSetFuncInfo stamps, asked
+  /// as a question. The builtin exists because the C++ helper that decides it,
+  /// isWasmExportedFunction, is not callable from generated IR; see the note
+  /// on the builtin in Builtins.def. Answers for any argument rather than
+  /// throwing, `null` and `undefined` included.
+  Instruction *emitIsExportedFunction(Value *value);
+
+  /// Emit wasmFuncTypeId: yield the INTERNED type id of \p value's signature
+  /// if it is a WebAssembly Exported Function, and undefined otherwise. The
+  /// function-import type check reads this instead of a `__wasm_type__`
+  /// string property, which script could intercept on store, swallow, or
+  /// rewrite afterwards. Answers for any argument rather than throwing;
+  /// undefined means "unbranded", not "failed", because a plain JS callable
+  /// legitimately satisfies a function import.
+  Instruction *emitFuncTypeId(Value *value);
+
+  /// Emit wasmMakeTag: a WebAssembly.Tag whose parameters are \p typeCodes,
+  /// which are globalValTypeCode results. Used instead of building a plain
+  /// object and storing a signature string on it: the string was an ordinary
+  /// property, so the store walked Object.prototype and the result was
+  /// writable on an object handed to script.
+  Instruction *emitMakeTag(llvh::ArrayRef<Value *> typeCodes);
+
+  /// Emit wasmCheckTagType: is \p value a WebAssembly.Tag whose parameters
+  /// are exactly \p typeCodes? The tag import check.
+  Instruction *emitCheckTagType(
+      Value *value,
+      llvh::ArrayRef<Value *> typeCodes);
+
+  /// Emit wasmAllocRefBuf: allocate the private container that carries the
+  /// REFERENCE results of one multi-value call, \p slots elements long. The
+  /// caller passes the result to the callee as a hidden argument and reads the
+  /// references back out of that same value. A nested or reentrant call runs
+  /// this again and gets a different container, so it writes different
+  /// storage than the activation whose results are still outstanding.
+  Instruction *emitAllocRefBuf(Value *slots);
+
+  /// Emit wasmRefBufGet: read element \p index of the container \p buf.
+  Instruction *emitRefBufGet(Value *buf, Value *index);
+
+  /// Emit wasmRefBufSet: write \p value to element \p index of \p buf.
+  Instruction *emitRefBufSet(Value *buf, Value *index, Value *value);
+
+  /// Emit wasmMakeResultArray: build the JS Array a multi-value export
+  /// returns, out of \p values, without running script. The array is fresh and
+  /// its elements are own data properties, so neither a replaced Array
+  /// constructor nor an indexed setter inherited from Array.prototype sees a
+  /// result on its way out.
+  Instruction *emitMakeResultArray(llvh::ArrayRef<Value *> values);
 
   /// Emit wasmGlobalGet / wasmGlobalSet: read or write the shared value of an
   /// imported MUTABLE global, \p globalObj, in its internal field. That is

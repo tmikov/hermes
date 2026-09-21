@@ -15,13 +15,14 @@
 // RUN: %shermes -exec %s -Wx,-Xhermes-internal-test-methods=false | %FileCheck --match-full-lines --check-prefix=CHKIMD %s
 
 // concat
+// intrinsics
 // hasPromise
 // setPromiseRejectionTrackingHook
 // enablePromiseRejectionTracker
 // enqueueJob
 // useEngineQueue
 // test262Enabled
-var SAFE_FIELDS_COUNT = 7;
+var SAFE_FIELDS_COUNT = 8;
 
 // Check that we can disable unsafe fields of HermesInternal.
 print(Object.getOwnPropertyNames(HermesInternal).length)
