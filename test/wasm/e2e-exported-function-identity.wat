@@ -37,6 +37,6 @@
 ;; CHECK-NEXT: a() = 7
 ;; CHECK-NEXT: b() = 7
 ;; CHECK-NEXT: c() = 9
-;; CHECK-NEXT: names: length,name,prototype,__wasm_type__
-;; CHECK-NEXT: keys: __wasm_type__
+;; CHECK-NEXT: names: length,name,prototype
+;; CHECK-NEXT: keys:
 ;; CHECK-NEXT: symbols: 0

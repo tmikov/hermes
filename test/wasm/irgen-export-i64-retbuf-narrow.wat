@@ -47,9 +47,14 @@
 ;; CHECK-LABEL: function wasm_export_two(): any
 ;; CHECK: %[[MI32:[0-9]+]] = LoadPropertyInst (:any) %{{[0-9]+}}: any, 0: number
 ;; CHECK-NEXT: %[[MI32N:[0-9]+]] = AsInt32Inst (:number) %[[MI32]]: any
-;; CHECK-NEXT: StorePropertyStrictInst %[[MI32N]]: number, %{{[0-9]+}}: object, 0: number
 ;; CHECK-NEXT: %[[MLO:[0-9]+]] = LoadPropertyInst (:any) %{{[0-9]+}}: any, 1: number
 ;; CHECK-NEXT: %[[MLON:[0-9]+]] = AsInt32Inst (:number) %[[MLO]]: any
 ;; CHECK-NEXT: %[[MHI:[0-9]+]] = LoadPropertyInst (:any) %{{[0-9]+}}: any, 2: number
 ;; CHECK-NEXT: %[[MHIN:[0-9]+]] = AsInt32Inst (:number) %[[MHI]]: any
-;; CHECK-NEXT: %{{[0-9]+}} = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[MLON]]: number, %[[MHIN]]: number
+;; CHECK-NEXT: %[[BI:[0-9]+]] = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[MLON]]: number, %[[MHIN]]: number
+
+;; Both narrowed values reach the result array through wasmMakeResultArray,
+;; which builds it natively. The array used to be a globalThis.Array product
+;; written with indexed property stores, so the narrowing could be observed --
+;; and altered -- by a replaced constructor or an inherited setter.
+;; CHECK-NEXT: %{{[0-9]+}} = CallBuiltinInst (:object) [HermesBuiltin.wasmMakeResultArray]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[MI32N]]: number, %[[BI]]: bigint

@@ -52,13 +52,20 @@
 ;; CHECK: [[G2:%[0-9]+]] = LoadFrameInst (:any) {{.*}}, [%VS0.import_global_val_0]: any
 ;; CHECK-NEXT: CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalSet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, [[G2]]: any
 
-;; The instantiate body links the import and then does NOT read its value.
-;; The frame slot used to be seeded with a link-time snapshot, which cost a
-;; wasmGlobalGet per mutable global import; nothing reads that slot, because
-;; every reader (global.get, global.set, the export loop) takes the object
-;; path above. The call also has to go: once an exporting module publishes a
-;; closure-backed Global, it would run the EXPORTER's getter inside the
-;; IMPORTER's instantiation.
+;; The instantiate body links this MUTABLE import and then does NOT read its
+;; value. The frame slot used to be seeded with a link-time snapshot, which
+;; cost a wasmGlobalGet per mutable global import; nothing reads that slot,
+;; because every reader (global.get, global.set, the export loop) takes the
+;; object path above. The call also has to go: once an exporting module
+;; publishes a closure-backed Global, it would run the EXPORTER's getter
+;; inside the IMPORTER's instantiation.
+;;
+;; This is a claim about a MUTABLE import, and the CHECK-NOT below is scoped
+;; to this module, which has no other global import. An IMMUTABLE one does
+;; fetch at link time -- it keeps the value rather than the object, and the
+;; brand check answers with the object -- and that fetch cannot run a closure,
+;; because a matching immutable Global is never live. See
+;; irgen-memory-global-import-link.wat, which pins it.
 ;; CHECK-LABEL: function __wasm_instantiate__(imports: any): object
 ;; CHECK: [HermesBuiltin.wasmLinkGlobal]
 ;; CHECK-NOT: [HermesBuiltin.wasmGlobalGet]

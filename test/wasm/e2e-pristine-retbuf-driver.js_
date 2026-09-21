@@ -1,0 +1,61 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-pristine-retbuf.wat. The module is loaded AFTER the
+// globals are replaced, because the return buffer is constructed during
+// instantiation and kept in the module's frame -- a replacement installed
+// later would never be reached.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+
+var ctorCalls = 0;
+
+// Poisoned storage: every index reads back as a string, which is what the
+// uncoerced f64 result arm used to hand to code that had been told it was
+// looking at a double.
+function makePoisoned() {
+  var view = {};
+  for (var i = 0; i < 8; i++) {
+    (function(i) {
+      Object.defineProperty(view, String(i), {
+        get: function() { return 'poison'; },
+        set: function(v) {},
+        configurable: true,
+        enumerable: true,
+      });
+    })(i);
+  }
+  return view;
+}
+
+globalThis.ArrayBuffer = function(n) { ctorCalls++; return {}; };
+globalThis.Uint32Array = function(buf) { ctorCalls++; return makePoisoned(); };
+globalThis.Float64Array = function(buf) { ctorCalls++; return makePoisoned(); };
+
+// The replacements are real: built directly, they hand back the poison.
+var probe = new Float64Array(new ArrayBuffer(64));
+var probeCalls = ctorCalls;
+print('replacement is live: ' + (probe[1] === 'poison' && probeCalls === 2));
+
+ctorCalls = 0;
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+
+print('module called the replaced constructors: ' + ctorCalls);
+
+var f = inst.exports.twoF64();
+print(
+  'f64 result 1: typeof ' + typeof f[1] + ', === 2.25: ' + (f[1] === 2.25));
+
+var i = inst.exports.twoI32();
+print('i32 result 1: typeof ' + typeof i[1] + ', === 22: ' + (i[1] === 22));
+
+var g = inst.exports.twoF32();
+print('f32 result 1: === fround(0.1): ' + (g[1] === Math.fround(0.1)) +
+      ', !== 0.1: ' + (g[1] !== 0.1));
+
+print('done');

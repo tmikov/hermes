@@ -1,0 +1,79 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-tag-import-brand.wat.
+//   args[0] the exporter: tags t_i32 (i32), t_f64 (f64), t_ref (externref)
+//   args[1] a consumer importing "e"."t" as (param i32)   -- matches t_i32
+//   args[2] a consumer importing "e"."t" as (param f64)   -- does not
+
+var args = hermescli.getScriptArgs();
+function mod(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+
+function link(i, label, tag) {
+  try {
+    new WebAssembly.Instance(mod(i), {e: {t: tag}});
+    print(label + ': linked');
+  } catch (err) {
+    print(label + ': ' + err.name);
+  }
+}
+
+// A clean instantiation first. Asking these while a setter is installed could
+// not tell "never stored" from "stored and swallowed".
+var e = new WebAssembly.Instance(mod(0)).exports;
+
+print('exported tag is a WebAssembly.Tag: ' +
+      (e.t_i32 instanceof WebAssembly.Tag));
+print('a tag with a reference parameter too: ' +
+      (e.t_ref instanceof WebAssembly.Tag));
+print('exported tag carries __wasm_type__: ' + e.t_i32.__wasm_type__);
+
+// Tags were built on a plain object literal, whose prototype is
+// Object.prototype, so the store that published the signature walked it.
+var fired = 0;
+Object.defineProperty(Object.prototype, '__wasm_type__', {
+  configurable: true,
+  set: function(v) { fired++; },
+});
+var swallowed = new WebAssembly.Instance(mod(0)).exports.t_i32;
+delete Object.prototype.__wasm_type__;
+print('setter fired during instantiation: ' + fired + ' times');
+
+// Same shape as the function half: swallowing the store left the tag with no
+// signature, and the importer's check then accepted it as a raw JS value.
+link(2, 'swallowed signature, mismatched import', swallowed);
+
+link(1, 'matching import', e.t_i32);
+link(2, 'mismatched import', e.t_i32);
+
+// Rewriting the published string after the fact needs no setter at all.
+e.t_i32.__wasm_type__ = 'tag:d:';
+link(2, 'forged signature, mismatched import', e.t_i32);
+
+// A tag import must be a genuine tag. Both shapes are tried: one carrying the
+// signature the old check consulted, and a BARE object carrying nothing -- a
+// checker that only refused the forged property would still accept the bare
+// one.
+link(1, 'raw JS object with a forged signature', {__wasm_type__: 'tag:i:'});
+link(1, 'bare JS object as the tag', {});
+
+// The control for every "mismatched import" row. Consumer 2 is used there
+// only to be refused, so a consumer that refused EVERY tag would satisfy all
+// of them. Handed the tag it actually declares, it links.
+link(2, 'f64 consumer, the matching f64 tag', e.t_f64);
+
+// A tag built by JS rather than by a module satisfies an import when its
+// signature matches: the check is on the brand and the parameters, not on
+// where the tag came from.
+link(1, 'JS-constructed Tag with the right signature',
+     new WebAssembly.Tag({parameters: ['i32']}));
+link(1, 'JS-constructed Tag with the wrong signature',
+     new WebAssembly.Tag({parameters: ['f64']}));
+
+print('done');

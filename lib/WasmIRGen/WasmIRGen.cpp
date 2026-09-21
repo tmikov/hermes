@@ -63,38 +63,46 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
   return s;
 }
 
-/// Map a WasmValType to the numeric code wasmLinkGlobal compares against.
+/// Map a WasmValType to the numeric code wasmLinkGlobal and wasmMakeGlobal
+/// compare against.
 /// The codes are JSWebAssemblyGlobal::ValType, which is the enum stored in a
 /// WebAssembly.Global's internal field; they are spelled out here rather than
 /// included so that the Wasm frontend does not depend on a VM header. That
 /// makes them an ABI between two files that cannot see each other, so
-/// JSWebAssemblyGlobal.h carries static_asserts pinning the four values and
+/// JSWebAssemblyGlobal.h carries static_asserts pinning the six values and
 /// naming this function -- reordering the enum is a build error, not a
 /// silently wrong type check.
-/// 0xFF is "a Wasm type no Global can have" -- every reference type, and
-/// v128. It matches nothing, which is exactly the old behaviour: no
-/// __wasm_type__ string the Global constructor wrote ever named one either.
+/// 0xFF remains "a Wasm type no Global can have", which is now only v128. It
+/// matches nothing, so a v128 import satisfied by a WebAssembly.Global
+/// reports a mismatch.
+///
+/// The EXPORT side no longer reaches this function with a v128 type at all:
+/// validateGlobalExportTypes() refuses such a module during finalizeModule()
+/// with a message naming SIMD, before the export loop runs. See
+/// test/wasm/compile-invalid-v128-global-export.wat and
+/// test/wasm/compile-invalid-v128-global-reexport.wat.
+///
+/// The IMPORT side is not comprehensively screened. An immutable global
+/// import may be satisfied by a RAW JS value instead of a
+/// WebAssembly.Global, and the raw branch at the import loop has an arm per
+/// declared type: a BigInt for i64, any JS value for externref, `null` or an
+/// Exported Function for funcref, and a Number for what is left -- which is
+/// where v128 lands, so a raw Number satisfies a v128 immutable import today.
+/// Do not read this code as a v128 guard.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32
     case WasmValType::I64: return 1; // JSWebAssemblyGlobal::ValType::I64
     case WasmValType::F32: return 2; // JSWebAssemblyGlobal::ValType::F32
     case WasmValType::F64: return 3; // JSWebAssemblyGlobal::ValType::F64
+    // JSWebAssemblyGlobal::ValType::ExternRef
+    case WasmValType::ExternRef: return 4;
+    // JSWebAssemblyGlobal::ValType::FuncRef
+    case WasmValType::FuncRef: return 5;
     default: return 0xFF;
   }
 }
 
-/// Build a type string for a tag type, e.g. "tag:i:".
-/// Tags have parameters but no results per spec.
-static std::string buildTagTypeString(const WasmFuncType &ft) {
-  std::string s = "tag:";
-  for (auto p : ft.params)
-    s += valTypeChar(p);
-  s += ':';
-  return s;
-}
-
-/// Map a WasmValType to an IR Type.
 /// If \p val is an AsInt32Inst whose operand is boolean, return the boolean
 /// operand directly (suitable for use as a CondBranchInst condition).
 /// Otherwise return \p val unchanged.
@@ -115,7 +123,14 @@ static Type wasmValTypeToIRType(WasmValType vt) {
     case WasmValType::F64:
       return Type::createNumber();
     case WasmValType::FuncRef:
-      return Type::createObject();
+      // ObjectOrNull, not Object: a funcref value is an Exported Function or
+      // null. Null is not a corner case here -- beginFunction() below
+      // zero-initializes a declared funcref local with getLiteralNull().
+      // Object excludes null, and InstSimplify folds a strict comparison
+      // between disjoint types to a constant without testing anything, so an
+      // Object annotation would make `ref === null` answer false for a null
+      // funcref once the optimizer runs.
+      return Type::createObjectOrNull();
     case WasmValType::ExternRef:
       return Type::createAnyType();
     case WasmValType::V128:
@@ -136,6 +151,33 @@ bool WasmIRGen::needsReturnBuffer(const WasmFuncType &funcType) {
   if (funcType.results.size() == 1 && funcType.results[0] == WasmValType::I64)
     return true;
   return false;
+}
+
+bool WasmIRGen::needsRefBuffer(const WasmFuncType &funcType) {
+  if (!needsReturnBuffer(funcType))
+    return false;
+  for (auto vt : funcType.results)
+    if (vt == WasmValType::FuncRef || vt == WasmValType::ExternRef)
+      return true;
+  return false;
+}
+
+uint32_t WasmIRGen::refBufSlotCount(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+  (void)offsets;
+  // Every result reserves at least four bytes at a four-aligned offset, so the
+  // largest slot index a reference can take is (totalSize - 4) / 4, and
+  // totalSize / 4 slots cover it.
+  return totalSize / 4;
+}
+
+uint32_t WasmIRGen::firstWasmParamIndex(const WasmFuncType &funcType) {
+  uint32_t idx = 1; // 0 = "this"
+  if (needsReturnBuffer(funcType))
+    idx += 2; // retbuf_I, retbuf_F
+  if (needsRefBuffer(funcType))
+    idx += 1; // retbuf_R
+  return idx;
 }
 
 std::pair<std::vector<uint32_t>, uint32_t> WasmIRGen::computeRetBufLayout(
@@ -207,17 +249,12 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
     }
   }
 
-  // The reference array is not a parameter -- the calling convention passes
-  // only the two typed-array views -- so reach it through the top-level scope
-  // on demand. There is one buffer per module, so the top-level array is the
-  // same object the caller will read from (the same aliasing the float view
-  // already relies on; see emitRetBufLoads).
-  Value *rbR = nullptr;
+  // Reference results go into the container this function RECEIVED, which is
+  // the one its caller allocated for this call and will read back from. It is
+  // a parameter, so there is nothing to look up.
   auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
-    return rbR;
+    assert(refBuf_ && "reference result but no reference container parameter");
+    return refBuf_;
   };
 
   // Store each result into the buffer at its computed offset.
@@ -260,12 +297,14 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
       case WasmValType::ExternRef: {
         // R[byteOff / 4] = val. A funcref is a JS closure and an externref an
         // arbitrary JS value; neither survives a store into the Uint32Array
-        // view, which coerces it to NaN and then to 0.
+        // view, which coerces it to NaN and then to 0. The write goes through
+        // a builtin rather than a property store because script cannot name
+        // the container, and a property operation is not valid on one.
         uint32_t idx = byteOff / 4;
-        builder_.createStorePropertyStrictInst(
-            poppedResults[i].first,
+        helpers_.emitRefBufSet(
             getRbR(),
-            builder_.getLiteralNumber(idx));
+            builder_.getLiteralNumber(idx),
+            poppedResults[i].first);
         break;
       }
       default: {
@@ -283,32 +322,30 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
   builder_.createReturnInst(builder_.getLiteralNumber(0));
 }
 
-void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
+void WasmIRGen::emitRetBufLoads(
+    const WasmFuncType &funcType,
+    Value *rbI,
+    Value *rbF,
+    Value *refBuf) {
   auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+  assert(rbI && rbF && "the numeric views must be the ones passed to the call");
+  assert(
+      (refBuf != nullptr) == needsRefBuffer(funcType) &&
+      "the reference container must be the one passed to this very call");
 
-  // retBufF_ is the *current* function's float view, and it is set only when
-  // this function itself returns through the buffer. These loads read the
-  // results of a CALLEE, so a caller that returns nothing through the buffer
-  // still needs the view whenever the callee has an f32/f64 result. Load it
-  // on demand rather than in every function's preamble. There is one buffer
-  // per module, so the top-level view is the object the callee was handed.
-  Value *rbF = retBufF_;
-  auto getRbF = [&]() -> Value * {
-    if (!rbF)
-      rbF = builder_.createLoadFrameInst(parentScopeInst_, retBufFVar_);
-    return rbF;
-  };
-
-  // The reference array is never a parameter, so it is always loaded from the
-  // top-level scope, for the same reason and under the same one-buffer-per-
-  // module assumption as getRbF() above.
-  Value *rbR = nullptr;
-  auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
-    return rbR;
-  };
+  // All three containers are read back out of the values this call site
+  // handed to this very call. The numeric two used to be read from
+  // retBufI_/retBufF_ -- this function's OWN incoming views -- while the call
+  // passed the module-local ones, so a callee wrote one object and its caller
+  // read another. Inside one module those are the same object and the mistake
+  // is invisible. Across modules they are not: a table's call array holds the
+  // callee's internal closure rather than its export wrapper (setWasmTableSlot
+  // puts the closure in funcsArr and the wrapper in exportedArr), so a
+  // call_indirect enters another module's function carrying the CALLER's
+  // views, and that function's own nested calls then wrote one buffer and read
+  // the other. It returned zeros. See test/wasm/e2e-cross-module-retbuf.wat.
+  // The reference container was already threaded this way and its comment
+  // named the hazard.
 
   for (size_t i = 0; i < funcType.results.size(); ++i) {
     uint32_t byteOff = offsets[i];
@@ -316,7 +353,7 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
       case WasmValType::I32: {
         uint32_t idx = byteOff / 4;
         auto *raw = builder_.createLoadPropertyInst(
-            retBufI_, builder_.getLiteralNumber(idx));
+            rbI, builder_.getLiteralNumber(idx));
         // Convert Uint32Array unsigned value to signed int32.
         push(builder_.createAsInt32Inst(raw));
         break;
@@ -324,9 +361,9 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
       case WasmValType::I64: {
         uint32_t idx = byteOff / 4;
         auto *loRaw = builder_.createLoadPropertyInst(
-            retBufI_, builder_.getLiteralNumber(idx));
+            rbI, builder_.getLiteralNumber(idx));
         auto *hiRaw = builder_.createLoadPropertyInst(
-            retBufI_, builder_.getLiteralNumber(idx + 1));
+            rbI, builder_.getLiteralNumber(idx + 1));
         // Convert Uint32Array unsigned values to signed int32.
         pushI64(
             builder_.createAsInt32Inst(loRaw),
@@ -337,25 +374,24 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
       case WasmValType::F64: {
         uint32_t idx = byteOff / 8;
         auto *val = builder_.createLoadPropertyInst(
-            getRbF(), builder_.getLiteralNumber(idx));
+            rbF, builder_.getLiteralNumber(idx));
         push(val);
         break;
       }
       case WasmValType::FuncRef:
       case WasmValType::ExternRef: {
-        // Read the reference back from the parallel array. No AsInt32Inst
-        // here: that narrowing exists to undo the Uint32Array's unsigned
-        // reads, and a reference is not a number.
+        // Read the reference back out of the container. No AsInt32Inst here:
+        // that narrowing exists to undo the Uint32Array's unsigned reads, and
+        // a reference is not a number.
         uint32_t idx = byteOff / 4;
-        push(builder_.createLoadPropertyInst(
-            getRbR(), builder_.getLiteralNumber(idx)));
+        push(helpers_.emitRefBufGet(refBuf, builder_.getLiteralNumber(idx)));
         break;
       }
       default: {
         // V128: still unsupported. Keep the existing behavior.
         uint32_t idx = byteOff / 4;
         auto *raw = builder_.createLoadPropertyInst(
-            retBufI_, builder_.getLiteralNumber(idx));
+            rbI, builder_.getLiteralNumber(idx));
         push(builder_.createAsInt32Inst(raw));
         break;
       }
@@ -382,9 +418,9 @@ void WasmIRGen::buildCanonicalTypeMap() {
 }
 
 void WasmIRGen::computeEscapableFuncs() {
-  // Which function indices a funcref VALUE can name. In the supported feature
-  // set a funcref is introduced in exactly two places, both of which name the
-  // function by index in moduleInfo_:
+  // Which function indices a funcref VALUE can name, over and above the
+  // exported and imported ones createFunctions() adds. The two loops below
+  // collect the module-level constructs that produce one:
   //
   //   1. Element segments -- the function goes into a table, from where
   //      table.get, WebAssembly.Table.prototype.get, table.copy, table.init
@@ -392,32 +428,67 @@ void WasmIRGen::computeEscapableFuncs() {
   //      already-listed functions, so they add no indices).
   //   2. A ref.func global initializer.
   //
-  // ref.func inside a function body is unsupported (it warns and pushes a
-  // placeholder), so there is no dynamic way to materialize a funcref for an
-  // arbitrary function.
-  //
   // What this set is FOR is exportedFuncVars_: an index in it gets a canonical
   // Exported Function even if it is neither exported nor imported, because
-  // that wrapper is the object every one of those funcref values carries. If
-  // a new way to introduce a funcref lands -- ref.func in code, call_ref --
-  // it must be added here, or the index will have no wrapper and there will
-  // be nothing to hand out but the internal closure. The safe fallback is to
-  // put every function in the set.
+  // that wrapper is the object those funcref values carry.
   //
-  // It no longer affects parameter typing: the J4 interim typed float params
-  // of these functions `:any` and coerced them at entry, and that is gone now
-  // that no route yields the closure (see createFunctions()).
+  // A ref.func in a FUNCTION BODY adds no index here, and that is a claim
+  // about Wasm validation rather than about this module's shape. The operand
+  // of ref.func must be in the module's `refs` set, which Core 2.0 fills from
+  // the indices occurring outside function bodies and outside the start
+  // function. wabt's `declared_funcs_` has two writers implementing that:
+  // SharedValidator::OnExport for an exported function, and OnRefFunc when
+  // `in_init_expr_` -- an element expression or a global initializer.
+  // OnStart checks the start function's signature and inserts nothing. So
+  // wabt refuses `ref.func $f` in a body unless $f also appears in an element
+  // segment, in a ref.func global initializer or in an export. The first two
+  // are the loops below; exports are added by createFunctions().
+  // compileWasmModule() runs validateWasmBinary() (which is
+  // wabt::ValidateModule) before it builds any IR, so a module that breaks the
+  // rule is refused before reaching here.
+  // compile-invalid-ref-func-undeclared.wat is that rejection, run against a
+  // binary built with wat2wasm --no-check.
   //
-  // A funcref global cannot currently be EXPORTED at all: finalizeModule's
-  // export loop has no case for a reference type and hits an llvm_unreachable
-  // ("unsupported global export type"), which aborts hermesc rather than
-  // diagnosing. Covering ref.func initializers here is still right -- the
-  // value reaches the value stack through global.get regardless -- and the
-  // abort is recorded as a separate defect rather than being described as a
-  // rejection here.
+  // That reasoning is why this does not take the safe fallback of putting
+  // every function in the set. createExportedFunctions() builds an export
+  // wrapper -- an IR function, a closure and a wasmSetFuncInfo call -- for
+  // each non-null slot of exportedFuncVars_, so the fallback would charge
+  // that to every function of every module compiled. It would also leave the
+  // loops below unfalsifiable: an index missing from the set could no longer
+  // be observed. Where the reasoning does not hold, onRefFunc() refuses the
+  // module instead of emitting a funcref with no wrapper.
+  //
+  // e2e-no-closure-escape.wat enumerates the routes by which a function value
+  // reaches script and requires a wrapper on each; route 22 is a body
+  // ref.func.
+  //
+  // If an instruction that materializes a function reference BY INDEX is ever
+  // supported, check whether validation ties its operand to `refs` the way
+  // ref.func's is tied; if it does not, its indices belong here. (call_ref is
+  // not such an instruction: it consumes a reference that already exists.)
+  //
+  // This set no longer affects parameter typing: the J4 interim typed float
+  // params of these functions `:any` and coerced them at entry, and that is
+  // gone now that no route yields the closure (see createFunctions()).
+  //
+  // A funcref global is exportable, and the loop below over ref.func
+  // initializers is what makes that work. An exported one is wrapped by the
+  // wasmMakeGlobal builtin, whose funcref arm takes null or an Exported
+  // Function and refuses anything else, so the initializer's function index
+  // needs the canonical wrapper this set gives it.
+  // Enforced by e2e-global-ref-export.wat, which goes red if that loop goes.
+  //
+  // The loop below does not filter by mode, and a DECLARATIVE segment is the
+  // reason: it puts nothing in a table, but declaring an index is what makes
+  // a body `ref.func` on it legal, and that reference needs the canonical
+  // wrapper -- onRefFunc() refuses the module without one.
+  // e2e-ref-func-body.wat and e2e-elem-declare-items.wat both go red if the
+  // filter is added, the latter with a ref.null ahead of the declared index.
+  // A ref.null or global.get entry names no function, so it adds nothing.
   for (const auto &seg : moduleInfo_.elements)
-    for (uint32_t fi : seg.funcIndices)
-      escapableFuncs_.insert(fi);
+    for (const auto &item : seg.items)
+      if (item.kind == WasmElemItem::Kind::FuncIndex)
+        escapableFuncs_.insert(item.index);
   for (const auto &g : moduleInfo_.globals)
     if (g.initKind == WasmGlobal::InitKind::RefFunc)
       escapableFuncs_.insert(g.initValue.funcIndex);
@@ -532,29 +603,14 @@ void WasmIRGen::createFunctions() {
     uint32_t slotIdx = 0;
     for (uint32_t i = 0; i < numGlobals; ++i) {
       globalSlotIndex_[i] = slotIdx;
-      // Get the global's type.
-      WasmValType gType;
-      if (i < numImportedGlobals) {
-        // Imported global: find the i-th global import.
-        uint32_t importGlobalIdx = 0;
-        for (const auto &imp : moduleInfo_.imports) {
-          if (imp.kind != WasmExternalKind::Global)
-            continue;
-          if (importGlobalIdx == i) {
-            gType = imp.globalType.type;
-            // A mutable imported global is shared state: it is read and
-            // written through the host's WebAssembly.Global, not through
-            // the frame slot allocated below.
-            if (imp.globalType.mutable_)
-              importedMutableGlobals_.insert(i);
-            break;
-          }
-          ++importGlobalIdx;
-        }
-      } else {
-        // Defined global.
-        gType = moduleInfo_.globals[i - numImportedGlobals].type.type;
-      }
+      // The global's declared type, through the single derivation of it.
+      WasmGlobalType gt = globalTypeAt(i);
+      WasmValType gType = gt.type;
+      // A mutable imported global is shared state: it is read and written
+      // through the host's WebAssembly.Global, not through the frame slot
+      // allocated below.
+      if (i < numImportedGlobals && gt.mutable_)
+        importedMutableGlobals_.insert(i);
 
       globalVars_.push_back(builder_.createVariable(
           topLevelVS_,
@@ -656,16 +712,6 @@ void WasmIRGen::createFunctions() {
       if (needsReturnBuffer(ft)) {
         auto [offsets, size] = computeRetBufLayout(ft.results);
         maxRetBufSize = std::max(maxRetBufSize, size);
-        // A reference result cannot be stored in the ArrayBuffer views, so
-        // such a module also needs the parallel reference array. Gate it:
-        // creating the array unconditionally would add an allocation to every
-        // module that merely does i64 arithmetic, and would churn the golden
-        // IR of every Wasm test. V128 is deliberately excluded -- it stays
-        // unsupported and keeps its diagnostic.
-        for (auto vt : ft.results) {
-          if (vt == WasmValType::FuncRef || vt == WasmValType::ExternRef)
-            retBufHasRefResult_ = true;
-        }
       }
     }
 
@@ -683,13 +729,6 @@ void WasmIRGen::createFunctions() {
         "retBufF",
         Type::createAnyType(),
         /* hidden */ true);
-    if (retBufHasRefResult_) {
-      retBufRVar_ = builder_.createVariable(
-          topLevelVS_,
-          "retBufR",
-          Type::createAnyType(),
-          /* hidden */ true);
-    }
     retBufSize_ = maxRetBufSize;
   }
 
@@ -704,6 +743,8 @@ void WasmIRGen::createFunctions() {
   // through an import (whose wrapper wraps the trampoline, so a JS function
   // placed in a table is reached the same way as a native one), or through
   // escapableFuncs_ -- element segments and ref.func global initializers.
+  // A ref.func in a function body reaches script too, and is covered by these
+  // three without a fourth term; computeEscapableFuncs() says why.
   llvh::DenseSet<uint32_t> wrapped = escapableFuncs_;
   for (uint32_t i = 0; i < moduleInfo_.importedFunctionCount(); ++i)
     wrapped.insert(i);
@@ -745,7 +786,8 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
 
     // And, where the function can reach script at all, a variable for its
-    // single canonical Exported Function (filled in by finalizeModule).
+    // single canonical Exported Function (stored by createExportedFunctions(),
+    // called below).
     if (wrapped.count(i)) {
       exportedFuncVars_[i] = builder_.createVariable(
           topLevelVS_,
@@ -766,6 +808,18 @@ void WasmIRGen::createFunctions() {
       auto *rbF = builder_.createJSDynamicParam(func, "retbuf_F");
       rbF->setType(Type::createObject());
       jsParamCount += 2;
+    }
+    // And, when a reference travels through the buffer, the container that
+    // carries it, immediately after the two numeric views. It is typed `any`
+    // rather than `object`: an ArrayStorage is a GC cell, not a JSObject, so
+    // `object` would be a claim the value does not satisfy. The code this
+    // compiler emits for the parameter passes it to wasmRefBufGet and
+    // wasmRefBufSet and applies no other operation to it; nothing enforces
+    // that, which is dz 01a08953-c401.
+    if (needsRefBuffer(funcType)) {
+      auto *rbR = builder_.createJSDynamicParam(func, "retbuf_R");
+      rbR->setType(Type::createAnyType());
+      jsParamCount += 1;
     }
 
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
@@ -799,7 +853,7 @@ void WasmIRGen::createFunctions() {
         //
         // That is finding J4, and the claim is not asserted here: it is
         // enumerated and executed by test/wasm/e2e-no-closure-escape.wat,
-        // which walks all twenty routes and brand-checks what each one yields.
+        // which walks every route and brand-checks what each one yields.
         // The interim fix -- typing float params of "escapable" functions
         // `:any` and coercing at function entry -- is gone with the routes it
         // defended against. ANY NEW ROUTE OUT (ref.func in a function body,
@@ -808,7 +862,11 @@ void WasmIRGen::createFunctions() {
         //
         // The JS->Wasm coercion itself did not disappear, it moved to where it
         // belongs: createExportWrapper does ToNumber (plus fround for f32) on
-        // the wrapper's parameters, which is the actual boundary.
+        // the wrapper's numeric parameters, which is the actual boundary. A
+        // funcref parameter is TESTED rather than coerced in the same place --
+        // null or an Exported Function, TypeError otherwise -- which is what
+        // makes the objectOrNull annotation wasmValTypeToIRType gives a
+        // funcref parameter true of the values that actually arrive.
         param->setType(wasmValTypeToIRType(funcType.params[p]));
         jsParamCount += 1;
       }
@@ -848,6 +906,23 @@ void WasmIRGen::createFunctions() {
   tlScope_ = builder_.createCreateScopeInst(
       topLevelVS_, builder_.getEmptySentinel());
   auto *tlScope = tlScope_;
+
+  // Read the pristine-constructor holder once, before anything allocates.
+  // Every constructor this module builds with comes from here rather than
+  // from globalThis, so replacing a global cannot redirect the module's
+  // allocations -- its linear-memory views, its return buffer, its table
+  // backing arrays. globalThis.HermesInternal and its `intrinsics` property
+  // are both non-writable and non-configurable and the holder is
+  // non-extensible, so neither of these two loads can be intercepted or
+  // redirected.
+  //
+  // Cached in a Variable rather than re-read at each use because memory.grow
+  // rebuilds all eight views at run time; this way the walk is paid once per
+  // instance instead of once per grow.
+  intrinsicsVar_ = builder_.createVariable(
+      topLevelVS_, "intrinsics", Type::createAnyType(), /* hidden */ true);
+  builder_.createStoreFrameInst(
+      tlScope, loadIntrinsicsHolder(), intrinsicsVar_);
 
   // Resolve and validate ALL imports from the imports object.
   // The imports object arrives as instantiate()'s parameter.
@@ -913,32 +988,61 @@ void WasmIRGen::createFunctions() {
       auto *importVal = builder_.createLoadPropertyInst(
           moduleObj, builder_.getLiteralString(imp.fieldName));
 
-      // Check import value is not undefined.
-      auto *impIsUndef = builder_.createBinaryOperatorInst(
-          importVal, undefinedVal,
-          ValueKind::BinaryStrictlyEqualInstKind);
-      auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
-      auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
-      builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
+      // Check the import value is not undefined -- EXCEPT where `undefined`
+      // is a value the declaration admits, which is an immutable externref
+      // global import and nothing else. An externref is any JS value,
+      // `undefined` included; a property that is absent and one that holds
+      // `undefined` read alike, so this guard would refuse a legitimate
+      // import and would refuse an omitted one for the wrong reason.
+      // Measured on node v24.13.1, the implementation this engine's
+      // descriptor spellings and defaults are matched against: it has no
+      // missing-import concept for globals at all -- it reads the property,
+      // takes `undefined` when absent, and applies the type rule. Both
+      // `{e: {b: undefined}}` and `{e: {}}` link and hand the module
+      // `undefined`.
+      //
+      // The guard stays for every other import kind, and for a funcref or
+      // numeric global, where node also refuses -- naming a type error where
+      // this names a missing import. That message difference is dz
+      // 01a0855d-6b5b and is not this change's subject.
+      const bool undefinedIsAValue = imp.kind == WasmExternalKind::Global &&
+          imp.globalType.type == WasmValType::ExternRef &&
+          !imp.globalType.mutable_;
+      if (!undefinedIsAValue) {
+        auto *impIsUndef = builder_.createBinaryOperatorInst(
+            importVal, undefinedVal,
+            ValueKind::BinaryStrictlyEqualInstKind);
+        auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
+        auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
+        builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
 
-      builder_.setInsertionBlock(impFailBB);
-      helpers_.emitLinkError(builder_.getLiteralString(
-          "module has no import " + imp.moduleName + "." + imp.fieldName));
-      builder_.createUnreachableInst();
+        builder_.setInsertionBlock(impFailBB);
+        helpers_.emitLinkError(builder_.getLiteralString(
+            "module has no import " + imp.moduleName + "." + imp.fieldName));
+        builder_.createUnreachableInst();
 
-      builder_.setInsertionBlock(impOkBB);
-      tlEntry_ = impOkBB;
+        builder_.setInsertionBlock(impOkBB);
+        tlEntry_ = impOkBB;
+      }
 
       // Per-kind type validation.
       switch (imp.kind) {
         case WasmExternalKind::Function: {
-          // Load __wasm_type__ from the import value.
-          auto *typeStr = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("__wasm_type__"));
+          // The signature comes from the Exported Function brand, not from a
+          // property on the value. A `__wasm_type__` string used to be read
+          // here; createExportedFunctions says what was wrong with publishing
+          // it, and all three failures were failures of THIS check.
+          //
+          // undefined means "not an Exported Function", which is not a
+          // failure: a plain JS callable satisfies a function import and
+          // takes its types from the declaration below. That is the JS API
+          // as specified, and it is why the old forgery bought nothing a
+          // forwarding function could not -- the check exists to catch a
+          // genuine export wired to the wrong import.
+          auto *typeId = helpers_.emitFuncTypeId(importVal);
           auto *typeIsUndef = builder_.createBinaryOperatorInst(
-              typeStr, undefinedVal,
+              typeId, undefinedVal,
               ValueKind::BinaryStrictlyEqualInstKind);
-          // If undefined → could be plain JS function. Check typeof.
           auto *checkCallableBB =
               builder_.createBasicBlock(topLevelFunc);
           auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
@@ -948,10 +1052,12 @@ void WasmIRGen::createFunctions() {
               typeIsUndef, checkCallableBB, checkTypeBB);
 
           // Check that the import value is callable (typeof === "function").
-          // This runs on both paths: carrying a matching __wasm_type__ says
-          // what the value claims to be, not that it can be called, and a
-          // non-callable used to link happily and fail as a TypeError at the
-          // first call instead of a LinkError at instantiation.
+          // This runs on both paths: carrying a matching signature says what
+          // the value is, not that it can be called, and a non-callable used
+          // to link happily and fail as a TypeError at the first call instead
+          // of a LinkError at instantiation. Kept on the branded path too
+          // rather than argued away from wasmSetFuncInfo's precondition: one
+          // branch on a cold path is cheaper than that argument going stale.
           builder_.setInsertionBlock(checkCallableBB);
           auto *typeofVal = builder_.createTypeOfInst(importVal);
           auto *isFunc = builder_.createBinaryOperatorInst(
@@ -962,13 +1068,19 @@ void WasmIRGen::createFunctions() {
               isFunc, acceptBB, linkErrorBB);
 
           builder_.setInsertionBlock(checkTypeBB);
-          // Compare type string against expected.
+          // Intern the declared signature here rather than reading
+          // typeIdVars_: internTypeIds() runs well after import resolution.
+          // It is the same structural string and the same interning, so the
+          // two agree by construction.
           std::string expectedType =
               buildFuncTypeString(moduleInfo_.getFunctionType(
                   importFuncIdx));
+          auto *expectedId = builder_.createCallBuiltinInst(
+              BuiltinMethod::HermesBuiltin_wasmInternType,
+              {builder_.getLiteralString(expectedType)});
           auto *mismatch = builder_.createBinaryOperatorInst(
-              typeStr,
-              builder_.getLiteralString(expectedType),
+              typeId,
+              expectedId,
               ValueKind::BinaryStrictlyNotEqualInstKind);
           auto *typedCallableBB =
               builder_.createBasicBlock(topLevelFunc);
@@ -1007,27 +1119,44 @@ void WasmIRGen::createFunctions() {
           // string property, which made a global the one kind where a plain
           // object literal linked outright and handed the module its own
           // `value`. wasmLinkGlobal brand-checks with dyn_vmcast instead, and
-          // returns the value from the internal field rather than through the
-          // replaceable `.value` accessor.
+          // answers a match with the Global OBJECT; the value of an immutable
+          // match is fetched below with wasmGlobalGet, out of the internal
+          // field rather than through the replaceable `.value` accessor.
           //
           // What a raw value may be is decided per import at compile time,
-          // per spec: a raw value allocates an *immutable* global, so it can
-          // never satisfy a mutable import; an i64 import takes a BigInt, and
-          // every other type takes a Number. Accepting either typeof for
-          // every type would let a BigInt satisfy an i32 import and a Number
-          // an i64 one.
-          const bool isI64 = imp.globalType.type == WasmValType::I64;
+          // per spec. A raw value allocates an *immutable* global, so it can
+          // never satisfy a mutable import; beyond that the DECLARED type
+          // decides, in three arms:
+          //   - a numeric type takes a Number, except i64, which takes a
+          //     BigInt. Accepting either typeof for every type would let a
+          //     BigInt satisfy an i32 import and a Number an i64 one. (v128
+          //     falls in with the Number types, which is wrong and is not
+          //     this branch's to fix; see globalValTypeCode.)
+          //   - externref takes ANY JS value, `null` and `undefined`
+          //     included, so its arm emits no check and has no diagnostic.
+          //   - funcref takes `null` or a WebAssembly Exported Function,
+          //     asked through the wasmIsExportedFunction builtin so that the
+          //     compiler and the JS API share one notion of the brand.
+          const WasmValType declaredType = imp.globalType.type;
+          const bool isI64 = declaredType == WasmValType::I64;
+          const bool isExternRef = declaredType == WasmValType::ExternRef;
+          const bool isFuncRef = declaredType == WasmValType::FuncRef;
           const bool rawAllowed = !imp.globalType.mutable_;
+          // The externref arm above refuses no raw value, so for an immutable
+          // externref import there is nothing for a raw diagnostic to say and
+          // no edge that would reach it.
+          const bool rawCanFail = !(rawAllowed && isExternRef);
 
           auto *linked = helpers_.emitLinkGlobal(
               importVal,
               builder_.getLiteralNumber(
-                  static_cast<double>(globalValTypeCode(imp.globalType.type))),
+                  static_cast<double>(globalValTypeCode(declaredType))),
               builder_.getLiteralBool(imp.globalType.mutable_));
           // null means "not a WebAssembly.Global"; undefined means "a
-          // WebAssembly.Global that does not match". They must stay apart:
-          // only the first can legitimately be a raw JS value, and reporting
-          // the second as "not a WebAssembly.Global" would be false.
+          // WebAssembly.Global that does not match"; anything else is the
+          // matched Global itself. The first two must stay apart: only "not a
+          // WebAssembly.Global" can legitimately be a raw JS value, and
+          // reporting a mismatch that way would be false.
           auto *notAGlobal = builder_.createBinaryOperatorInst(
               linked,
               builder_.getLiteralNull(),
@@ -1036,21 +1165,48 @@ void WasmIRGen::createFunctions() {
           auto *checkMatchBB = builder_.createBasicBlock(topLevelFunc);
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          auto *rawErrorBB = builder_.createBasicBlock(topLevelFunc);
-          BasicBlock *checkRawBB = nullptr;
+          BasicBlock *rawErrorBB =
+              rawCanFail ? builder_.createBasicBlock(topLevelFunc) : nullptr;
+          // The predecessors of acceptBB that carry the RAW import value.
+          // There is more than one only on the funcref arm, which admits
+          // `null` and a branded function by separate tests.
+          llvh::SmallVector<BasicBlock *, 2> rawAcceptBBs;
           if (rawAllowed) {
-            checkRawBB = builder_.createBasicBlock(topLevelFunc);
+            auto *checkRawBB = builder_.createBasicBlock(topLevelFunc);
             builder_.createCondBranchInst(
                 notAGlobal, checkRawBB, checkMatchBB);
 
             builder_.setInsertionBlock(checkRawBB);
-            auto *typeofVal = builder_.createTypeOfInst(importVal);
-            auto *rawOk = builder_.createBinaryOperatorInst(
-                typeofVal,
-                builder_.getLiteralString(isI64 ? "bigint" : "number"),
-                ValueKind::BinaryStrictlyEqualInstKind);
-            builder_.createCondBranchInst(
-                rawOk, acceptBB, rawErrorBB);
+            if (isExternRef) {
+              // Any JS value is an externref, so there is nothing to test.
+              // A check here would be a bug rather than extra safety: it
+              // would refuse a host reference the module is entitled to.
+              builder_.createBranchInst(acceptBB);
+              rawAcceptBBs.push_back(checkRawBB);
+            } else if (isFuncRef) {
+              // `null` first, because the predicate answers false for it and
+              // a null funcref is a legal import.
+              auto *isNull = builder_.createBinaryOperatorInst(
+                  importVal,
+                  builder_.getLiteralNull(),
+                  ValueKind::BinaryStrictlyEqualInstKind);
+              auto *checkBrandBB = builder_.createBasicBlock(topLevelFunc);
+              builder_.createCondBranchInst(isNull, acceptBB, checkBrandBB);
+              rawAcceptBBs.push_back(checkRawBB);
+
+              builder_.setInsertionBlock(checkBrandBB);
+              auto *branded = helpers_.emitIsExportedFunction(importVal);
+              builder_.createCondBranchInst(branded, acceptBB, rawErrorBB);
+              rawAcceptBBs.push_back(checkBrandBB);
+            } else {
+              auto *typeofVal = builder_.createTypeOfInst(importVal);
+              auto *rawOk = builder_.createBinaryOperatorInst(
+                  typeofVal,
+                  builder_.getLiteralString(isI64 ? "bigint" : "number"),
+                  ValueKind::BinaryStrictlyEqualInstKind);
+              builder_.createCondBranchInst(rawOk, acceptBB, rawErrorBB);
+              rawAcceptBBs.push_back(checkRawBB);
+            }
           } else {
             builder_.createCondBranchInst(
                 notAGlobal, rawErrorBB, checkMatchBB);
@@ -1059,38 +1215,70 @@ void WasmIRGen::createFunctions() {
           builder_.setInsertionBlock(checkMatchBB);
           auto *mismatch = builder_.createBinaryOperatorInst(
               linked, undefinedVal, ValueKind::BinaryStrictlyEqualInstKind);
-          builder_.createCondBranchInst(mismatch, linkErrorBB, acceptBB);
 
-          // For an immutable import the VALUE is what is kept, and
-          // wasmLinkGlobal already read it out of the internal field. For a
-          // mutable one the OBJECT is, because the module and the host share
-          // the global and each must see the other's writes.
-          Value *globalObjValue = imp.globalType.mutable_
-              ? static_cast<Value *>(importVal)
-              : static_cast<Value *>(linked);
+          // For a MUTABLE import the OBJECT is what is kept, because the
+          // module and the host share the global and each must see the
+          // other's writes, so a match needs no fetch. For an IMMUTABLE one
+          // the VALUE is kept, and it is fetched HERE -- in a block reached
+          // only by a successful match, since `linked` is the Global itself
+          // and a Global is not a value.
+          //
+          // The fetch cannot run a closure. A closure is consulted only for
+          // a LIVE global, and no route builds a live immutable one:
+          // JSWebAssemblyGlobal::setGetter and setSetter assert the global is
+          // mutable when the closures go in, and both callers of setMutable
+          // -- wasmMakeGlobal and the JS constructor -- set mutability once,
+          // at construction, before the object escapes. (The assertions are
+          // about installation time; setMutable is not itself guarded, so
+          // this rests on the callers as well as on them.) The mutability
+          // half of the match above has already refused a mutable Global for
+          // this immutable declaration, so a snapshot is what reaches the
+          // fetch.
+          //
+          // `importVal` rather than `linked` on the mutable side: what is
+          // stored is the object the import object supplied, which is what
+          // the two are agreed to share. The brand check returns that same
+          // object on a match, so this is a statement about provenance and
+          // not a difference in value.
+          BasicBlock *matchedBB = checkMatchBB;
+          Value *matchedValue = importVal;
+          if (imp.globalType.mutable_) {
+            builder_.createCondBranchInst(mismatch, linkErrorBB, acceptBB);
+          } else {
+            auto *fetchBB = builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(mismatch, linkErrorBB, fetchBB);
+            builder_.setInsertionBlock(fetchBB);
+            matchedValue = helpers_.emitGlobalGet(linked);
+            builder_.createBranchInst(acceptBB);
+            matchedBB = fetchBB;
+          }
 
           builder_.setInsertionBlock(linkErrorBB);
           helpers_.emitLinkError(builder_.getLiteralString(
               "import " + imp.moduleName + "." + imp.fieldName +
               " is a WebAssembly.Global that does not match the declared " +
               (imp.globalType.mutable_ ? "mutable " : "immutable ") +
-              valTypeName(imp.globalType.type) + " global import"));
+              valTypeName(declaredType) + " global import"));
           builder_.createUnreachableInst();
 
-          builder_.setInsertionBlock(rawErrorBB);
-          {
+          if (rawErrorBB) {
+            builder_.setInsertionBlock(rawErrorBB);
             std::string rawErrMsg =
                 "import " + imp.moduleName + "." + imp.fieldName;
             if (!rawAllowed)
               rawErrMsg +=
                   " must be a WebAssembly.Global to satisfy a mutable"
                   " global import";
+            else if (isFuncRef)
+              rawErrMsg +=
+                  " must be null or a WebAssembly exported function to"
+                  " satisfy a funcref global import";
             else if (isI64)
               rawErrMsg += " must be a BigInt to satisfy an i64 global"
                            " import";
             else
               rawErrMsg += " must be a Number to satisfy an " +
-                  std::string(valTypeName(imp.globalType.type)) +
+                  std::string(valTypeName(declaredType)) +
                   " global import";
             helpers_.emitLinkError(builder_.getLiteralString(rawErrMsg));
             builder_.createUnreachableInst();
@@ -1106,9 +1294,9 @@ void WasmIRGen::createFunctions() {
           // object itself into an i32 slot. Nothing about this value is read
           // off the import object again.
           auto *resolved = builder_.createPhiInst();
-          if (checkRawBB)
-            resolved->addEntry(importVal, checkRawBB);
-          resolved->addEntry(globalObjValue, checkMatchBB);
+          for (BasicBlock *pred : rawAcceptBBs)
+            resolved->addEntry(importVal, pred);
+          resolved->addEntry(matchedValue, matchedBB);
 
           // Store the resolved import into importGlobalVals_ -- its value
           // for an immutable import, the WebAssembly.Global object itself
@@ -1254,10 +1442,9 @@ void WasmIRGen::createFunctions() {
           builder_.createStoreFrameInst(
               tlScope, exportedResult, tableExportVars_[importTableIdx]);
 
-          // No wasmCheckTableArrays call: these came out of a table this
-          // engine built, so they are JSArrays by construction. The check
-          // remains for externref tables, whose arrays come from
-          // globalThis.Array.
+          // These came out of a table this engine built, so they are
+          // JSArrays by construction -- as are the externref path's, which
+          // createTables() allocates from the pristine Array.
 
           ++importTableIdx;
           tlEntry_ = acceptBB;
@@ -1383,29 +1570,35 @@ void WasmIRGen::createFunctions() {
         }
 
         case WasmExternalKind::Tag: {
-          // Load __wasm_type__ from the import value.
-          auto *typeStr = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("__wasm_type__"));
-          auto *typeIsUndef = builder_.createBinaryOperatorInst(
-              typeStr, undefinedVal,
-              ValueKind::BinaryStrictlyEqualInstKind);
+          // A tag import must be a GENUINE WebAssembly.Tag with exactly this
+          // signature. The brand is a dyn_vmcast inside the builtin, the same
+          // shape the memory, table and global import paths use.
+          //
+          // What this replaced compared a `__wasm_type__` string, and
+          // accepted anything carrying none as a "raw JS value as tag". That
+          // last part is why swallowing the store on the EXPORTER's side made
+          // the IMPORTER accept it.
+          //
+          // Such an object was not inert: the accepted value goes straight
+          // into tagVars_, onThrow puts it in the exception, and
+          // wasmMatchException compares identity -- so a module handed an
+          // ordinary object could throw and catch with it, and two instances
+          // handed the same object would agree. Refusing it changes working,
+          // nonconforming behaviour rather than removing a no-op. Node
+          // refuses it.
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
-          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          // If __wasm_type__ is undefined, accept (raw JS value as tag).
-          builder_.createCondBranchInst(
-              typeIsUndef, acceptBB, checkTypeBB);
-
-          builder_.setInsertionBlock(checkTypeBB);
+          // A function export reaching here is covered by the same refusal:
+          // it is not a Tag, so the brand check fails. spec/imports.wast has
+          // that as `assert_unlinkable ... "incompatible import type"`. The
+          // previous commit refused it explicitly, by asking wasmFuncTypeId
+          // whether the value was branded; that separate arm is gone because
+          // the brand check subsumes it.
           const WasmFuncType &tagFuncType =
               moduleInfo_.types[imp.tagTypeIndex];
-          std::string expectedType = buildTagTypeString(tagFuncType);
-          auto *mismatch = builder_.createBinaryOperatorInst(
-              typeStr,
-              builder_.getLiteralString(expectedType),
-              ValueKind::BinaryStrictlyNotEqualInstKind);
-          builder_.createCondBranchInst(
-              mismatch, linkErrorBB, acceptBB);
+          auto *ok =
+              helpers_.emitCheckTagType(importVal, tagTypeCodes(tagFuncType));
+          builder_.createCondBranchInst(ok, acceptBB, linkErrorBB);
 
           builder_.setInsertionBlock(linkErrorBB);
           helpers_.emitLinkError(builder_.getLiteralString(
@@ -1441,31 +1634,55 @@ void WasmIRGen::createFunctions() {
     createMemoryViews(tlScope);
   }
 
-  // Create the per-module return buffer if needed.
+  // Create the per-module NUMERIC return buffer if needed. Reference results
+  // do not travel here: they go in a container allocated per call by
+  // wasmAllocRefBuf, because neither a closure nor an arbitrary JS value fits
+  // in an ArrayBuffer view.
   //
-  // REENTRANCY INVARIANT: there is exactly one return buffer per module
-  // instance, shared by every function that returns an i64 or a multi-value
-  // result. A function marshals its results into the buffer and its caller
-  // reads them straight back out, so the buffer must not be written again
-  // between those two points. Any operation that could re-enter Wasm --
-  // calling back into an export, or running arbitrary JS such as a property
-  // getter, valueOf, or a Proxy trap -- while a result sits unread in the
-  // buffer will overwrite it. The marshalling code therefore computes every
-  // result into an SSA value first and only then stores them (see
-  // emitRetBufLoads / the multi-value trampoline), so no user code runs
-  // between the write and the read.
+  // These two views are one object per module instance, shared by every
+  // function that returns an i64 or a multi-value result. A function marshals
+  // its numeric results into them and its caller reads them straight back
+  // out, so a write in between corrupts the result. Any operation that could
+  // re-enter Wasm while a result sits unread in the buffer -- calling back
+  // into an export from a JS import, say -- will overwrite it. The import
+  // trampoline's two-pass marshalling converts each result into an SSA value
+  // in the first pass and stores them in the second, which keeps script from
+  // running between one result's conversion and another's store.
   //
-  // The buffer is built from globalThis.ArrayBuffer / Uint32Array /
-  // Float64Array, which a script can replace, so the native builtins that
-  // read it (writeI64ToRetBuf and friends) treat arg0 as untrusted and
-  // reject a non-typed-array rather than casting it blindly.
+  // The constructors come from HermesInternal.intrinsics rather than from
+  // globalThis, so replacing ArrayBuffer / Uint32Array / Float64Array cannot
+  // substitute the storage. That closes the substitution half of
+  // 01a0821a-1093, and with it the only route by which touching the buffer
+  // ran script at all: indexed access on a genuine typed array calls no
+  // accessor, so a store or a load here cannot hand control to a getter that
+  // re-enters. What is left of that issue is reentrancy reached some other
+  // way, which per-activation buffers -- not pristine constructors -- would
+  // be the fix for.
+  //
+  // It also closes 01a0850f-ac3e outright, including the rounding half. F32
+  // and F64 share one arm of the result load and both go through the
+  // Float64Array, and nothing on that path rounds to f32 -- which is correct
+  // only because every producer of an f32 value has rounded it already
+  // (arithmetic and the conversions via emitFround, f32.const via a float
+  // cast, f32.load via the Float32Array view, an imported global and an
+  // import's result through the trampoline). A replaced Float64Array was the
+  // one way to get an unrounded double into an f32 slot. Measured against the
+  // old buffer, `(result f32 f32)` of 0.1 answered 0.1, where f32 can only
+  // hold 0.10000000149011612; pinned now by e2e-pristine-retbuf.wat.
+  //
+  // It did not fix 01a0820d-5190, whose cause was passing one buffer and
+  // reading another rather than anything about who allocated them. That is
+  // fixed separately: emitRetBufLoads now reads back out of the views the
+  // call site passed.
+  //
+  // The native builtins that read these views (writeI64ToRetBuf and friends)
+  // still treat arg0 as untrusted and reject a non-typed-array. Nothing
+  // reaches them with a forged view by this route any more, but the check is
+  // what stands between a future caller and a blind cast, so it stays.
   if (retBufSize_ > 0) {
-    auto *ArrayBufferCtor =
-        builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
-    auto *Uint32ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Uint32Array");
-    auto *Float64ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Float64Array");
+    auto *ArrayBufferCtor = loadIntrinsic(tlScope, "ArrayBuffer");
+    auto *Uint32ArrayCtor = loadIntrinsic(tlScope, "Uint32Array");
+    auto *Float64ArrayCtor = loadIntrinsic(tlScope, "Float64Array");
     auto *buf = emitNew(
         ArrayBufferCtor,
         {builder_.getLiteralNumber(static_cast<double>(retBufSize_))});
@@ -1473,17 +1690,6 @@ void WasmIRGen::createFunctions() {
     auto *retBufF = emitNew(Float64ArrayCtor, {buf});
     builder_.createStoreFrameInst(tlScope, retBufI, retBufIVar_);
     builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
-    if (retBufRVar_) {
-      // Parallel reference slots, indexed like the Uint32Array view. This
-      // array holds the last reference written to each slot until it is
-      // overwritten -- bounded by retBufSize_/4 entries per instance, so it
-      // retains a little longer than strictly necessary but does not grow.
-      auto *ArrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
-      auto *retBufR = emitNew(
-          ArrayCtor,
-          {builder_.getLiteralNumber(static_cast<double>(retBufSize_ / 4))});
-      builder_.createStoreFrameInst(tlScope, retBufR, retBufRVar_);
-    }
   }
 
   // Tag identity is needed by throw/catch whether or not the module has any
@@ -1511,9 +1717,12 @@ void WasmIRGen::createFunctions() {
   createExportedFunctions(tlScope);
 
   // Initialize Wasm globals (both imported and defined) BEFORE createTables():
-  // an active element segment's offset may be a `global.get`, which
-  // createTables() loads from globalVars_. Initializing globals first ensures
-  // that load sees the real value instead of the slot's undefined placeholder.
+  // an active element segment's offset may be a `global.get`, and so may any
+  // of its entries, both of which createTables() loads from globalVars_.
+  // Initializing globals first ensures those loads see the real value instead
+  // of the slot's undefined placeholder. The passive segment arrays built by
+  // finalizeModule() read globalVars_ for the same reason, and finalizeModule()
+  // runs after this.
   if (numGlobals > 0) {
     initializeGlobals(tlScope);
   }
@@ -1569,58 +1778,91 @@ void WasmIRGen::createFunctions() {
     return builder_.getLiteralString("function");
   };
 
+  // The factory creates its own instance of topLevelVS_, so intrinsicsVar_
+  // is not filled in here -- __wasm_instantiate__ fills the instance it
+  // creates for itself. Walk to the holder once and build both arrays off it.
+  auto *descIntrinsics = loadIntrinsicsHolder();
+
   // Build exportDescs array.
   auto *exportDescsArr = emitNew(
-      builder_.createTryLoadGlobalPropertyInst("Array"),
+      loadIntrinsicFrom(descIntrinsics, "Array"),
       {builder_.getLiteralNumber(
           static_cast<double>(moduleInfo_.exports.size()))});
   for (uint32_t i = 0; i < moduleInfo_.exports.size(); ++i) {
     const auto &exp = moduleInfo_.exports[i];
     auto *desc = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(exp.name), desc,
-        builder_.getLiteralString("name"));
-    builder_.createStorePropertyStrictInst(
-        kindToString(exp.kind), desc,
-        builder_.getLiteralString("kind"));
-    builder_.createStorePropertyStrictInst(
-        desc, exportDescsArr,
-        builder_.getLiteralNumber(static_cast<double>(i)));
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(exp.name),
+        desc,
+        builder_.getLiteralString("name"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        kindToString(exp.kind),
+        desc,
+        builder_.getLiteralString("kind"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        desc,
+        exportDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Build importDescs array.
   auto *importDescsArr = emitNew(
-      builder_.createTryLoadGlobalPropertyInst("Array"),
+      loadIntrinsicFrom(descIntrinsics, "Array"),
       {builder_.getLiteralNumber(
           static_cast<double>(moduleInfo_.imports.size()))});
   for (uint32_t i = 0; i < moduleInfo_.imports.size(); ++i) {
     const auto &imp = moduleInfo_.imports[i];
     auto *desc = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(imp.moduleName), desc,
-        builder_.getLiteralString("module"));
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(imp.fieldName), desc,
-        builder_.getLiteralString("name"));
-    builder_.createStorePropertyStrictInst(
-        kindToString(imp.kind), desc,
-        builder_.getLiteralString("kind"));
-    builder_.createStorePropertyStrictInst(
-        desc, importDescsArr,
-        builder_.getLiteralNumber(static_cast<double>(i)));
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(imp.moduleName),
+        desc,
+        builder_.getLiteralString("module"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        builder_.getLiteralString(imp.fieldName),
+        desc,
+        builder_.getLiteralString("name"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        kindToString(imp.kind),
+        desc,
+        builder_.getLiteralString("kind"),
+        IRBuilder::PropEnumerable::Yes);
+    builder_.createDefineOwnPropertyInst(
+        desc,
+        importDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Build module info object: {instantiate, exportDescs, importDescs}.
   auto *moduleInfoObj = builder_.createAllocObjectLiteralInst({});
-  builder_.createStorePropertyStrictInst(
-      instClosure, moduleInfoObj,
-      builder_.getLiteralString("instantiate"));
-  builder_.createStorePropertyStrictInst(
-      exportDescsArr, moduleInfoObj,
-      builder_.getLiteralString("exportDescs"));
-  builder_.createStorePropertyStrictInst(
-      importDescsArr, moduleInfoObj,
-      builder_.getLiteralString("importDescs"));
+  // Defined, not assigned, and this one is not merely about losing a value.
+  // An Object.prototype.instantiate setter swallowed this store and its getter
+  // then supplied the function the JS API calls: that replacement can invoke
+  // the real closure, rewrite the exports object it returns, and hand back the
+  // rewritten one, which the JS API then FREEZES. Measured on a module whose
+  // f() returns 42: exports.f() came back 1337, frozen. So "the exports object
+  // is frozen before the Instance is returned" says nothing about integrity on
+  // its own -- the freeze preserves whatever the interposer left.
+  builder_.createDefineOwnPropertyInst(
+      instClosure,
+      moduleInfoObj,
+      builder_.getLiteralString("instantiate"),
+      IRBuilder::PropEnumerable::Yes);
+  builder_.createDefineOwnPropertyInst(
+      exportDescsArr,
+      moduleInfoObj,
+      builder_.getLiteralString("exportDescs"),
+      IRBuilder::PropEnumerable::Yes);
+  builder_.createDefineOwnPropertyInst(
+      importDescsArr,
+      moduleInfoObj,
+      builder_.getLiteralString("importDescs"),
+      IRBuilder::PropEnumerable::Yes);
   builder_.createReturnInst(moduleInfoObj);
 }
 
@@ -1691,7 +1933,58 @@ bool WasmIRGen::validateExportIndices() {
   return true;
 }
 
+WasmGlobalType WasmIRGen::globalTypeAt(uint32_t index) const {
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  if (index >= numImportedGlobals)
+    return moduleInfo_.globals[index - numImportedGlobals].type;
+  uint32_t idx = 0;
+  for (const auto &imp : moduleInfo_.imports) {
+    if (imp.kind != WasmExternalKind::Global)
+      continue;
+    if (idx == index)
+      return imp.globalType;
+    ++idx;
+  }
+  // Only an out-of-range index reaches here, which the precondition excludes.
+  // Returning the default keeps the caller on a defined path in a release
+  // build rather than reading past the end of a vector.
+  return WasmGlobalType{};
+}
+
+bool WasmIRGen::validateTagTypes() {
+  for (uint32_t i = 0, e = moduleInfo_.totalTagCount(); i < e; ++i) {
+    const WasmFuncType &ft = moduleInfo_.getTagType(i);
+    for (auto p : ft.params) {
+      if (LLVM_UNLIKELY(p == WasmValType::V128)) {
+        errorMsg_ = "tag " + std::to_string(i) +
+            " has a v128 parameter, and SIMD is not supported";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool WasmIRGen::validateGlobalExportTypes() {
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Global)
+      continue;
+    if (LLVM_UNLIKELY(globalTypeAt(exp.index).type == WasmValType::V128)) {
+      errorMsg_ = "exported global \"" + exp.name +
+          "\" has type v128, and SIMD is not supported";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool WasmIRGen::finalizeModule() {
+  // onRefFunc() can refuse the module from inside a function body; it records
+  // why in errorMsg_ and translation carries on. Report that here, before
+  // anything else is emitted.
+  if (LLVM_UNLIKELY(!errorMsg_.empty()))
+    return false;
+
   auto *tlScope = tlScope_;
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
@@ -1711,6 +2004,43 @@ bool WasmIRGen::finalizeModule() {
   // module is invalid, and the answer is to reject the module, not to skip
   // the export and compile the rest of it.
   if (LLVM_UNLIKELY(!validateExportIndices()))
+    return false;
+
+  // A v128 global export is refused rather than compiled. The JS API says the
+  // exports object should carry a WebAssembly.Global whose `.value` throws,
+  // but JSWebAssemblyGlobal::ValType has no v128 member to build one from, and
+  // BinaryReaderHermesIRGen has no v128.const initializer handler, so the
+  // module's slot for such a global holds the number 0.
+  //
+  // What this MOVES, rather than what it prevents: no such Global was ever
+  // built. globalValTypeCode maps v128 to 0xFF, and wasmMakeGlobal already
+  // range-checks that and raises "wasmMakeGlobal: unknown value type". The
+  // change is that the refusal now happens at compile time and says why --
+  // a CompileError from `new WebAssembly.Module` naming SIMD and the export,
+  // instead of a TypeError from `new WebAssembly.Instance` naming an internal
+  // builtin. dz 01a07d4b-01bc tracks building the real shell; this diagnostic
+  // is what that work removes.
+  //
+  // Run after validateExportIndices(), because it indexes the global index
+  // space with an export's index and relies on that check for the bound. Run
+  // before the export loops below, so that no half-populated exports object
+  // is built for a module that is about to be refused.
+  if (LLVM_UNLIKELY(!validateGlobalExportTypes()))
+    return false;
+
+  // The same treatment for a v128 TAG parameter, and for the same reason: tag
+  // parameter codes are globalValTypeCode's, which maps v128 to 0xFF, and
+  // wasmMakeTag range-checks that and raises "wasmMakeTag: bad value type
+  // code". Without this the module compiles and dies at instantiation on an
+  // internal builtin's message.
+  //
+  // Refusing here is late in the sense that createTagObjects() has already
+  // emitted the wasmMakeTag call -- it runs from createFunctions(), well
+  // before this -- but a refusal discards the half-built IR module, so that
+  // call is never reached. Not the same as the global check above, which runs
+  // BEFORE the export loops that would emit wasmMakeGlobal; only the tag one
+  // emits first and validates after.
+  if (LLVM_UNLIKELY(!validateTagTypes()))
     return false;
 
   // Ensure insertion is at the instantiate function's entry block.
@@ -1735,10 +2065,9 @@ bool WasmIRGen::finalizeModule() {
   // or null for segments that have been dropped.
   if (dataSegVar_) {
     uint32_t numSegs = moduleInfo_.dataSegments.size();
-    auto *Uint8ArrayCtor =
-        builder_.createTryLoadGlobalPropertyInst("Uint8Array");
+    auto *Uint8ArrayCtor = loadIntrinsic(tlScope, "Uint8Array");
     auto *segsArr = emitNew(
-        builder_.createTryLoadGlobalPropertyInst("Array"),
+        loadIntrinsic(tlScope, "Array"),
         {builder_.getLiteralNumber(static_cast<double>(numSegs))});
     builder_.createStoreFrameInst(tlScope, segsArr, dataSegVar_);
 
@@ -1746,10 +2075,11 @@ bool WasmIRGen::finalizeModule() {
       const auto &seg = moduleInfo_.dataSegments[si];
       if (seg.data.empty()) {
         // Empty segment: store null (same as dropped).
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             segsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         // Still advance binaryDataOffset for consistency with the blob.
         binaryDataOffset += seg.data.size();
         continue;
@@ -1768,10 +2098,11 @@ bool WasmIRGen::finalizeModule() {
               static_cast<double>(seg.data.size())),
           builder_.getLiteralNumber(0));
       binaryDataOffset += seg.data.size();
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           segArr,
           segsArr,
-          builder_.getLiteralNumber(static_cast<double>(si)));
+          builder_.getLiteralNumber(static_cast<double>(si)),
+          IRBuilder::PropEnumerable::Yes);
     }
   } else {
     // Even when dataSegVar_ is not set, we still need to advance
@@ -1931,23 +2262,27 @@ bool WasmIRGen::finalizeModule() {
       if (dataSegVar_) {
         auto *dataSegsArr = builder_.createLoadFrameInst(
             tlScope, dataSegVar_);
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             dataSegsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
       }
     }
   }
 
   // Initialize the element segments array (for table.init/elem.drop).
-  // Each element is a JS Array of Exported Functions, one per entry, or null
-  // for segments that have been dropped. Only the wrapper is stored: table.init
-  // writes through the slot funnel, which derives the closure and the interned
-  // type id from it, so a segment cannot describe a slot inconsistently.
+  // Each element is a JS Array holding one value per segment entry, or null
+  // for a segment that has been dropped. An entry's value is what
+  // emitElemItem() lowers it to: null, an Exported Function, or a global's
+  // value. For a funcref table that is the wrapper and nothing else --
+  // table.init writes through the slot funnel, which derives the closure and
+  // the interned type id from the wrapper, so a segment cannot describe a
+  // slot inconsistently.
   if (elemSegVar_) {
     uint32_t numElemSegs = moduleInfo_.elements.size();
     auto *elemsArr = emitNew(
-        builder_.createTryLoadGlobalPropertyInst("Array"),
+        loadIntrinsic(tlScope, "Array"),
         {builder_.getLiteralNumber(static_cast<double>(numElemSegs))});
     builder_.createStoreFrameInst(tlScope, elemsArr, elemSegVar_);
 
@@ -1956,55 +2291,52 @@ bool WasmIRGen::finalizeModule() {
 
       // Declarative segments are immediately dropped.
       if (seg.mode == WasmElemSegment::Mode::Declarative) {
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         continue;
       }
 
-      if (seg.funcIndices.empty()) {
+      if (seg.items.empty()) {
         // Empty segment: store null (same as dropped).
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
         continue;
       }
 
-      // Create the segment array: [exportedFunc0, exportedFunc1, ...]
-      uint32_t numEntries = seg.funcIndices.size();
+      // Create the segment array, one slot per entry, in segment order.
+      uint32_t numEntries = seg.items.size();
       auto *segArr = emitNew(
-          builder_.createTryLoadGlobalPropertyInst("Array"),
+          loadIntrinsic(tlScope, "Array"),
           {builder_.getLiteralNumber(static_cast<double>(numEntries))});
 
       for (uint32_t i = 0; i < numEntries; ++i) {
-        uint32_t funcIdx = seg.funcIndices[i];
-        // Every function index named by an element segment is in
-        // escapableFuncs_, so it has a canonical Exported Function; the null
-        // is for a segment naming an index this module does not have.
-        bool known =
-            funcIdx < exportedFuncVars_.size() && exportedFuncVars_[funcIdx];
-        builder_.createStorePropertyStrictInst(
-            known ? static_cast<Value *>(builder_.createLoadFrameInst(
-                        tlScope, exportedFuncVars_[funcIdx]))
-                  : builder_.getLiteralNull(),
+        builder_.createDefineOwnPropertyInst(
+            emitElemItem(seg.items[i], tlScope),
             segArr,
-            builder_.getLiteralNumber(static_cast<double>(i)));
+            builder_.getLiteralNumber(static_cast<double>(i)),
+            IRBuilder::PropEnumerable::Yes);
       }
 
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           segArr,
           elemsArr,
-          builder_.getLiteralNumber(static_cast<double>(si)));
+          builder_.getLiteralNumber(static_cast<double>(si)),
+          IRBuilder::PropEnumerable::Yes);
 
       // Active segments are dropped after their contents have been applied
       // (applied in createTables during createFunctions).
       if (seg.mode == WasmElemSegment::Mode::Active) {
-        builder_.createStorePropertyStrictInst(
+        builder_.createDefineOwnPropertyInst(
             builder_.getLiteralNull(),
             elemsArr,
-            builder_.getLiteralNumber(static_cast<double>(si)));
+            builder_.getLiteralNumber(static_cast<double>(si)),
+            IRBuilder::PropEnumerable::Yes);
       }
     }
   }
@@ -2032,6 +2364,22 @@ bool WasmIRGen::finalizeModule() {
   // the same object under all of them. Function, global, tag, memory, and
   // table exports are handled.
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});
+
+  // Every name below is DEFINED on this object, not assigned into it, and the
+  // same goes for the description objects the module factory builds.
+  //
+  // An ordinary store walks the prototype chain, and an object literal's
+  // prototype is Object.prototype, so an accessor installed there under an
+  // export's name intercepted the store: user JS ran inside instantiation with
+  // the half-built exports object as `this`, and the store was SWALLOWED, so
+  // the export was missing from the object entirely. Measured on a module
+  // exporting one of each kind: 25 accessor calls and not one export present.
+  //
+  // This is not the __wasm_type__ problem. That one also needed the published
+  // value to be unforgeable afterwards, which is why it needed an internal
+  // property; the exports object is handed to script by design and is frozen
+  // before the Instance is returned. All that was wrong here is the store
+  // consulting the prototype chain. See e2e-export-store-accessor.wat.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Function)
       continue;
@@ -2040,10 +2388,11 @@ bool WasmIRGen::finalizeModule() {
     assert(
         exp.index < exportedFuncVars_.size() && exportedFuncVars_[exp.index] &&
         "every exported function index must have a canonical wrapper");
-    builder_.createStorePropertyStrictInst(
+    builder_.createDefineOwnPropertyInst(
         builder_.createLoadFrameInst(tlScope, exportedFuncVars_[exp.index]),
         exportsObj,
-        builder_.getLiteralString(exp.name));
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add global exports as WebAssembly.Global objects. Each exported global is
@@ -2079,28 +2428,17 @@ bool WasmIRGen::finalizeModule() {
     if (importedMutableGlobals_.count(exp.index)) {
       auto *globalObj = builder_.createLoadFrameInst(
           tlScope, importGlobalVals_[exp.index]);
-      builder_.createStorePropertyStrictInst(
-          globalObj, exportsObj, builder_.getLiteralString(exp.name));
+      builder_.createDefineOwnPropertyInst(
+          globalObj,
+          exportsObj,
+          builder_.getLiteralString(exp.name),
+          IRBuilder::PropEnumerable::Yes);
       continue;
     }
 
     // Determine the global's type and mutability.
     uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-    WasmGlobalType gType{WasmValType::I32, false};
-    if (exp.index < numImportedGlobals) {
-      uint32_t idx = 0;
-      for (const auto &imp : moduleInfo_.imports) {
-        if (imp.kind != WasmExternalKind::Global)
-          continue;
-        if (idx == exp.index) {
-          gType = imp.globalType;
-          break;
-        }
-        ++idx;
-      }
-    } else {
-      gType = moduleInfo_.globals[exp.index - numImportedGlobals].type;
-    }
+    WasmGlobalType gType = globalTypeAt(exp.index);
 
     // Only a MUTABLE global this module DEFINES is published live. An
     // immutable one cannot go stale, and an imported mutable one is
@@ -2145,11 +2483,15 @@ bool WasmIRGen::finalizeModule() {
         builder_.getLiteralBool(gType.mutable_),
         valueOrGetter,
         setterOrUndefined);
-    builder_.createStorePropertyStrictInst(
-        globalObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        globalObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
-  // Add tag exports as plain objects with __wasm_type__ metadata.
+  // Publish the tag exports. Each is the WebAssembly.Tag createTagObjects
+  // built, or the one an import supplied.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Tag)
       continue;
@@ -2157,8 +2499,11 @@ bool WasmIRGen::finalizeModule() {
     // importer compares identity against it, so a copy would never match.
     assert(exp.index < tagVars_.size() && "tag index out of range");
     auto *tagObj = builder_.createLoadFrameInst(tlScope, tagVars_[exp.index]);
-    builder_.createStorePropertyStrictInst(
-        tagObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        tagObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add memory exports. There is nothing to construct: the module already
@@ -2172,10 +2517,11 @@ bool WasmIRGen::finalizeModule() {
     // Export that same object. Re-exporting an import this way also gives
     // the identity the spec requires, and its limits are its own, so nothing
     // can understate them.
-    builder_.createStorePropertyStrictInst(
+    builder_.createDefineOwnPropertyInst(
         builder_.createLoadFrameInst(tlScope, memObjVar_),
         exportsObj,
-        builder_.getLiteralString(exp.name));
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   // Add table exports as WebAssembly.Table objects. A funcref table -- one the
@@ -2185,8 +2531,8 @@ bool WasmIRGen::finalizeModule() {
   // internal fields through the wasmLinkTable brand check, so there is no
   // publication left to make and no forgeable copy of the ABI to leak.
   // Loaded lazily: only an externref table export needs the constructor now,
-  // and reading globalThis.WebAssembly.Table when nothing will use it would
-  // run a user getter for nothing.
+  // so a module without one emits neither the holder load nor the property
+  // reads.
   Value *wasmTableCtor = nullptr;
 
   for (const auto &exp : moduleInfo_.exports) {
@@ -2224,27 +2570,32 @@ bool WasmIRGen::finalizeModule() {
     // what the spec says and the only way the storage can still be shared now
     // that it lives in internal fields.
     if (tType.elemType == WasmValType::FuncRef) {
-      builder_.createStorePropertyStrictInst(
+      builder_.createDefineOwnPropertyInst(
           builder_.createLoadFrameInst(tlScope, tableObjVars_[exp.index]),
           exportsObj,
-          builder_.getLiteralString(exp.name));
+          builder_.getLiteralString(exp.name),
+          IRBuilder::PropEnumerable::Yes);
       continue;
     }
 
     // An EXTERNREF table has no WebAssembly.Table -- the constructor accepts
-    // only "anyfunc"/"funcref" -- so exporting one raises a TypeError from
-    // the constructor below at instantiate time. That is pre-existing and
+    // only "anyfunc"/"funcref" -- so exporting one NORMALLY raises a TypeError
+    // from the constructor below at instantiate time. That is pre-existing and
     // unchanged here; the code is kept rather than turned into a compile-time
-    // diagnostic because the diagnostic belongs with the rest of the
-    // externref work, not with this change. An IMPORTED externref table
-    // cannot link at all (no object can satisfy the declaration), so only the
-    // declared limits are used.
-    if (!wasmTableCtor) {
-      auto *wasmObj =
-          builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-      wasmTableCtor = builder_.createLoadPropertyInst(
-          wasmObj, builder_.getLiteralString("Table"));
-    }
+    // diagnostic because the diagnostic belongs with the rest of the externref
+    // work, not with this change.
+    //
+    // "Normally" is doing work in that sentence. The element type goes into
+    // the descriptor with an ordinary store, so an Object.prototype accessor
+    // named `element` swallows "externref" and answers "anyfunc" instead. The
+    // module then LINKS and publishes a genuine funcref Table for a table it
+    // declared as externref, whose storage has nothing to do with the module's
+    // externref arrays. Measured. Filed as 01a09e43-b6b6.
+    //
+    // An IMPORTED externref table cannot link at all (no object can satisfy
+    // the declaration), so only the declared limits are used.
+    if (!wasmTableCtor)
+      wasmTableCtor = loadWasmIntrinsic(tlScope, "Table");
     auto *descriptor = builder_.createAllocObjectLiteralInst({});
     builder_.createStorePropertyStrictInst(
         builder_.getLiteralString("externref"),
@@ -2265,8 +2616,11 @@ bool WasmIRGen::finalizeModule() {
 
     // Construct: new WebAssembly.Table(descriptor)
     auto *tableObj = emitNew(wasmTableCtor, {descriptor});
-    builder_.createStorePropertyStrictInst(
-        tableObj, exportsObj, builder_.getLiteralString(exp.name));
+    builder_.createDefineOwnPropertyInst(
+        tableObj,
+        exportsObj,
+        builder_.getLiteralString(exp.name),
+        IRBuilder::PropEnumerable::Yes);
   }
 
   builder_.createReturnInst(exportsObj);
@@ -2302,14 +2656,29 @@ void WasmIRGen::createExportedFunctions(BaseScopeInst *tlScope) {
   for (const auto &w : wrappers) {
     auto *wrapperClosure = builder_.createCreateFunctionInst(
         tlScope, w.wrapperFunc);
-    // Set __wasm_type__ on the wrapper closure for import type validation.
-    std::string typeStr =
-        buildFuncTypeString(moduleInfo_.getFunctionType(w.funcIndex));
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(typeStr),
-        wrapperClosure,
-        builder_.getLiteralString("__wasm_type__"));
-
+    // NOTHING IS PUBLISHED ON THE WRAPPER. It used to carry one ordinary
+    // own property, __wasm_type__, holding a signature string such as
+    // "func:i:i" that an importing module's type check compared against.
+    // That was wrong three ways at once, all of them measured:
+    //
+    //   - The store was an ordinary one, so it walked the prototype chain and
+    //     a setter on Function.prototype.__wasm_type__ ran user JS INSIDE
+    //     instantiation, with the module's own wrapper as `this`. Node runs
+    //     none.
+    //   - That setter SWALLOWED the store. A wrapper created while it was
+    //     installed carried no signature, so an importer handed that wrapper
+    //     fell through to the path accepting any callable. Wrappers made
+    //     before it was installed keep their own property and are still
+    //     checked, so this disables checking for everything instantiated
+    //     while the setter is in place, not retroactively.
+    //   - What did get stored arrived writable, enumerable and configurable
+    //     on an object handed straight to script, so a plain assignment
+    //     rewrote it afterwards and an importer compared against the forgery.
+    //
+    // The import check reads the interned type id stamped just below instead,
+    // which lives in an internal property: no name to assign to, so nothing
+    // to intercept, swallow or rewrite. See e2e-func-import-brand.wat.
+    //
     // Stamp the internal state that makes this an Exported Function: the
     // closure it wraps and the INTERNED id of its signature. Interned, not
     // module-local: the same signature is numbered differently in another
@@ -2485,21 +2854,25 @@ Function *WasmIRGen::createExportWrapper(
   if (retBufFVar_ && needsReturnBuffer(funcType)) {
     rbF = builder_.createLoadFrameInst(parentScope, retBufFVar_);
   }
-  // The reference array is not part of the calling convention; it is reached
-  // through the top-level scope like every other per-module object.
-  Value *rbR = nullptr;
-  auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
-    return rbR;
-  };
+  // The reference container is allocated HERE, for this one call, and read
+  // back below out of this same SSA value. Allocating it per call is what
+  // stops a reentrant call -- one started by a numeric accessor, or by a JS
+  // import this call reaches -- from writing the slots this activation is
+  // about to read.
+  Value *refBuf = nullptr;
+  if (needsRefBuffer(funcType)) {
+    refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+        static_cast<double>(refBufSlotCount(funcType))));
+  }
 
-  // If the internal function needs a return buffer, prepend retBufI/retBufF.
+  // If the internal function needs a return buffer, prepend retBufI/retBufF,
+  // then the reference container.
   if (needsReturnBuffer(funcType)) {
     callArgs.push_back(rbI);
     callArgs.push_back(rbF);
   }
+  if (refBuf)
+    callArgs.push_back(refBuf);
 
   for (uint32_t i = 0; i < numParams; ++i) {
     // JS param index: 0=this, 1..N=user params. getJSDynamicParam(1+i).
@@ -2551,8 +2924,26 @@ Function *WasmIRGen::createExportWrapper(
         callArgs.push_back(
             emitFround(builder_.createAsNumberInst(paramVal)));
         break;
+      case WasmValType::FuncRef:
+        // A funcref parameter of an EXPORTED function is a JS-to-Wasm
+        // conversion point that no setter covers: the body may do
+        // `local.get 0; global.set $g` into a funcref global it defines,
+        // which is a frame store with nothing in between. The test goes here,
+        // in argument order, so an earlier parameter's ToNumber still runs
+        // its valueOf before a later argument is refused.
+        callArgs.push_back(emitFuncRefCheck(
+            paramVal,
+            "Wasm call: funcref argument " + llvh::Twine(i) +
+                " requires null or a WebAssembly exported function"));
+        break;
+      case WasmValType::ExternRef:
+        // Any JS value is an externref. A test here would refuse a host
+        // reference the module is entitled to.
+        callArgs.push_back(paramVal);
+        break;
       default:
-        // FuncRef, ExternRef, etc: pass through for now.
+        // Whatever the arms above do not name -- V128 today -- is passed
+        // through as it always was.
         callArgs.push_back(paramVal);
         break;
     }
@@ -2590,13 +2981,31 @@ Function *WasmIRGen::createExportWrapper(
       builder_.createReturnInst(bigint);
     } else {
       // Multi-value: return a JS Array of results.
+      //
+      // Each result is read into an SSA value before the array is built, and
+      // the array is built from all of them at the end by a builtin that runs
+      // no script. The array used to come from globalThis.Array, called AFTER
+      // the internal call, with the buffer reads interleaved with indexed
+      // stores into whatever that constructor returned -- so a replacement
+      // constructor, or an indexed setter inherited from Array.prototype, saw
+      // each result and could substitute it, drop it, or re-enter an export
+      // between two of them.
+      //
+      // That is a claim about the ARRAY, not about the reads that fill it.
+      // The numeric reads below are ordinary indexed property loads on
+      // rbI/rbF, which are genuine typed arrays built from the pristine
+      // constructors -- see the retBuf view creation in createFunctions().
+      // An indexed load on one of those runs no script, so nothing can
+      // substitute a result or re-enter between two of them here.
+      //
+      // F32 and F64 share one arm of the read below and both go through the
+      // Float64Array, which does not round. That is correct because every
+      // producer of an f32 value rounds already, and a replaced Float64Array
+      // was the one way to get an unrounded double into an f32 slot -- see
+      // the retbuf view creation in createFunctions().
       auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
-      auto *ArrayCtor =
-          builder_.createTryLoadGlobalPropertyInst("Array");
-      auto *resultArr = emitNew(
-          ArrayCtor,
-          {builder_.getLiteralNumber(
-              static_cast<double>(funcType.results.size()))});
+      llvh::SmallVector<Value *, 8> resultVals;
+      resultVals.reserve(funcType.results.size());
       for (size_t i = 0; i < funcType.results.size(); ++i) {
         uint32_t byteOff = offsets[i];
         Value *val;
@@ -2630,12 +3039,12 @@ Function *WasmIRGen::createExportWrapper(
           }
           case WasmValType::FuncRef:
           case WasmValType::ExternRef: {
-            // The reference was stored into the parallel reference array, not
-            // into the Uint32Array view, so the real value is still here.
-            // No AsInt32Inst: a reference is not a number.
+            // The reference was stored into the container this wrapper passed
+            // to the call, not into the Uint32Array view, so the real value is
+            // still here. No AsInt32Inst: a reference is not a number.
             uint32_t idx = byteOff / 4;
-            val = builder_.createLoadPropertyInst(
-                getRbR(), builder_.getLiteralNumber(idx));
+            val = helpers_.emitRefBufGet(
+                refBuf, builder_.getLiteralNumber(idx));
             break;
           }
           default: {
@@ -2651,11 +3060,9 @@ Function *WasmIRGen::createExportWrapper(
             break;
           }
         }
-        builder_.createStorePropertyStrictInst(
-            val, resultArr,
-            builder_.getLiteralNumber(static_cast<double>(i)));
+        resultVals.push_back(val);
       }
-      builder_.createReturnInst(resultArr);
+      builder_.createReturnInst(helpers_.emitMakeResultArray(resultVals));
     }
   } else {
     // i32/f32/f64: return the call result directly.
@@ -2696,8 +3103,8 @@ void WasmIRGen::createImportTrampoline(
   // i32/f32/f64 → pass through (already JS Numbers).
   // i64 → convert split (lo, hi) to BigInt for JS.
   llvh::SmallVector<Value *, 8> jsArgs;
-  // Skip retBuf params if present.
-  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+  // Skip the hidden buffer params if present.
+  uint32_t jsParamIdx = firstWasmParamIndex(funcType);
 
   // Load retBuf params if this function uses them.
   Value *rbI = nullptr;
@@ -2708,13 +3115,15 @@ void WasmIRGen::createImportTrampoline(
     rbI = builder_.createLoadParamInst(paramI);
     rbF = builder_.createLoadParamInst(paramF);
   }
-  // The reference array is not a parameter; reach it through the top-level
-  // scope on demand, as the other reference-array users do.
+  // The reference container this trampoline RECEIVED. Its results are the
+  // caller's to read, so they go where the caller said, not into anything
+  // this module owns. It is never appended to the imported JS function's
+  // argument list below.
   Value *rbR = nullptr;
+  if (needsRefBuffer(funcType))
+    rbR = builder_.createLoadParamInst(func->getJSDynamicParam(3));
   auto getRbR = [&]() -> Value * {
-    assert(retBufRVar_ && "reference result but no reference array");
-    if (!rbR)
-      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
+    assert(rbR && "reference result but no reference container parameter");
     return rbR;
   };
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
@@ -2796,7 +3205,33 @@ void WasmIRGen::createImportTrampoline(
             vals.emplace_back(coerced, nullptr);
             break;
           }
+          case WasmValType::FuncRef:
+            // Tested here, in the pass that LOADS the element, and the value
+            // recorded is the one that was tested -- reading the element
+            // again for the store would let an accessor-backed array answer
+            // the test with one value and the store with another. Results
+            // are stored at their offsets in the second pass, so a refusal
+            // here happens before any result of this call has landed. (The
+            // buffer is not untouched: the i64 arm above uses rbI[0]/[1] as
+            // scratch in this pass.)
+            //
+            // A refusal at result i also abandons this loop, so the elements
+            // after i are never read. An accessor-backed array therefore sees
+            // fewer property reads than it did when nothing was tested.
+            vals.emplace_back(
+                emitFuncRefCheck(
+                    jsVal,
+                    "Wasm import: funcref result " + llvh::Twine(i) +
+                        " requires null or a WebAssembly exported function"),
+                nullptr);
+            break;
+          case WasmValType::ExternRef:
+            // Any JS value is an externref; nothing to test.
+            vals.emplace_back(jsVal, nullptr);
+            break;
           default:
+            // Whatever the arms above do not name -- V128 today -- is
+            // recorded as it always was.
             vals.emplace_back(jsVal, nullptr);
             break;
         }
@@ -2822,11 +3257,12 @@ void WasmIRGen::createImportTrampoline(
           case WasmValType::ExternRef:
             // The JS value passes through untouched on the way in (see the
             // parameter loop above); on the way out it must go to the
-            // reference array, since the Uint32Array view would coerce it
+            // reference container, since the Uint32Array view would coerce it
             // to 0.
-            builder_.createStorePropertyStrictInst(
-                vals[i].first, getRbR(),
-                builder_.getLiteralNumber(byteOff / 4));
+            helpers_.emitRefBufSet(
+                getRbR(),
+                builder_.getLiteralNumber(byteOff / 4),
+                vals[i].first);
             break;
           default:
             // V128: still unsupported. Keep the existing behavior.
@@ -2855,8 +3291,22 @@ void WasmIRGen::createImportTrampoline(
       case WasmValType::F64:
         builder_.createReturnInst(builder_.createAsNumberInst(callResult));
         break;
+      case WasmValType::FuncRef:
+        // The other JS-to-Wasm conversion point no setter covers: whatever
+        // the imported JS function returned becomes a funcref on the Wasm
+        // stack of the caller, which can store it anywhere a funcref goes.
+        builder_.createReturnInst(emitFuncRefCheck(
+            callResult,
+            "Wasm import: funcref result 0 requires null or a WebAssembly "
+            "exported function"));
+        break;
+      case WasmValType::ExternRef:
+        // Any JS value is an externref; nothing to test.
+        builder_.createReturnInst(callResult);
+        break;
       default:
-        // FuncRef, ExternRef, etc: pass through for now.
+        // Whatever the arms above do not name -- V128 today -- is passed
+        // through as it always was.
         builder_.createReturnInst(callResult);
         break;
     }
@@ -2901,12 +3351,20 @@ void WasmIRGen::beginFunction(
   // Load return buffer views for this function.
   retBufI_ = nullptr;
   retBufF_ = nullptr;
+  refBuf_ = nullptr;
   if (needsReturnBuffer(funcType)) {
     // Function receives retBufI and retBufF as its first two params.
     auto *paramI = currentFunc_->getJSDynamicParam(1);
     auto *paramF = currentFunc_->getJSDynamicParam(2);
     retBufI_ = builder_.createLoadParamInst(paramI);
     retBufF_ = builder_.createLoadParamInst(paramF);
+    // And, for a signature with a reference result, the container that
+    // carries it, at param 3. This is the container this function's own
+    // returns write to; a nested call gets a freshly allocated one instead
+    // (see onCall).
+    if (needsRefBuffer(funcType))
+      refBuf_ =
+          builder_.createLoadParamInst(currentFunc_->getJSDynamicParam(3));
   } else if (retBufIVar_) {
     // Function doesn't receive buffer params but may do i64 arithmetic.
     // Load retBufI from the top-level scope.
@@ -2925,8 +3383,8 @@ void WasmIRGen::beginFunction(
 
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
-  // Skip retBuf params (indices 1,2) if this function has them.
-  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+  // Skip the hidden buffer params if this function has them.
+  uint32_t jsParamIdx = firstWasmParamIndex(funcType);
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
     if (funcType.params[i] == WasmValType::I64) {
@@ -3101,6 +3559,7 @@ void WasmIRGen::endFunction() {
   parentScopeInst_ = nullptr;
   retBufI_ = nullptr;
   retBufF_ = nullptr;
+  refBuf_ = nullptr;
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
@@ -3194,6 +3653,14 @@ void WasmIRGen::onLocalTee(uint32_t localIndex) {
 void WasmIRGen::onReturn() {
   if (unreachable_)
     return;
+
+  // A return leaves every protected region it is inside, so it closes all of
+  // them rather than a branch's crossed subset. The verifier enforces this
+  // one directly: a ReturnInst under an open try is "Try %0 has not been
+  // closed". This runs before the return sequence is emitted so that none of
+  // it sits inside a region the function is done with.
+  if (!controlStack_.empty())
+    emitBranchTryEnds(controlStack_.size() - 1);
 
   const WasmFuncType &funcType =
       moduleInfo_.getFunctionType(currentFuncIndex_);
@@ -3777,15 +4244,7 @@ void WasmIRGen::onEnd() {
       // Try was pushed in unreachable context — no real IR generated.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -3838,19 +4297,12 @@ void WasmIRGen::onEnd() {
     if (entry.outerUnreachable) {
       // This block/if was entered in unreachable context (e.g., inside dead
       // code after a br/return). No real IR was generated. Just restore state
-      // and remain unreachable. Push placeholder values for the result types
-      // so the value stack has the right shape for outer code.
+      // and remain unreachable. The pushUndefinedResults call below is a
+      // no-op while unreachable_, as it is here; the enclosing live construct
+      // restores the stack and its own results later.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -3904,15 +4356,7 @@ void WasmIRGen::onEnd() {
       // Loop entered in unreachable context — no real IR generated.
       valueStack_.resize(entry.stackHeight);
       valueStackIsI64Hi_.resize(entry.stackHeight);
-      for (auto t : entry.resultTypes) {
-        if (t == WasmValType::I64) {
-          push(builder_.getLiteralUndefined());
-          push(builder_.getLiteralUndefined());
-          valueStackIsI64Hi_.back() = true;
-        } else {
-          push(builder_.getLiteralUndefined());
-        }
-      }
+      pushUndefinedResults(entry.resultTypes);
       unreachable_ = true;
       return;
     }
@@ -3921,9 +4365,10 @@ void WasmIRGen::onEnd() {
 
     if (fallsThrough) {
       // Add phi operands to the end block from the fallthrough path.
-      // We handle this directly here rather than via addBranchPhiOperands,
-      // because addBranchPhiOperands skips Loop entries (since br to a
-      // loop targets the header, not the end block).
+      // Directly rather than via addBranchPhiOperands: handed a Loop entry
+      // that fills the HEADER's parameter phis, because that is where a br
+      // to a loop goes. The exit block's result phis are only ever filled
+      // here.
       if (!entry.resultPhis.empty()) {
         auto *currentBlock = builder_.getInsertionBlock();
         size_t numPhis = entry.resultPhis.size();
@@ -3970,6 +4415,11 @@ void WasmIRGen::onBr(uint32_t depth) {
   ControlEntry &entry = getControlEntry(depth);
   entry.branchTargeted = true;
 
+  // Leave every protected region the branch crosses. This moves the insertion
+  // point, so it has to happen before the phi operands are recorded: they
+  // must name the block that actually branches to the continuation.
+  emitBranchTryEnds(depth);
+
   // Add phi operands for the branch target.
   addBranchPhiOperands(entry);
 
@@ -3997,12 +4447,22 @@ void WasmIRGen::onBrIf(uint32_t depth) {
   // Create a fallthrough block for when the condition is false.
   auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
 
-  // If the block has results, peek at the value stack (don't pop) and add
-  // phi operands from the branch-taken path. Values stay for fallthrough.
-  peekBranchPhiOperands(entry);
-
-  // Emit conditional branch: non-zero condition branches to target.
-  builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
+  // Peek rather than pop: the values stay on the stack for the fallthrough.
+  if (branchLeavesTryBody(depth)) {
+    // The regions are left only on the TAKEN edge, so the chain needs a block
+    // of its own for the condition to select. The phi operands are recorded
+    // at the end of it, which is where the branch to the continuation is.
+    auto *takenBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(cond, takenBlock, fallthroughBlock);
+    builder_.setInsertionBlock(takenBlock);
+    emitBranchTryEnds(depth);
+    peekBranchPhiOperands(entry);
+    builder_.createBranchInst(entry.contBlock);
+  } else {
+    peekBranchPhiOperands(entry);
+    // Emit conditional branch: non-zero condition branches to target.
+    builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
+  }
 
   // Continue generating code in the fallthrough block.
   builder_.setInsertionBlock(fallthroughBlock);
@@ -4064,38 +4524,19 @@ void WasmIRGen::onBrTable(
 
     builder_.setInsertionBlock(trampoline);
 
-    // Add phi operands. For Block/If entries, peek at the value stack and
-    // add values as phi incoming edges (the values were on the stack before
-    // the index was popped, so they're still there).
-    if ((entry.kind == ControlEntry::Block ||
-         entry.kind == ControlEntry::If) &&
-        !entry.resultPhis.empty()) {
-      size_t numPhis = entry.resultPhis.size();
-      size_t available = valueStack_.size();
-      for (size_t i = 0; i < numPhis; ++i) {
-        Value *val;
-        if (available >= numPhis) {
-          val = valueStack_[available - numPhis + i];
-        } else {
-          val = builder_.getLiteralUndefined();
-        }
-        entry.resultPhis[i]->addEntry(val, trampoline);
-      }
-    }
-    // For Loop entries, br targets the header and passes param values.
-    if (entry.kind == ControlEntry::Loop && !entry.paramPhis.empty()) {
-      size_t numPhis = entry.paramPhis.size();
-      size_t available = valueStack_.size();
-      for (size_t i = 0; i < numPhis; ++i) {
-        Value *val;
-        if (available >= numPhis) {
-          val = valueStack_[available - numPhis + i];
-        } else {
-          val = builder_.getLiteralUndefined();
-        }
-        entry.paramPhis[i]->addEntry(val, trampoline);
-      }
-    }
+    // Each target leaves its own set of regions, so the chain goes inside the
+    // trampoline rather than before the dispatch.
+    emitBranchTryEnds(depth);
+
+    // Peek rather than pop: every trampoline reads the same values, and they
+    // are still on the stack because only the index was popped. The insertion
+    // block is wherever the chain above ended, so that is the predecessor the
+    // operands are recorded against.
+    //
+    // This used to be two loops written out here, and they had drifted: they
+    // admitted Block and If but not Try, so a br_table targeting a `try`
+    // reached its continuation contributing nothing.
+    peekBranchPhiOperands(entry);
 
     builder_.createBranchInst(entry.contBlock);
   }
@@ -4171,6 +4612,22 @@ void WasmIRGen::onSelect() {
 
 // --- Function calls (D.12) ---
 
+Value *WasmIRGen::emitNestedCallRefBuf(
+    const WasmFuncType &funcType,
+    llvh::SmallVectorImpl<Value *> &args) {
+  if (!needsRefBuffer(funcType))
+    return nullptr;
+  // A container allocated for THIS call, sized for the CALLEE's signature,
+  // and read back by the caller out of the value returned here. Forwarding
+  // the container this function received would be too small whenever the
+  // nested signature has more results, and reaching for one through module
+  // scope is what let a caller read a slot a cross-module callee never wrote.
+  auto *refBuf = helpers_.emitAllocRefBuf(builder_.getLiteralNumber(
+      static_cast<double>(refBufSlotCount(funcType))));
+  args.push_back(refBuf);
+  return refBuf;
+}
+
 void WasmIRGen::onCall(uint32_t funcIndex) {
   if (unreachable_)
     return;
@@ -4198,15 +4655,20 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     }
   }
   // Build the JS arg list in forward order.
-  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  // If the callee needs a return buffer, prepend retBufI and retBufF, then the
+  // reference container.
+  // Held rather than discarded: emitRetBufLoads below reads the results back
+  // out of these very values, not out of anything reached again from module
+  // scope or from this function's own parameters.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
   if (needsReturnBuffer(funcType)) {
-    auto *rbI = builder_.createLoadFrameInst(
-        parentScopeInst_, retBufIVar_);
-    auto *rbF = builder_.createLoadFrameInst(
-        parentScopeInst_, retBufFVar_);
+    rbI = builder_.createLoadFrameInst(parentScopeInst_, retBufIVar_);
+    rbF = builder_.createLoadFrameInst(parentScopeInst_, retBufFVar_);
     args.push_back(rbI);
     args.push_back(rbF);
   }
+  Value *refBuf = emitNestedCallRefBuf(funcType, args);
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -4239,7 +4701,7 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
-    emitRetBufLoads(funcType);
+    emitRetBufLoads(funcType, rbI, rbF, refBuf);
   } else if (!funcType.results.empty()) {
     // Single non-buffer result: push the JS return value.
     push(call);
@@ -4274,15 +4736,20 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
     }
   }
   // Build the JS arg list in forward order.
-  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  // If the callee needs a return buffer, prepend retBufI and retBufF, then the
+  // reference container.
+  // Held rather than discarded: emitRetBufLoads below reads the results back
+  // out of these very values, not out of anything reached again from module
+  // scope or from this function's own parameters.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
   if (needsReturnBuffer(funcType)) {
-    auto *rbI = builder_.createLoadFrameInst(
-        parentScopeInst_, retBufIVar_);
-    auto *rbF = builder_.createLoadFrameInst(
-        parentScopeInst_, retBufFVar_);
+    rbI = builder_.createLoadFrameInst(parentScopeInst_, retBufIVar_);
+    rbF = builder_.createLoadFrameInst(parentScopeInst_, retBufFVar_);
     args.push_back(rbI);
     args.push_back(rbF);
   }
+  Value *refBuf = emitNestedCallRefBuf(funcType, args);
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -4325,7 +4792,7 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
-    emitRetBufLoads(funcType);
+    emitRetBufLoads(funcType, rbI, rbF, refBuf);
   } else if (!funcType.results.empty()) {
     // Single non-buffer result: push the JS return value.
     push(call);
@@ -5419,13 +5886,22 @@ void WasmIRGen::onNop() {
 
 // --- Exception handling (L.1) ---
 
-void WasmIRGen::onTry(const std::vector<WasmValType> &resultTypes) {
+void WasmIRGen::onTry(
+    const std::vector<WasmValType> &paramTypes,
+    const std::vector<WasmValType> &resultTypes) {
+  // Count param stack slots (i64 params use 2 slots).
+  size_t numParamSlots = 0;
+  for (auto t : paramTypes) {
+    numParamSlots += (t == WasmValType::I64) ? 2 : 1;
+  }
+
   if (unreachable_) {
     // Push a dummy Try entry so onEnd/onCatch can pop it.
     ControlEntry entry;
     entry.kind = ControlEntry::Try;
     entry.contBlock = nullptr;
     entry.catchBlock = nullptr;
+    entry.paramTypes = paramTypes;
     entry.resultTypes = resultTypes;
     entry.stackHeight = valueStack_.size();
     entry.outerUnreachable = true;
@@ -5448,8 +5924,13 @@ void WasmIRGen::onTry(const std::vector<WasmValType> &resultTypes) {
   entry.kind = ControlEntry::Try;
   entry.contBlock = contBlock; // br target and end continuation
   entry.catchBlock = catchBlock;
+  entry.paramTypes = paramTypes;
   entry.resultTypes = resultTypes;
-  entry.stackHeight = valueStack_.size();
+  // Below the params, as onBlock does, so they are part of the try body's
+  // accessible stack. This is also the height a handler runs at: an
+  // exception unwinds past the params the body consumed, so a handler sees
+  // the stack as it was before they were pushed.
+  entry.stackHeight = valueStack_.size() - numParamSlots;
   entry.outerUnreachable = unreachable_;
 
   // Create phi nodes in the continuation block for results.
@@ -5479,6 +5960,20 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
+      // The try body's results are the try's results on this edge, so they
+      // have to reach the continuation's phis like any other incoming edge.
+      // Without this the phi had one operand for two predecessors, and the
+      // operand it did have was the catch handler's payload load -- which
+      // does not dominate the continuation, so the lowered IR verifier
+      // rejected the function outright:
+      //
+      //   Operand %8 must dominate the Instruction %2
+      //
+      // branchTargeted for the same reason the explicit branches below set
+      // it: onEnd decides whether the continuation is reachable from it, and
+      // this edge reaches it whether or not any handler falls through.
+      addBranchPhiOperands(entry);
+      entry.branchTargeted = true;
       // End the try body: TryEndInst exits the protected region.
       builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
     }
@@ -5536,6 +6031,18 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
   // The array layout is: [tagIndex, v0, v1, ...]
   // where i64 values occupy two consecutive slots (lo, hi).
   // Payload values start at array index 1.
+  //
+  // The match above reads element 0 and nothing else -- see
+  // wasmMatchException in lib/VM/JSLib/HermesBuiltin.cpp, which compares that
+  // element against the tag and returns the array unexamined. So the loads
+  // below are where a funcref payload item is first seen, and where it is
+  // tested. The test is applied to `val` -- the result of the one
+  // LoadPropertyInst that also feeds push() -- rather than to a second read
+  // of the same index, because a payload item can be an accessor: reading it
+  // twice would let it answer the test with one value and hand the Wasm
+  // stack another. test/wasm/e2e-exception-payload-ref.wat counts the reads
+  // and compares the delivered value against the one the first read
+  // returned.
   const WasmFuncType &tagType = moduleInfo_.getTagType(tagIndex);
   uint32_t arrIdx = 1; // Start after tagIndex at position 0.
   for (size_t i = 0; i < tagType.params.size(); ++i) {
@@ -5549,7 +6056,24 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
       pushI64(val, hiVal);
       arrIdx += 2;
     } else {
-      push(val);
+      // ExternRef is deliberately not tested: any JS value is a valid
+      // externref, so a test on that arm would refuse a host reference the
+      // module is entitled to.
+      Value *pushVal = val;
+      if (tagType.params[i] == WasmValType::FuncRef) {
+        // A rejected item raises a TypeError rather than falling through to
+        // entry.nextCatchBlock: the tag DID match, and answering "no match"
+        // here would hand the exception to an outer handler or rethrow it,
+        // hiding the refusal. The refusal also abandons this loop -- the
+        // loads for the items after i are emitted after the test, on the
+        // path the test passes -- so those items are never read.
+        pushVal = emitBodyFuncRefCheck(
+            val,
+            "Wasm catch: funcref payload " + llvh::Twine(i) +
+                " requires null or a WebAssembly exported function");
+        assert(pushVal == val && "the test must hand back what it tested");
+      }
+      push(pushVal);
       arrIdx += 1;
     }
   }
@@ -5570,6 +6094,10 @@ void WasmIRGen::onCatchAll() {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
+      // The try body's results reach the continuation on this edge too --
+      // see the comment on the same three lines in onCatch.
+      addBranchPhiOperands(entry);
+      entry.branchTargeted = true;
       builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
     }
 
@@ -5678,19 +6206,30 @@ void WasmIRGen::onDelegate(uint32_t depth) {
 
   bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
-  // End the try body. delegate pops the try entry.
-  // If the delegate targets an enclosing try, exceptions are forwarded there.
-  // For simplicity in Phase 1, we end the try body normally and let the
-  // catch block re-throw (which the outer try will catch).
+  // The body's own edge to the continuation, as for any try.
   if (fallsThrough) {
     addBranchPhiOperands(entry);
     builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
   }
 
-  // The catch block re-throws unconditionally (delegate just forwards).
+  // The synthetic handler rethrows, and WHERE it rethrows from is the whole
+  // of what `delegate` means: the exception has to arrive as though it had
+  // been thrown at the target label's position. So the handler first leaves
+  // every protected region the delegation skips -- those strictly between
+  // this try and the target -- and throws inside whatever region is left.
+  //
+  // This entry has already been popped, so depth counts from the enclosing
+  // scope, which is how `delegate l` numbers its label. The target's own
+  // region is deliberately NOT left: if the target is a try whose body is
+  // active, that is the one the exception is being handed to. A target that
+  // is a block or a loop, or a try whose HANDLER is running -- whose region
+  // ended when that handler started -- has no region of its own to leave, and
+  // the throw lands in whatever encloses it.
   auto *savedBlock = builder_.getInsertionBlock();
   builder_.setInsertionBlock(entry.catchBlock);
   auto *caught = builder_.createCatchInst();
+  if (depth > 0)
+    emitBranchTryEnds(depth - 1);
   builder_.createThrowInst(caught);
   builder_.setInsertionBlock(savedBlock);
 
@@ -5832,6 +6371,39 @@ std::vector<PhiInst *> WasmIRGen::createResultPhis(
   return phis;
 }
 
+bool WasmIRGen::crossingLeavesTryBody(const ControlEntry &entry) {
+  // catchBlock is null for the dummy entry pushed in unreachable code, which
+  // has no region at all.
+  return entry.kind == ControlEntry::Try && !entry.inCatch && entry.catchBlock;
+}
+
+bool WasmIRGen::branchLeavesTryBody(uint32_t depth) {
+  for (uint32_t i = 0; i <= depth; ++i) {
+    if (crossingLeavesTryBody(getControlEntry(i)))
+      return true;
+  }
+  return false;
+}
+
+void WasmIRGen::emitBranchTryEnds(uint32_t depth) {
+  // Up to and INCLUDING the target: a br whose target is the try itself
+  // leaves its body too, since the target is the try's continuation.
+  //
+  // Innermost first. A TryEndInst ends exactly one level, and both consumers
+  // read the chain that way: the verifier tracks the innermost enclosing try
+  // per block and requires each TryEndInst's catch target to match it, and
+  // Exceptions.cpp hands the block after a TryEndInst back to the enclosing
+  // level, which then meets the next one.
+  for (uint32_t i = 0; i <= depth; ++i) {
+    ControlEntry &crossed = getControlEntry(i);
+    if (!crossingLeavesTryBody(crossed))
+      continue;
+    auto *next = builder_.createBasicBlock(currentFunc_);
+    builder_.createTryEndInst(crossed.catchBlock, next);
+    builder_.setInsertionBlock(next);
+  }
+}
+
 void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
   if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If ||
        entry.kind == ControlEntry::Try) &&
@@ -5922,6 +6494,24 @@ void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
   }
 }
 
+void WasmIRGen::pushUndefinedResults(
+    const std::vector<WasmValType> &resultTypes) {
+  for (auto t : resultTypes) {
+    push(builder_.getLiteralUndefined());
+    if (t != WasmValType::I64)
+      continue;
+    push(builder_.getLiteralUndefined());
+    // Only when the push actually landed. push() is a no-op while
+    // unreachable_, which every caller is, and then the top of the stack is
+    // not this pair's high word: it is either nothing at all, where back() is
+    // an invalid access on an empty vector, or a slot belonging to an
+    // enclosing block, which marking would label an i64 high word for
+    // whatever reads it later.
+    if (!unreachable_)
+      valueStackIsI64Hi_.back() = true;
+  }
+}
+
 void WasmIRGen::pushResultPhis(const ControlEntry &entry) {
   size_t phiIdx = 0;
   for (auto t : entry.resultTypes) {
@@ -5951,6 +6541,84 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
   auto *call = builder_.createCallInst(
       constructor, constructor, thisArg, args);
   return builder_.createGetConstructedObjectInst(thisArg, call);
+}
+
+Value *WasmIRGen::emitFuncRefCheck(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  // This entry point is for the two Functions built outside
+  // begin/endFunction -- the export wrapper and the import trampoline. The
+  // ThrowTypeErrorInst below keeps the nullptr catch target it is given:
+  // hermes::fixupCatchTargets (lib/IR/Analysis.cpp) is what supplies a real
+  // one to a BaseThrowInst inside a `try`, and endFunction() runs it over
+  // currentFunc_ when a body is finished, which neither of these reaches.
+  // Their nullptr is therefore final, and right while they build no `try`.
+  assert(
+      builder_.getInsertionBlock()->getParent() != currentFunc_ &&
+      "emitFuncRefCheck is for wrappers and trampolines; a function body "
+      "wants emitBodyFuncRefCheck");
+  return emitFuncRefCheckImpl(value, diagnostic);
+}
+
+Value *WasmIRGen::emitBodyFuncRefCheck(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  // The body counterpart. Here the ThrowTypeErrorInst's nullptr catch target
+  // is a placeholder rather than an answer: endFunction() calls
+  // hermes::fixupCatchTargets(currentFunc_), which walks every block with its
+  // enclosing TryStartInst and rewrites the catch target of any BaseThrowInst
+  // terminator -- ThrowTypeErrorInst is one. So a throw emitted here inside a
+  // Wasm `try` ends up targeting that try's catch dispatch.
+  //
+  // That has a consequence worth stating rather than discovering: a module
+  // that wraps its work in `catch_all` SWALLOWS a refusal raised by this
+  // helper instead of surfacing it to JS. `catch_nested` in
+  // test/wasm/e2e-exception-payload-ref.wat is that case end to end, and
+  // answers 3 -- the outer handler -- rather than throwing out.
+  //
+  // It is a tradeoff, not a plainly right answer. What recommends it is that
+  // it matches what `catch_all` already does here: see onCatchAll's "Phase 1:
+  // catches everything including traps (known spec deviation)". A refusal
+  // that escaped `catch_all` while a Wasm trap did not would give one handler
+  // two swallowing rules. The alternative -- a refusal no handler in the
+  // module can intercept -- means a BaseThrowInst that deliberately keeps a
+  // catch target its enclosing try disagrees with, which fixupCatchTargets
+  // has no way to express: it rewrites every BaseThrowInst it walks. Buying
+  // it would cost a flag on the instruction or a carve-out in an IR analysis
+  // the whole compiler shares.
+  assert(
+      builder_.getInsertionBlock()->getParent() == currentFunc_ &&
+      "emitBodyFuncRefCheck emits into the body being compiled");
+  return emitFuncRefCheckImpl(value, diagnostic);
+}
+
+Value *WasmIRGen::emitFuncRefCheckImpl(
+    Value *value,
+    const llvh::Twine &diagnostic) {
+  auto *func = builder_.getInsertionBlock()->getParent();
+  auto *checkBrandBB = builder_.createBasicBlock(func);
+  auto *throwBB = builder_.createBasicBlock(func);
+  auto *okBB = builder_.createBasicBlock(func);
+
+  // `null` first, because the predicate answers false for it and a null
+  // funcref is a legal value of the type.
+  auto *isNull = builder_.createBinaryOperatorInst(
+      value,
+      builder_.getLiteralNull(),
+      ValueKind::BinaryStrictlyEqualInstKind);
+  builder_.createCondBranchInst(isNull, okBB, checkBrandBB);
+
+  builder_.setInsertionBlock(checkBrandBB);
+  auto *branded = helpers_.emitIsExportedFunction(value);
+  builder_.createCondBranchInst(branded, okBB, throwBB);
+
+  // The catch target is left nullptr here; what becomes of it depends on
+  // which entry point was used, and both of those explain it.
+  builder_.setInsertionBlock(throwBB);
+  builder_.createThrowTypeErrorInst(builder_.getLiteralString(diagnostic));
+
+  builder_.setInsertionBlock(okBB);
+  return value;
 }
 
 void WasmIRGen::createMemoryViews(Instruction *tlScope) {
@@ -5987,9 +6655,7 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
           descriptor,
           builder_.getLiteralString("maximum"));
     }
-    auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-    auto *memCtor = builder_.createLoadPropertyInst(
-        wasmObj, builder_.getLiteralString("Memory"));
+    auto *memCtor = loadWasmIntrinsic(tlScope, "Memory");
     auto *memObj = emitNew(memCtor, {descriptor});
     builder_.createStoreFrameInst(tlScope, memObj, memObjVar_);
     // Take the buffer out of the memory's internal field, through the same
@@ -6003,12 +6669,14 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     // cross-module: wasmLinkMemory would hand an importer a buffer that was
     // provably not this module's linear memory.
     //
-    // The brand check CAN fail here: `globalThis.WebAssembly.Memory` is an
-    // ordinary property and script may replace it with a constructor that
-    // returns anything. Without the branch, `.buffer` yielded undefined,
-    // `new Uint8Array(undefined)` gave a zero-length view, and instantiation
-    // SUCCEEDED with a memory of no pages -- every access silently out of
-    // bounds. Report it by name instead.
+    // The constructor is the pristine WebAssembly.Memory out of
+    // HermesInternal.intrinsics, so what used to make this branch reachable
+    // -- a replaced `globalThis.WebAssembly.Memory` returning anything at
+    // all -- is closed. The branch stays as the named diagnostic for a link
+    // failure, because what it replaced was silence: without it `.buffer`
+    // yielded undefined, `new Uint8Array(undefined)` gave a zero-length
+    // view, and instantiation SUCCEEDED with a memory of no pages, every
+    // access silently out of bounds.
     auto *linked = helpers_.emitLinkMemory(memObj);
     auto *ctorFunc = builder_.getInsertionBlock()->getParent();
     auto *ctorBadBB = builder_.createBasicBlock(ctorFunc);
@@ -6027,13 +6695,19 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     builder_.createUnreachableInst();
     builder_.setInsertionBlock(ctorOkBB);
 
-    // The brand is not the whole of it. A hostile constructor can return a
-    // GENUINE WebAssembly.Memory with limits of its own choosing, and the
-    // declaration's limits are compile-time constants of what this module
-    // ASKED FOR, not of what came back. Checking only the brand was the same
-    // "validate one object, use another" shape one level down. Reproduced
-    // before this check existed: declare `(memory 1 4)`, return a memory
-    // built with `{initial: 1, maximum: 2}`, and the module's memory.grow --
+    // The brand is not the whole of it, and a pristine constructor does not
+    // make it so. The limits a construction honours come out of a DESCRIPTOR
+    // built just above with ordinary strict stores, and those walk the
+    // prototype chain: an accessor named `initial` or `maximum` installed on
+    // Object.prototype swallows the store and answers the constructor's read
+    // with a number of its own choosing. The result is a GENUINE
+    // WebAssembly.Memory with limits nobody declared, while the declaration's
+    // limits are compile-time constants of what this module ASKED FOR.
+    // Checking only the brand was the same "validate one object, use another"
+    // shape one level down. Reproduced before this check existed, then by a
+    // replaced constructor and now by that descriptor accessor: declare
+    // `(memory 1 4)`, obtain a memory built with `{initial: 1, maximum: 2}`,
+    // and the module's memory.grow --
     // which uses the compile-time literal 4 for a defined memory -- grows it
     // to four pages, past the substituted object's own maximum, leaving
     // maxPages_ at 2 with a four-page buffer:
@@ -6050,10 +6724,11 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
     // supplied memory satisfy a declaration", it is "did the constructor
     // build the memory this module asked for". A genuine construction always
     // yields exactly the requested pages, and exactly the requested maximum
-    // or -1 when none was requested, so anything else means the descriptor or
-    // the constructor was interfered with. (The descriptor is reachable too:
-    // it is a fresh object literal, and its `initial`/`maximum` stores walk
-    // the prototype chain, so a setter on Object.prototype can rewrite them.)
+    // or -1 when none was requested, so anything else means the descriptor
+    // was interfered with. The constructor can no longer be: it comes from
+    // HermesInternal.intrinsics. The descriptor still can, which is what
+    // keeps this check load-bearing -- see
+    // test/wasm/e2e-pristine-descriptor.wat.
     auto *actualPages = builder_.createLoadPropertyInst(
         linked, builder_.getLiteralNumber(0));
     auto *actualMax = builder_.createLoadPropertyInst(
@@ -6091,7 +6766,7 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
   } else {
     // No memory at all -- only reached if createMemoryViews() is called
     // without a memory, which hasMemory guards against.
-    auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+    auto *abCtor = loadIntrinsic(tlScope, "ArrayBuffer");
     buffer = emitNew(abCtor, {builder_.getLiteralNumber(0)});
   }
 
@@ -6107,10 +6782,32 @@ void WasmIRGen::createMemoryViews(Instruction *tlScope) {
       "Float64Array",
   };
   for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
-    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *ctor = loadIntrinsic(tlScope, ctorNames[i]);
     auto *view = emitNew(ctor, {buffer});
     builder_.createStoreFrameInst(tlScope, view, memViewVars_[i]);
   }
+}
+
+Value *WasmIRGen::loadIntrinsicsHolder() {
+  return builder_.createLoadPropertyInst(
+      builder_.createTryLoadGlobalPropertyInst("HermesInternal"),
+      builder_.getLiteralString("intrinsics"));
+}
+
+Value *WasmIRGen::loadIntrinsicFrom(Value *holder, llvh::StringRef name) {
+  return builder_.createLoadPropertyInst(
+      holder, builder_.getLiteralString(name));
+}
+
+Value *WasmIRGen::loadIntrinsic(Instruction *scope, llvh::StringRef name) {
+  return loadIntrinsicFrom(
+      builder_.createLoadFrameInst(scope, intrinsicsVar_), name);
+}
+
+Value *WasmIRGen::loadWasmIntrinsic(Instruction *scope, llvh::StringRef name) {
+  auto *wasmIntrinsics = loadIntrinsic(scope, "WebAssembly");
+  return builder_.createLoadPropertyInst(
+      wasmIntrinsics, builder_.getLiteralString(name));
 }
 
 Value *WasmIRGen::loadMemView(MemView view) {
@@ -6966,7 +7663,7 @@ void WasmIRGen::onMemoryGrow() {
       "Float64Array",
   };
   for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
-    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *ctor = loadIntrinsic(parentScopeInst_, ctorNames[i]);
     auto *view = emitNew(ctor, {result});
     builder_.createStoreFrameInst(parentScopeInst_, view, memViewVars_[i]);
   }
@@ -7041,20 +7738,33 @@ void WasmIRGen::onDataDrop(uint32_t segmentIndex) {
 
 // --- Table operations (J.1) ---
 
+llvh::SmallVector<Value *, 4> WasmIRGen::tagTypeCodes(
+    const WasmFuncType &ft) {
+  llvh::SmallVector<Value *, 4> codes;
+  for (auto p : ft.params)
+    codes.push_back(
+        builder_.getLiteralNumber(static_cast<double>(globalValTypeCode(p))));
+  return codes;
+}
+
 void WasmIRGen::createTagObjects(Instruction *tlScope) {
   uint32_t numImported = moduleInfo_.importedTagCount();
   for (uint32_t i = numImported; i < moduleInfo_.totalTagCount(); ++i) {
     if (!tagVars_[i])
       continue;
-    // One object per tag, created once per instance. Its identity is the
-    // tag's identity, so two tags with the same signature stay distinct and
-    // an imported tag stays equal to the exporter's.
-    auto *tagObj = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(
-            buildTagTypeString(moduleInfo_.getTagType(i))),
-        tagObj,
-        builder_.getLiteralString("__wasm_type__"));
+    // One WebAssembly.Tag per tag, created once per instance. Its identity is
+    // the tag's identity, so two tags with the same signature stay distinct
+    // and an imported tag stays equal to the exporter's.
+    //
+    // A real Tag, not a plain object carrying a `__wasm_type__` string. That
+    // string was published with an ordinary store, and the object it went on
+    // was an object literal, whose prototype is Object.prototype -- so a
+    // setter installed there ran user JS inside instantiation and swallowed
+    // the store, and what did get stored was writable on an object handed
+    // straight to script. The signature lives in the cell's own field now.
+    // See e2e-tag-import-brand.wat.
+    auto *tagObj =
+        helpers_.emitMakeTag(tagTypeCodes(moduleInfo_.getTagType(i)));
     builder_.createStoreFrameInst(tlScope, tagObj, tagVars_[i]);
   }
 }
@@ -7071,6 +7781,35 @@ void WasmIRGen::internTypeIds(Instruction *tlScope) {
             buildFuncTypeString(moduleInfo_.types[i]))});
     builder_.createStoreFrameInst(tlScope, id, typeIdVars_[i]);
   }
+}
+
+Value *WasmIRGen::emitElemItem(const WasmElemItem &item, Instruction *tlScope) {
+  switch (item.kind) {
+    case WasmElemItem::Kind::Null:
+      return builder_.getLiteralNull();
+
+    case WasmElemItem::Kind::FuncIndex:
+      // A function index reachable from an element segment is in
+      // escapableFuncs_ (see computeEscapableFuncs), so it has a canonical
+      // Exported Function. The fallback is for an index this module does not
+      // have, which a validated module cannot name.
+      if (item.index < exportedFuncVars_.size() &&
+          exportedFuncVars_[item.index])
+        return builder_.createLoadFrameInst(
+            tlScope, exportedFuncVars_[item.index]);
+      return builder_.getLiteralNull();
+
+    case WasmElemItem::Kind::GlobalGet:
+      // One frame slot, not two: globalSlotIndex_ gives a global a second
+      // slot when and only when it is i64 (see its declaration), and a
+      // validated element expression is reference-typed, so a global.get
+      // entry names a reference-typed global.
+      if (item.index < globalSlotIndex_.size())
+        return builder_.createLoadFrameInst(
+            tlScope, globalVars_[globalSlotIndex_[item.index]]);
+      return builder_.getLiteralNull();
+  }
+  llvm_unreachable("invalid element item kind");
 }
 
 void WasmIRGen::createTables(Instruction *tlScope) {
@@ -7101,15 +7840,15 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       // the module's actual table -- publishing a fresh Table, or the arrays
       // alone, leaves the exported object's own storage disconnected from the
       // module's. The storage is reached through the same brand check the
-      // import path uses, and the arrays are JSArrays by construction, so no
-      // wasmCheckTableArrays call is needed.
+      // import path uses, and the arrays are JSArrays by construction.
       //
-      // The brand check CAN fail here: `globalThis.WebAssembly.Table` is an
-      // ordinary property and script may replace it with a constructor that
-      // returns anything. It is branched on for the diagnostic, not for
-      // safety -- without the branch the null result reaches an indexed load
-      // and reports "Cannot read property 0 of null", which names nothing and
-      // points at generated code.
+      // The constructor is the pristine WebAssembly.Table out of
+      // HermesInternal.intrinsics, so the route that used to make this branch
+      // reachable -- a replaced `globalThis.WebAssembly.Table` returning
+      // anything at all -- is closed. It stays because it is branched on for
+      // the diagnostic, not for safety: without it a null result reaches an
+      // indexed load and reports "Cannot read property 0 of null", which
+      // names nothing and points at generated code.
       auto *descriptor = builder_.createAllocObjectLiteralInst({});
       builder_.createStorePropertyStrictInst(
           builder_.getLiteralString("anyfunc"),
@@ -7124,9 +7863,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             descriptor,
             builder_.getLiteralString("maximum"));
       }
-      auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-      auto *tableCtor = builder_.createLoadPropertyInst(
-          wasmObj, builder_.getLiteralString("Table"));
+      auto *tableCtor = loadWasmIntrinsic(tlScope, "Table");
       auto *tableObj = emitNew(tableCtor, {descriptor});
       builder_.createStoreFrameInst(tlScope, tableObj, tableObjVars_[tblIdx]);
       auto *linked =
@@ -7155,12 +7892,15 @@ void WasmIRGen::createTables(Instruction *tlScope) {
           linked, builder_.getLiteralNumber(2));
 
       // The brand is not the whole of it, exactly as for a defined memory
-      // (createMemoryViews). A hostile `globalThis.WebAssembly.Table` can
-      // return a GENUINE WebAssembly.Table with limits of its own choosing,
-      // and the declaration's limits are compile-time constants of what this
-      // module ASKED FOR, not of what came back. Reproduced against
-      // `(table 1 2 funcref)` handed a genuine Table built with
-      // `{initial: 1, maximum: 1}`:
+      // (createMemoryViews), and for the same reason a pristine constructor
+      // does not settle: the limits come out of a DESCRIPTOR built just above
+      // with ordinary strict stores, which walk the prototype chain, so an
+      // `initial`/`maximum` accessor on Object.prototype can answer the
+      // constructor's read with a number of its own choosing. The result is a
+      // GENUINE WebAssembly.Table with limits nobody declared, while the
+      // declaration's limits are compile-time constants of what this module
+      // ASKED FOR. Reproduced against `(table 1 2 funcref)` yielding a genuine
+      // Table built with `{initial: 1, maximum: 1}`:
       //
       //   instantiation: linked
       //   wasm table.grow(1) -> 1 ; t.length now 2
@@ -7175,9 +7915,8 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       // declaration" but "did the constructor build the table this module
       // asked for". A genuine construction always yields exactly the requested
       // entries and exactly the requested maximum, or none, so anything else
-      // means the constructor or the descriptor was interfered with -- and the
-      // descriptor is reachable too, being a fresh object literal whose
-      // `initial`/`maximum` stores walk the prototype chain.
+      // means the descriptor was interfered with. The constructor can no
+      // longer be: it comes from HermesInternal.intrinsics.
       //
       // Both numbers are compared, each with its own branch: a check on only
       // one of them would let the other through.
@@ -7222,10 +7961,13 @@ void WasmIRGen::createTables(Instruction *tlScope) {
           tlScope, exportedArr, tableExportVars_[tblIdx]);
     } else {
       // externref tables are not built by the Table constructor, so keep the
-      // plain-array backing. These come from globalThis.Array, which script
-      // can replace, so validate once here to let call_indirect cast them
-      // without re-checking on every indirect call.
-      auto *arrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+      // plain-array backing. These come from the pristine Array and are
+      // JSArrays by construction, which is what lets call_indirect cast them
+      // without re-checking on every indirect call. There is no longer a
+      // wasmCheckTableArrays call establishing that: script cannot reach the
+      // constructor, and bytecode is trusted, so the check had no way left to
+      // fail. See dz 01a0904b-398b.
+      auto *arrayCtor = loadIntrinsic(tlScope, "Array");
       funcsArr = emitNew(arrayCtor, {sizeVal});
       builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
       typesArr = emitNew(arrayCtor, {sizeVal});
@@ -7233,9 +7975,6 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       exportedArr = emitNew(arrayCtor, {sizeVal});
       builder_.createStoreFrameInst(
           tlScope, exportedArr, tableExportVars_[tblIdx]);
-      builder_.createCallBuiltinInst(
-          BuiltinMethod::HermesBuiltin_wasmCheckTableArrays,
-          {funcsArr, typesArr, exportedArr});
     }
   }
 
@@ -7291,11 +8030,22 @@ void WasmIRGen::createTables(Instruction *tlScope) {
     auto *exportedArr = builder_.createLoadFrameInst(
         tlScope, tableExportVars_[seg.tableIndex]);
 
-    // Write each entry through the slot funnel. Only the Exported Function is
-    // handed over: the funnel derives the closure and the interned type id
-    // from it, so the three arrays cannot disagree about what this slot holds.
-    for (uint32_t i = 0; i < seg.funcIndices.size(); ++i) {
-      uint32_t funcIdx = seg.funcIndices[i];
+    // Whether the funnel brand-checks each value is a property of the TABLE,
+    // not of the segment: an element segment of externref type carries
+    // ref.null and global.get entries, and a global.get entry can be any JS
+    // value at all.
+    Value *isFuncRef = tableIsFuncRefLiteral(seg.tableIndex);
+
+    // Write each entry through the slot funnel: for a funcref table it takes
+    // null or an Exported Function and derives the closure and the interned
+    // type id from what it is given, so the three arrays cannot disagree
+    // about what this slot holds.
+    //
+    // A null entry is written like any other. A segment overwrites what the
+    // table already holds at its offset, so skipping the null store would
+    // leave the previous occupant in the slot -- the case
+    // e2e-elem-mixed-items.wat aims a ref.null at an occupied slot for.
+    for (uint32_t i = 0; i < seg.items.size(); ++i) {
       // Compute the table index: offset + i.
       Value *idx;
       if (i == 0 && firstIdxIsZero) {
@@ -7307,19 +8057,13 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             ValueKind::BinaryAddInstKind);
       }
 
-      // Every function index named by an element segment is in
-      // escapableFuncs_, so it has a canonical Exported Function.
-      if (funcIdx < exportedFuncVars_.size() && exportedFuncVars_[funcIdx]) {
-        helpers_.emitTableSetSlot(
-            funcsArr,
-            typesArr,
-            exportedArr,
-            idx,
-            builder_.createLoadFrameInst(
-                tlScope, exportedFuncVars_[funcIdx]),
-            // An element segment names functions, so this is a funcref table.
-            builder_.getLiteralNumber(1));
-      }
+      helpers_.emitTableSetSlot(
+          funcsArr,
+          typesArr,
+          exportedArr,
+          idx,
+          emitElemItem(seg.items[i], tlScope),
+          isFuncRef);
     }
   }
 }
@@ -7558,13 +8302,60 @@ void WasmIRGen::onTableInit(
   auto *segIdx =
       builder_.getLiteralNumber(static_cast<double>(segmentIndex));
   helpers_.emitTableInit(
-      funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count);
+      funcsArr,
+      typesArr,
+      exportedArr,
+      elemSegs,
+      segIdx,
+      dst,
+      src,
+      count,
+      tableIsFuncRefLiteral(tableIndex));
 }
 
 void WasmIRGen::onRefNull() {
   if (unreachable_)
     return;
   push(builder_.getLiteralNull());
+}
+
+void WasmIRGen::onRefIsNull() {
+  if (unreachable_)
+    return;
+  Value *ref = pop();
+  // Strict equality. A loose one would also answer 1 for `undefined`, which
+  // is an ordinary non-null externref value.
+  auto *isNull = builder_.createBinaryOperatorInst(
+      ref, builder_.getLiteralNull(), ValueKind::BinaryStrictlyEqualInstKind);
+  // Wasm wants an i32; AsInt32Inst turns the boolean into 1 or 0.
+  push(builder_.createAsInt32Inst(isNull));
+}
+
+void WasmIRGen::onRefFunc(uint32_t funcIndex) {
+  if (unreachable_)
+    return;
+
+  if (LLVM_UNLIKELY(
+          funcIndex >= exportedFuncVars_.size() ||
+          !exportedFuncVars_[funcIndex])) {
+    // computeEscapableFuncs() explains why a validated module does not get
+    // here. Refusing beats the alternatives: the internal closure has an
+    // internal calling convention and script can reach this value, and a null
+    // is a legal funcref, so it would be stored without complaint.
+    errorMsg_ = ("ref.func names function index " + llvh::Twine(funcIndex) +
+                 ", which has no canonical exported function")
+                    .str();
+    // The value stack has to stay the right height for the rest of the body,
+    // which is still translated before finalizeModule() reads errorMsg_.
+    push(builder_.getLiteralNull());
+    return;
+  }
+
+  // The wrapper, not closureVars_[funcIndex]: the Exported Function is what a
+  // funcref value is on the JS side of the boundary. Route 22 of
+  // e2e-no-closure-escape.wat is this one, and it goes red for the closure.
+  push(builder_.createLoadFrameInst(
+      parentScopeInst_, exportedFuncVars_[funcIndex]));
 }
 
 void WasmIRGen::onElemDrop(uint32_t segmentIndex) {
@@ -7636,18 +8427,7 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     uint32_t slotIdx = globalSlotIndex_[i];
 
-    // Find the i-th global import to determine its type.
-    WasmValType gType = WasmValType::I32;
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == i) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
+    WasmValType gType = globalTypeAt(i).type;
 
     if (importedMutableGlobals_.count(i)) {
       // A mutable import's frame slot is never read as a snapshot: Wasm
@@ -7856,22 +8636,7 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
   uint32_t slotIdx = globalSlotIndex_[globalIndex];
 
   // Determine the global's type.
-  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-  WasmValType gType = WasmValType::I32;
-  if (globalIndex < numImportedGlobals) {
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == globalIndex) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
-  } else {
-    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
-  }
+  WasmValType gType = globalTypeAt(globalIndex).type;
 
   // An imported mutable global is shared state: its value lives in the
   // host's WebAssembly.Global, which the host can write at any time. Read it
@@ -7906,9 +8671,10 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
     } else {
       // This coercion IS A NO-OP on this path and is kept deliberately.
       // Read that as a statement about scope, not about trust: the value now
-      // comes out of value_ through wasmGlobalGet, and setWasmGlobalNumber is
-      // the only writer of that field, so it is already an int32-valued
-      // double for an i32 global and float-representable for an f32 one --
+      // comes out of value_ through wasmGlobalGet, and every numeric write to
+      // that slot is narrowed by setWasmGlobalValue, so it is already an
+      // int32-valued double for an i32 global and float-representable for an
+      // f32 one --
       // and wasmLinkGlobal refused the import unless the Global's type
       // matched the declaration. Measured: deleting it here leaves every
       // behavioural test green, and fails only irgen-global-mutable-shared
@@ -7941,22 +8707,7 @@ void WasmIRGen::onGlobalSet(uint32_t globalIndex) {
   uint32_t slotIdx = globalSlotIndex_[globalIndex];
 
   // Determine the global's type.
-  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
-  WasmValType gType = WasmValType::I32;
-  if (globalIndex < numImportedGlobals) {
-    uint32_t importGlobalIdx = 0;
-    for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Global)
-        continue;
-      if (importGlobalIdx == globalIndex) {
-        gType = imp.globalType.type;
-        break;
-      }
-      ++importGlobalIdx;
-    }
-  } else {
-    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
-  }
+  WasmValType gType = globalTypeAt(globalIndex).type;
 
   // An imported mutable global is shared state: write through the host's
   // WebAssembly.Global, which is what makes the write visible to the host

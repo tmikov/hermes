@@ -1,0 +1,10 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Consumer for e2e-func-import-brand.wat, declaring the import with the
+;; signature the exporter actually has.
+(module
+  (import "a" "f" (func $f (param i32) (result i32)))
+  (func (export "call") (param i32) (result i32) (call $f (local.get 0))))

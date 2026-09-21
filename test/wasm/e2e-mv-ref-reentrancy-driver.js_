@@ -1,0 +1,120 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-mv-ref-reentrancy.wat.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+var realArray = Array;
+var realUint32Array = Uint32Array;
+var realFloat64Array = Float64Array;
+
+// ---------------------------------------------------------------- shape 1 --
+
+var inst1 = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+
+var outerFunc = inst1.exports.f7;
+var innerFunc = inst1.exports.f9;
+var outerObject = {tag: 'outer'};
+var innerObject = {tag: 'inner'};
+
+inst1.exports.setF(outerFunc);
+inst1.exports.setE(outerObject);
+
+var arrayCtorCalls = 0;
+var ctorReentries = 0;
+var ctorDepth = 0;
+globalThis.Array = function (n) {
+  arrayCtorCalls++;
+  if (ctorDepth === 0) {
+    ctorDepth++;
+    ctorReentries++;
+    // A second activation, with deliberately different identities. If the two
+    // activations shared storage, these are the values the outer call would
+    // come back with.
+    inst1.exports.setF(innerFunc);
+    inst1.exports.setE(innerObject);
+    inst1.exports.both();
+    ctorDepth--;
+  }
+  return {};
+};
+
+var r1 = inst1.exports.both();
+globalThis.Array = realArray;
+
+print('shape 1: replacement Array constructor calls: ' + arrayCtorCalls);
+print('shape 1: reentries from the constructor: ' + ctorReentries);
+print("shape 1: funcref is the outer activation's: " + (r1[0] === outerFunc));
+print(
+  "shape 1: externref is the outer activation's: " + (r1[1] === outerObject));
+
+// ---------------------------------------------------------------- shape 2 --
+//
+// The reentrancy this section used to drive is no longer constructible.
+// Replacing globalThis.Uint32Array / Float64Array before instantiation gave a
+// getter and a setter control between two reference stores and again between
+// two reference loads, because the numeric buffer sat between them and was
+// built from those globals. The buffer now comes from the pristine
+// constructors under HermesInternal.intrinsics, so an indexed access on it
+// runs no script at all and there is no gap left to re-enter from -- nor any
+// way to force a GC while a result is outstanding, which is what the WeakRef
+// machinery here used to do.
+//
+// What is asserted instead is that the replacements really are not consulted,
+// which is a property that CAN fail: before the constructors became pristine,
+// both of these fired. The reference results are still checked, because the
+// container's indexing has to survive a signature with an i32 between two
+// references. The lost reentrancy and GC probes are recorded on dz
+// 01a0904b-398b.
+
+var taSets = 0;
+var taGets = 0;
+
+function makeFakeTypedArray() {
+  var store = [0, 0, 0, 0, 0, 0, 0, 0];
+  var view = {};
+  for (var i = 0; i < store.length; i++) {
+    (function (i) {
+      Object.defineProperty(view, String(i), {
+        get: function () { taGets++; return store[i]; },
+        set: function (v) { store[i] = v; taSets++; },
+        configurable: true,
+        enumerable: true,
+      });
+    })(i);
+  }
+  return view;
+}
+
+// Installed BEFORE instantiation, which is the timing that used to matter:
+// the buffers are built during instantiation and kept in the module's frame.
+globalThis.Uint32Array = function (buf) { return makeFakeTypedArray(); };
+globalThis.Float64Array = function (buf) { return makeFakeTypedArray(); };
+
+var inst2 = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(bytes));
+
+var outer0 = {tag: 'outer0'};
+var outer1 = {tag: 'outer1'};
+inst2.exports.setE0(outer0);
+inst2.exports.setE1(outer1);
+var r2 = inst2.exports.mixed();
+
+globalThis.Uint32Array = realUint32Array;
+globalThis.Float64Array = realFloat64Array;
+
+print('shape 2: replacement typed-array setter fired: ' + (taSets > 0));
+print('shape 2: replacement typed-array getter fired: ' + (taGets > 0));
+
+// The i32 laid out between the two references. It travels in the numeric
+// buffer, which is now a genuine Uint32Array, so it comes back as written.
+print('shape 2: the i32 between them: ' + r2[1]);
+
+print("shape 2: result 0 is the reference that was set: " + (r2[0] === outer0));
+print("shape 2: result 2 is the reference that was set: " + (r2[2] === outer1));
+print('done');

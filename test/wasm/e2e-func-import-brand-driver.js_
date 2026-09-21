@@ -1,0 +1,85 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-func-import-brand.wat.
+//   args[0] the exporter, f : (i32) -> i32
+//   args[1] a consumer importing it as (i32) -> i32   -- matches
+//   args[2] a consumer importing it as (f64) -> f64   -- does not match
+
+var args = hermescli.getScriptArgs();
+function mod(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+
+// Instantiation and the call are caught SEPARATELY. Sharing one try would let
+// a LinkError thrown by the call print the same line a link refusal prints,
+// so a row asserting refusal could be satisfied at the wrong stage.
+function link(i, label, fn) {
+  var e;
+  try {
+    e = new WebAssembly.Instance(mod(i), {a: {f: fn}}).exports;
+  } catch (err) {
+    print(label + ': ' + err.name);
+    return;
+  }
+  try {
+    print(label + ': linked, call(21) = ' + e.call(21));
+  } catch (err) {
+    print(label + ': linked, but the call threw ' + err.name);
+  }
+}
+
+// First a clean instantiation, with nothing installed anywhere. This is the
+// line that says whether the compiler publishes a signature at all; asking it
+// while a setter is installed cannot tell "never stored" from "stored and
+// swallowed".
+var exporter = new WebAssembly.Instance(mod(0)).exports;
+var f = exporter.f;
+var f64Export = exporter.g;
+print('export carries __wasm_type__: ' + f.__wasm_type__);
+
+// Now with a setter, installed BEFORE instantiating because the store it used
+// to intercept happened during instantiation.
+var fired = 0;
+Object.defineProperty(Function.prototype, '__wasm_type__', {
+  configurable: true,
+  set: function(v) { fired++; },
+});
+var g = new WebAssembly.Instance(mod(0)).exports.f;
+delete Function.prototype.__wasm_type__;
+print('setter fired during instantiation: ' + fired + ' times');
+
+// The setter swallowed the store, so a wrapper created while it was installed
+// carried no signature and the importer's check fell through to its "any
+// callable" path. Wrappers made earlier keep their own property, so this is
+// everything instantiated while the setter is in place, not retroactive.
+link(2, 'swallowed signature, mismatched import', g);
+
+link(1, 'matching import', f);
+link(2, 'mismatched import', f);
+
+// Forge the signature the old check consulted, then retry the mismatch.
+f.__wasm_type__ = 'func:d:d';
+link(2, 'forged signature, mismatched import', f);
+print('the forged property is really there: ' + f.__wasm_type__);
+
+// A plain callable carries no signature at all and is accepted, taking its
+// types from the importing module's declaration.
+link(1, 'plain JS callable', function(x) { return x * 2; });
+
+// The controls for every "mismatched import" row above. Consumer 2 is used
+// there only to be refused, so a consumer that refused every function would
+// satisfy all of them.
+//
+// Both kinds are needed. An unbranded callable alone would not exclude an
+// implementation that refused every BRANDED f64 import -- which is most of
+// what those rows are about -- so the second line hands it the exporter's own
+// (f64)->f64 function, branded and matching.
+link(2, 'f64 consumer, unbranded callable', function(x) { return x * 2; });
+link(2, 'f64 consumer, the matching branded export', f64Export);
+
+print('done');

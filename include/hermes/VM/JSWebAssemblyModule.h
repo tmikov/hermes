@@ -68,6 +68,18 @@ class JSWebAssemblyModule final : public JSObject {
       Metadata::Builder &mb);
 
   /// Opaque module data (metadata + compiled bytecode).
+  ///
+  /// DO NOT INLINE THIS INTO THE CELL. Being a separately allocated
+  /// unique_ptr pointee is load-bearing, not incidental:
+  /// WebAssembly.Module.exports() and .imports() hold a REFERENCE into
+  /// exportDescs/importDescs across a putNamed_RJS that can run a user
+  /// setter, and they survive it because the struct does not move when the
+  /// cell does. Storing it inline would make both of them use-after-frees --
+  /// which is exactly what JSWebAssemblyTag::parameters_, an inline
+  /// std::vector, was, until wasmExceptionConstructor was changed to copy it
+  /// out. Those two call sites carry the full argument, including the two
+  /// further conditions unique_ptr does not establish (a rooted owner, and no
+  /// descriptor mutation during the loop).
   std::unique_ptr<WasmModuleData> moduleData_;
 };
 

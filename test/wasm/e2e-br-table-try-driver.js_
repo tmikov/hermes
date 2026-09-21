@@ -1,0 +1,46 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-br-table-try.wat.
+
+var throwing = false;
+var e = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(
+    hermescli.loadFile(hermescli.getScriptArgs()[0])),
+  {e: {boom: function() { if (throwing) throw [e.t, 77]; }}}).exports;
+
+function show(label, v) {
+  print(label + ': ' + v);
+}
+
+// The no-throw pass first. A handler that never runs cannot reach a br_table,
+// so these rows are about the body's own edge and would be satisfied by an
+// implementation that dropped the branch edge entirely -- which is exactly
+// what the defect did. They are here so the caught rows below are not passing
+// because the fix routed everything down one side.
+throwing = false;
+show('sw() with no throw', e.sw());
+show('def() with no throw', e.def());
+show('i64sw() with no throw', e.i64sw());
+show('two() with no throw', e.two());
+// One index is enough here: share's parameter is read only inside the
+// handler, so every index gives the same answer when nothing throws.
+show('share(0) with no throw', e.share(0));
+
+throwing = true;
+show('sw() catching 77', e.sw());
+show('def() catching 77', e.def());
+show('i64sw() catching 77', e.i64sw());
+show('two() catching 77', e.two());
+// only's body throws on its own, so it needs no import and has one row.
+show('only()', e.only());
+show('share(0) catching 77', e.share(0));
+show('share(1) catching 77', e.share(1));
+show('share(2) catching 77', e.share(2));
+show('share(3) catching 77', e.share(3));
+
+print('done');

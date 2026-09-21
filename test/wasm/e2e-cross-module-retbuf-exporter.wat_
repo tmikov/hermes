@@ -1,0 +1,34 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; The exporter for e2e-cross-module-retbuf.wat.
+
+(module
+  (func $inner (result i32 f64 i64)
+    (i32.const 11)
+    (f64.const 2.5)
+    (i64.const 7))
+
+  ;; Makes a NESTED multi-value call, so it both receives buffer views from
+  ;; its caller and hands its own module's views to $inner. Those are the same
+  ;; object until this function is reached through another module's
+  ;; call_indirect, and then they are not.
+  (func $nested (export "nested") (result i32 f64 i64)
+    (call $inner))
+
+  ;; The control: same signature, no nested call, so its results go straight
+  ;; into the views it was given. That path was always right and must stay so.
+  (func $flat (export "flat") (result i32 f64 i64)
+    (i32.const 33)
+    (f64.const 4.5)
+    (i64.const 9))
+
+  ;; Declared so both are reference-eligible and can be placed in a table.
+  (elem declare func $nested $flat)
+
+  ;; This module's OWN table, exported, with $nested already in it. A module
+  ;; that imports this table reaches $nested with no JS in the path at all.
+  (table (export "tbl") 1 funcref)
+  (elem (i32.const 0) $nested))

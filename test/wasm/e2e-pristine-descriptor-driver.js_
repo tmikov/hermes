@@ -1,0 +1,58 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-pristine-descriptor.wat.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+
+// --- The constructor is out of reach ------------------------------------
+
+var realWebAssembly = WebAssembly;
+var replacementUsed = false;
+globalThis.WebAssembly = {
+  Memory: function() { replacementUsed = true; return {}; },
+  Table: function() { replacementUsed = true; return {}; },
+};
+
+var inst = new realWebAssembly.Instance(
+  realWebAssembly.Module.fromHermesBytecode(bytes));
+print('with WebAssembly replaced: instantiated');
+
+// The replacement really would have been used had anything read it, so the
+// line above is not passing because the replacement was inert.
+new globalThis.WebAssembly.Memory({initial: 1});
+print('replacement was live: ' + replacementUsed);
+
+globalThis.WebAssembly = realWebAssembly;
+
+// --- The descriptor is not -----------------------------------------------
+
+// The module declares `(memory 1 4)`. The setter swallows the store of 4 and
+// the getter answers the constructor's read with 2, so a genuine Memory is
+// built to a maximum the module never asked for. Nothing is assigned to
+// another object inside the accessors: that would re-enter them, since every
+// ordinary object inherits from Object.prototype.
+var sawStore = false;
+Object.defineProperty(Object.prototype, 'maximum', {
+  get: function() { return 2; },
+  set: function(v) { sawStore = true; },
+  configurable: true,
+});
+
+var caught = 'no error';
+try {
+  new realWebAssembly.Instance(
+    realWebAssembly.Module.fromHermesBytecode(bytes));
+} catch (e) {
+  caught = e.name;
+}
+delete Object.prototype.maximum;
+
+print('with a hostile descriptor: ' + caught);
+print('descriptor accessor did fire: ' + sawStore);
+
+print('done');

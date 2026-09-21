@@ -113,10 +113,13 @@
 ;; CHECK-NEXT: module tbl.get(2) [never written]: null
 ;; CHECK-NEXT: fresh JS-API tbl.get(0): null
 
-;; A module builds its own funcref table with globalThis.WebAssembly.Table,
-;; which script can replace -- so the brand check runs on that too, and is
-;; branched on for the DIAGNOSTIC: without the branch the null result reaches
-;; an indexed load and reports "Cannot read property 0 of null" from inside
-;; generated code, naming nothing.
-;; CHECK-NEXT: replaced WebAssembly.Table: LinkError: WebAssembly.Table did not construct a table for this module's table 0
+;; A module builds its own funcref table with the pristine WebAssembly.Table
+;; out of HermesInternal.intrinsics, so replacing globalThis.WebAssembly.Table
+;; no longer reaches it and the module links on its own table. The brand check
+;; on the constructor's result stays as the diagnostic for a link failure:
+;; without a branch on it a null result reaches an indexed load and reports
+;; "Cannot read property 0 of null" from inside generated code, naming
+;; nothing.
+;; CHECK-NEXT: replaced WebAssembly.Table: instantiated, tbl.get(2) = null
+;; CHECK-NEXT: replaced WebAssembly.Table was live: true
 ;; CHECK-NEXT: done

@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-cross-module-retbuf.wat.
+//   args[0] the exporter, with `nested` and `flat`
+//   args[1] the module under test, with a table and a call_indirect
+
+var args = hermescli.getScriptArgs();
+function mod(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+
+var a = new WebAssembly.Instance(mod(0)).exports;
+var b = new WebAssembly.Instance(mod(1), {a: {tbl: a.tbl}}).exports;
+
+// The first call needs nothing from JS: b imported a's table, which already
+// holds a's $nested, and reaches it with call_indirect.
+print('imported table, no JS in the path: ' + b.callImported());
+
+// The second is the same callee placed through the JS API. What matters in
+// both is that the table holds the callee's internal closure: importing the
+// FUNCTION instead and tabling that reaches it through the exporter's own
+// export wrapper, which supplies the exporter's own views and hides this.
+b.tbl.set(0, a.nested);
+b.tbl.set(1, a.flat);
+
+print('slot 0, nested call: ' + b.callSlot(0));
+print('slot 1, no nested call: ' + b.callSlot(1));
+print('nested() called from JS: ' + a.nested());
+
+print('done');

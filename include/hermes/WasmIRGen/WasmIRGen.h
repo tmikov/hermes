@@ -40,8 +40,11 @@ class WasmIRGen {
   /// bodies are translated.
   void createFunctions();
 
-  /// Populate escapableFuncs_ with the indices of functions for which a
-  /// funcref value can exist. Called once by createFunctions(), before
+  /// Populate escapableFuncs_ with the function indices named by an element
+  /// segment or by a ref.func global initializer. It is not the whole set of
+  /// indices a funcref value can name -- exports and imports are added
+  /// separately -- and the comment on the definition says why a function body
+  /// contributes nothing. Called once by createFunctions(), before
   /// exportedFuncVars_ is sized, because that set decides which indices get a
   /// canonical Exported Function.
   void computeEscapableFuncs();
@@ -51,12 +54,15 @@ class WasmIRGen {
   /// exports object, and emits the return instruction.
   /// Must be called after createFunctions() and after all function bodies
   /// and data sections have been processed.
-  /// \return false, with getErrorMessage() describing why, if the module is
-  ///   malformed in a way only detectable here. The IR module is left
-  ///   half-built in that case and must be discarded.
+  /// \return false, with getErrorMessage() describing why, if this module is
+  ///   refused -- either by a check made here, or by an earlier step that
+  ///   recorded its reason and had no way to fail the read (onRefFunc()).
+  ///   The IR module is left half-built in that case and must be discarded.
   bool finalizeModule();
 
-  /// Why finalizeModule() returned false. Empty while it has not failed.
+  /// Why the module was refused. Empty until some step refuses it; a step
+  /// that runs before finalizeModule() can fill it, so a non-empty value here
+  /// does not mean finalizeModule() has run.
   llvh::StringRef getErrorMessage() const {
     return errorMsg_;
   }
@@ -407,9 +413,15 @@ class WasmIRGen {
 
   // --- Exception handling (L.1) ---
 
-  /// Enter a try block with the given result types.
-  void onTry(const std::vector<WasmValType> &resultTypes);
-  /// Handle a catch clause for the given tag index.
+  /// Enter a try block whose body consumes \p paramTypes from the enclosing
+  /// stack and produces \p resultTypes.
+  void onTry(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Handle a catch clause for the given tag index. Emits the tag test and
+  /// the payload loads. A funcref payload item that is neither null nor a
+  /// WebAssembly Exported Function makes the emitted handler raise a
+  /// TypeError instead of continuing to the next catch clause.
   void onCatch(uint32_t tagIndex);
   /// Handle a catch_all clause.
   void onCatchAll();
@@ -465,6 +477,22 @@ class WasmIRGen {
   /// could not be told apart from one cleared by a missing JS argument.
   void onRefNull();
 
+  /// ref.is_null: pop a reference and push i32 1 if it is null, else 0. The
+  /// comparison is strict, so `undefined` -- a legal non-null externref --
+  /// answers 0. It also depends on wasmValTypeToIRType annotating a funcref
+  /// as nullable; test/wasm/ref-is-null.wat goes red if that changes.
+  void onRefIsNull();
+
+  /// ref.func: push the canonical Exported Function of \p funcIndex -- the
+  /// wrapper, not the internal closure, because this value can reach script
+  /// through a funcref global, a table slot or a funcref result. The wrapper
+  /// exists because Wasm validation only lets a function body name an index
+  /// that an element segment, a ref.func global initializer or an export also
+  /// names, and all three already get one; see computeEscapableFuncs(). If it
+  /// is absent anyway, this records an error message and finalizeModule()
+  /// refuses the module.
+  void onRefFunc(uint32_t funcIndex);
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
@@ -485,13 +513,38 @@ class WasmIRGen {
   IRBuilder builder_;
   WasmHelpers helpers_;
 
-  /// Set by finalizeModule() when it refuses the module; see
-  /// getErrorMessage().
+  /// Why the module was refused, set by whichever step refuses it --
+  /// finalizeModule()'s own checks, or onRefFunc() during body translation,
+  /// which has no way to fail the read and leaves its reason here for
+  /// finalizeModule() to report. See getErrorMessage().
   std::string errorMsg_;
 
   /// Check that every export names an index that exists in its index space.
   /// \return false, having set errorMsg_, for the first one that does not.
   bool validateExportIndices();
+
+  /// \return the declared type of the global at module-wide global index
+  ///   \p index, which may name either an imported or a defined global.
+  /// \pre \p index is in range for the module's global index space.
+  ///   validateExportIndices() establishes that for an exported index; for
+  ///   an index named by a function body, Wasm validation does, which
+  ///   compileWasmModule runs before any IR is built. Callers that walk the
+  ///   index space themselves are in range by construction.
+  WasmGlobalType globalTypeAt(uint32_t index) const;
+
+  /// Check that no exported global has a type the exports object cannot
+  /// represent, which today means v128.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateGlobalExportTypes();
+
+  /// Check that no tag has a parameter type the engine cannot represent,
+  /// which today means v128: globalValTypeCode maps it to 0xFF and wasmMakeTag
+  /// rejects that code. Every tag is checked, defined or imported and whether
+  /// or not it is exported, because createTagObjects() builds an object for
+  /// each defined one and the import check passes the same codes for each
+  /// imported one.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateTagTypes();
 
   /// Whether to enable strict Wasm memory bounds checking (from --test262).
   bool test262_ = false;
@@ -627,9 +680,9 @@ class WasmIRGen {
   /// slots in globalVars_: global.get/global.set for these go through the
   /// object's `.value` property so that the module and the host see the same
   /// global. The frame slots still hold the link-time snapshot, which only
-  /// constant expressions (data/element offsets, defined-global
-  /// initializers) read, and Wasm validation restricts those to immutable
-  /// imported globals.
+  /// constant expressions (data/element offsets, element segment entries,
+  /// defined-global initializers) read, and Wasm validation restricts those
+  /// to immutable imported globals.
   llvh::DenseSet<uint32_t> importedMutableGlobals_;
 
   /// Maps raw type section indices to canonical indices. Structurally
@@ -648,7 +701,13 @@ class WasmIRGen {
   /// Whether internTypeIds() has run. The Variables in typeIdVars_ are created
   /// unconditionally, so their non-nullness says nothing; only this says the
   /// interning calls were actually emitted and the slots hold real ids rather
-  /// than undefined. Anything that loads a type id must assert on this.
+  /// than undefined. Anything that loads a type id FROM typeIdVars_ must
+  /// assert on this.
+  ///
+  /// It is not a precondition for comparing type ids generally. The function
+  /// import check interns the signature it expects at the check site, because
+  /// import resolution runs before internTypeIds(); that is the same string
+  /// through the same builtin, so the two agree without sharing a slot.
   bool internedTypeIds_ = false;
 
   /// tagVars_[i] holds the object identifying tag i. Wasm tag identity is
@@ -658,12 +717,24 @@ class WasmIRGen {
   /// differently, so throw/catch across a boundary matched the wrong handler.
   std::vector<Variable *> tagVars_;
 
+  /// \return the JSWebAssemblyTag::ValType codes for \p ft's parameters, as
+  /// literal operands for wasmMakeTag / wasmCheckTagType. Tag parameter codes
+  /// are globalValTypeCode's; JSWebAssemblyTag.h static_asserts the agreement.
+  ///
+  /// A type with no code -- v128, which globalValTypeCode maps to 0xFF -- is
+  /// emitted here rather than refused here: this runs during createFunctions()
+  /// and validateTagTypes() runs later, in finalizeModule(). The emitted call
+  /// is never reached, because a refusal discards the half-built IR module.
+  llvh::SmallVector<Value *, 4> tagTypeCodes(const WasmFuncType &ft);
+
   /// Create the tag objects for this module's own tags. Imported tags are
   /// stored into tagVars_ by import validation instead.
   void createTagObjects(Instruction *tlScope);
 
   /// Emit the interning calls that populate typeIdVars_. Must run before
-  /// anything that stores or compares a type id.
+  /// anything that reads typeIdVars_. Not before every type-id comparison:
+  /// the function import check interns the signature it expects at the check
+  /// site, because import resolution runs first.
   void internTypeIds(Instruction *tlScope);
 
   /// Variable holding a JS Array of data segments in the top-level scope.
@@ -676,28 +747,20 @@ class WasmIRGen {
   /// or null (dropped). Only populated if the module has element segments.
   Variable *elemSegVar_ = nullptr;
 
+  /// Variable in the top-level scope holding HermesInternal.intrinsics, the
+  /// engine's holder of pristine constructors. Every constructor this module
+  /// allocates through is read from here rather than from globalThis, so a
+  /// script that replaces a global cannot redirect one of the module's
+  /// allocations. Stored once at the top of __wasm_instantiate__ and read via
+  /// loadIntrinsic()/loadWasmIntrinsic().
+  Variable *intrinsicsVar_ = nullptr;
+
   /// Per-module return buffer variables. Only created if the module uses i64
   /// or multi-value returns. The buffer is an ArrayBuffer shared by all
   /// functions. retBufIVar_ is a Uint32Array view, retBufFVar_ is a
   /// Float64Array view.
   Variable *retBufIVar_ = nullptr;
   Variable *retBufFVar_ = nullptr;
-
-  /// Parallel reference slots for the return buffer: a plain JS Array of
-  /// retBufSize_/4 elements, indexed identically to the Uint32Array view.
-  /// A funcref is a JS closure and an externref is an arbitrary JS value;
-  /// neither can live in an ArrayBuffer, so storing one through retBufIVar_
-  /// coerces it to NaN and then to 0, destroying it at the store. Reference
-  /// results reserve their 4 bytes in computeRetBufLayout() exactly like an
-  /// i32 and use the same byteOff/4 slot index here, so no layout arithmetic
-  /// changes. Only created when some function type that needs a return buffer
-  /// actually has a reference result (see retBufHasRefResult_).
-  Variable *retBufRVar_ = nullptr;
-
-  /// True when some function type that needsReturnBuffer() has a FuncRef or
-  /// ExternRef result, i.e. when retBufRVar_ must exist. V128 does not count:
-  /// it remains unsupported and keeps its diagnostic.
-  bool retBufHasRefResult_ = false;
 
   /// Size of the return buffer in bytes. Set during createFunctions().
   uint32_t retBufSize_ = 0;
@@ -772,6 +835,18 @@ class WasmIRGen {
   /// scope. nullptr if the module has no i64 at all.
   Value *retBufI_ = nullptr;
   Value *retBufF_ = nullptr;
+
+  /// The reference transport container THIS function RECEIVED, as a
+  /// LoadParamInst of its retbuf_R parameter; null when the signature has no
+  /// reference result travelling through the buffer. emitRetBufStores reads
+  /// it, to write this function's own results into it; `git grep refBuf_`
+  /// settles whether anything else has since.
+  ///
+  /// It is deliberately NOT what a nested call's results are read from: each
+  /// call site allocates its own container and reads back the very value it
+  /// passed. The numeric views once had the opposite shape and that was
+  /// defect 01a0820d-5190; they are now threaded the same way.
+  Value *refBuf_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,
   /// or unreachable). In unreachable mode, instructions are no-ops until
@@ -861,10 +936,38 @@ class WasmIRGen {
       const std::vector<WasmValType> &resultTypes);
 
   /// Add phi operands for branching to the given control entry from the
-  /// current block. For Block/If entries, pops result values and adds them
-  /// as phi incoming edges. For Loop entries, no phi operands are added
-  /// (loop phis are for loop parameters, handled separately).
+  /// current block, popping the values they consume. A Block/If/Try entry
+  /// takes the branch's result values. A Loop entry takes the loop's
+  /// PARAMETER values instead, because a branch to a loop targets its
+  /// header; a loop's result phis live in its exit block and are filled by
+  /// onEnd's fall-through path, never from here.
   void addBranchPhiOperands(ControlEntry &entry);
+
+  /// Push one placeholder per slot of \p resultTypes, marking the high slot
+  /// of each i64 pair. Every caller today is an onEnd path for a construct
+  /// entered in unreachable code, where push() is a no-op and this therefore
+  /// does nothing at all: the enclosing live construct restores the stack and
+  /// its own results later. It exists so the marking stays correct if a
+  /// reachable caller is ever added. The three copies it replaced marked
+  /// unconditionally, so on those same unreachable paths they wrote past the
+  /// end of the stack, or onto a slot belonging to an enclosing block.
+  void pushUndefinedResults(const std::vector<WasmValType> &resultTypes);
+
+  /// \return true if a branch crossing \p entry has to close a protected
+  /// region: it is a try, and we are still inside its body rather than in one
+  /// of its handlers, where onCatch or onCatchAll has already closed it.
+  static bool crossingLeavesTryBody(const ControlEntry &entry);
+
+  /// \return true if a branch to \p depth leaves the body of at least one
+  /// try, and so needs emitBranchTryEnds.
+  bool branchLeavesTryBody(uint32_t depth);
+
+  /// Emit one TryEndInst per protected region a branch to \p depth leaves,
+  /// innermost first, each in its own block, and leave the builder inserting
+  /// into the block the branch itself must be emitted from. That block is the
+  /// continuation's actual predecessor, so it is also the one a branch's phi
+  /// operands have to be recorded against.
+  void emitBranchTryEnds(uint32_t depth);
 
   /// Peek at (don't pop) the result values on the value stack for the given
   /// control entry and add them as phi incoming edges from the current block.
@@ -878,6 +981,32 @@ class WasmIRGen {
   /// Check if the current insertion block is terminated (ends with a
   /// terminator instruction).
   bool isCurrentBlockTerminated();
+
+  /// Emit the walk to the HermesInternal.intrinsics holder itself. Only for
+  /// code emitted OUTSIDE __wasm_instantiate__ -- the module factory, which
+  /// creates its own instance of topLevelVS_ and so cannot read the
+  /// intrinsicsVar_ slot that __wasm_instantiate__ fills in. Everything
+  /// inside instantiation goes through loadIntrinsic() instead, which reads
+  /// the cached Variable.
+  Value *loadIntrinsicsHolder();
+
+  /// Emit a load of the pristine constructor \p name off an already-loaded
+  /// \p holder.
+  Value *loadIntrinsicFrom(Value *holder, llvh::StringRef name);
+
+  /// Emit a load of the pristine constructor \p name from
+  /// HermesInternal.intrinsics. Use this instead of
+  /// createTryLoadGlobalPropertyInst for any constructor generated code
+  /// allocates through: a global is replaceable, this is not.
+  /// \param scope the scope to read intrinsicsVar_ from -- the top-level
+  ///   scope instruction during instantiation, parentScopeInst_ from inside
+  ///   a function body.
+  Value *loadIntrinsic(Instruction *scope, llvh::StringRef name);
+
+  /// Same as loadIntrinsic(), for a constructor under the WebAssembly
+  /// sub-holder (Memory, Table, ...). These live one level down because their
+  /// names would be ambiguous beside the ECMAScript ones.
+  Value *loadWasmIntrinsic(Instruction *scope, llvh::StringRef name);
 
   /// Load a memory view variable from the top-level scope.
   /// \return the LoadFrameInst for the view.
@@ -893,6 +1022,38 @@ class WasmIRGen {
 
   /// Emit `new Constructor(args)` and return the constructed object.
   Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
+
+  /// Emit the funcref admission test on \p value: `null` passes, and so does
+  /// a WebAssembly Exported Function, asked through the
+  /// wasmIsExportedFunction builtin so that generated code and the JS API
+  /// share one notion of the brand. Anything else raises a TypeError whose
+  /// message is \p diagnostic.
+  ///
+  /// Emits into the current insertion block and leaves the insertion block
+  /// set to the block reached when the test passes, so the caller goes on
+  /// emitting straight after the call. \return \p value unchanged: this is a
+  /// test, not a conversion, and the value that reaches the consumer is the
+  /// one that was tested.
+  ///
+  /// The builtin ALLOCATES, so this is a safepoint like any other call.
+  ///
+  /// This entry point is for the Functions built outside begin/endFunction --
+  /// the export wrapper and the import trampoline; emitBodyFuncRefCheck() is
+  /// the same test for code emitted into currentFunc_. They share one
+  /// implementation and emit the same IR; what differs is what supplies the
+  /// ThrowTypeErrorInst's catch target afterwards, which the definitions
+  /// spell out.
+  Value *emitFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// emitFuncRefCheck() for a function body: same test, same emission
+  /// contract, same return value, and see that declaration for all of it.
+  /// Separate only so that each entry point can assert which Function it is
+  /// emitting into.
+  Value *emitBodyFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// The shared body of emitFuncRefCheck() and emitBodyFuncRefCheck(). Call
+  /// one of those instead: they carry the doc comment and the assertion.
+  Value *emitFuncRefCheckImpl(Value *value, const llvh::Twine &diagnostic);
 
   /// Store `initial` and `maximum` on a WebAssembly.Memory or
   /// WebAssembly.Table descriptor object from values that are only known at
@@ -912,11 +1073,28 @@ class WasmIRGen {
   /// splits the instantiate body and advances tlEntry_.
   void createMemoryViews(Instruction *tlScope);
 
-  /// Create and initialize tables in the top-level function.
-  /// Allocates JS Array pairs (functions + type indices) for each table,
-  /// initializes them to null/-1, and applies active element segments.
+  /// Create and initialize tables in the top-level function, then apply the
+  /// module's active element segments to them. Each table is three parallel
+  /// arrays -- closures, interned type ids and Exported Functions -- built
+  /// either by the WebAssembly.Table constructor (funcref) or directly
+  /// (externref); see the body.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createTables(Instruction *tlScope);
+
+  /// Lower one element-segment entry to the JS value a table slot holds:
+  /// null, the canonical Exported Function of a function index, or the
+  /// current value of a global. This is the single rule shared by the two
+  /// places that materialize a segment's entries -- the active-segment loop
+  /// in createTables() and the passive-segment array built by
+  /// finalizeModule() -- so the two cannot describe the same segment
+  /// differently.
+  /// \p tlScope is the scope the frame loads read from.
+  /// A function index with no canonical wrapper, and a global index past the
+  /// end of the module's global space, both lower to null rather than to
+  /// nothing at all. A validated module has neither; the point of answering
+  /// with a value anyway is that both callers write one slot per entry, and a
+  /// caller made to skip an entry would leave whatever that slot held before.
+  Value *emitElemItem(const WasmElemItem &item, Instruction *tlScope);
 
   /// Build the canonical type index map. Structurally identical types
   /// (same params and results) get the same canonical index.
@@ -953,8 +1131,9 @@ class WasmIRGen {
   ///
   /// The second reason this comment used to give -- a mutable import being
   /// read at every global.get through the replaceable `.value` accessor -- is
-  /// GONE: that read is the wasmGlobalGet builtin now, and the field it
-  /// returns is written only by setWasmGlobalNumber, which canonicalises it.
+  /// GONE: that read is the wasmGlobalGet builtin now, and for a numeric
+  /// global the slot it returns is narrowed by setWasmGlobalValue, the funnel
+  /// every numeric writer of that slot goes through.
   /// The call on the mutable global.get path is therefore a no-op; it is kept
   /// only so that its retirement happens once, with J4, rather than in two
   /// places. Do not read its presence there as evidence that the value is
@@ -1029,6 +1208,14 @@ class WasmIRGen {
   /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
   /// param, argument coercion, and return value marshaling.
   /// Called once per function index, not once per export name.
+  ///
+  /// The wrapper it builds can THROW: a numeric parameter's ToNumber runs
+  /// arbitrary JS, and a funcref parameter is tested rather than coerced --
+  /// null and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError before the Wasm body is entered. This is where a JS argument
+  /// becomes a Wasm parameter value; the body's entry stores its parameters
+  /// raw (see beginFunction). test/wasm/e2e-ref-conversion-points.wat asserts
+  /// the refusal with a counter the body would have incremented.
   /// \p funcIndex is the Wasm function index being wrapped.
   /// \p wrapperName names the wrapper IR Function (the first export name of
   ///   \p funcIndex if it has one, otherwise a synthesized name).
@@ -1076,6 +1263,16 @@ class WasmIRGen {
   /// The trampoline loads the imported JS function from the top-level scope,
   /// marshals Wasm-typed arguments to JS, calls the JS function, and
   /// converts the return value back to the expected Wasm type.
+  ///
+  /// The conversion back can THROW, beyond whatever the imported JS function
+  /// itself throws: a funcref result is tested rather than coerced -- null
+  /// and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError -- on the single-result arm and on the multi-value arm alike.
+  /// On the multi-value arm the test runs in the pass that LOADS the array
+  /// elements, which runs before the pass that stores them at their offsets,
+  /// so a refusal happens before any result of the call has landed.
+  /// test/wasm/e2e-ref-conversion-points.wat asserts both arms, at result 0
+  /// and at result 1.
   /// \p funcIndex is the Wasm function index of the imported function.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createImportTrampoline(
@@ -1085,6 +1282,30 @@ class WasmIRGen {
   /// Returns true if the given function type needs buffer params (returns
   /// i64 or has multiple results).
   static bool needsReturnBuffer(const WasmFuncType &funcType);
+
+  /// Returns true if \p funcType returns a funcref or externref THROUGH the
+  /// return buffer, i.e. as one of several results. Such a call carries a
+  /// third hidden argument, the reference transport container. A lone
+  /// reference result is returned directly and needs no container.
+  ///
+  /// Caller and callee decide this from the same WasmFuncType, and
+  /// call_indirect matches signatures by interned type id -- which encodes
+  /// params and results -- so two modules agree about it.
+  static bool needsRefBuffer(const WasmFuncType &funcType);
+
+  /// The number of slots the reference container of \p funcType needs: the
+  /// TOTAL size of computeRetBufLayout()'s layout divided by four, not the
+  /// number of reference results. Reference slots are indexed by byte offset
+  /// over four, the same index an i32 at that offset would use, so the layout
+  /// is sparse -- an f64 result consumes two slot indices and stores nothing
+  /// in either.
+  static uint32_t refBufSlotCount(const WasmFuncType &funcType);
+
+  /// The JSDynamicParam index of the FIRST Wasm parameter of an internal
+  /// function or import trampoline with signature \p funcType. Index 0 is
+  /// `this`; a needsReturnBuffer() signature then takes retbuf_I and retbuf_F
+  /// at 1 and 2, and a needsRefBuffer() one takes retbuf_R at 3.
+  static uint32_t firstWasmParamIndex(const WasmFuncType &funcType);
 
   /// Compute byte layout for results in the return buffer.
   /// \return {vector of byte offsets per result, total buffer size}.
@@ -1116,10 +1337,35 @@ class WasmIRGen {
   /// and endFunction() when the function uses a return buffer.
   void emitRetBufStores(const WasmFuncType &funcType);
 
+  /// Allocate the reference container for one nested call with signature
+  /// \p funcType and append it to \p args, after the two numeric views that
+  /// the caller has already pushed. \return that container, which the caller
+  /// must hand to emitRetBufLoads for THAT call, or nullptr when the callee
+  /// has no reference result travelling through the buffer.
+  Value *emitNestedCallRefBuf(
+      const WasmFuncType &funcType,
+      llvh::SmallVectorImpl<Value *> &args);
+
   /// Caller: read results from buffer, push onto value stack.
   /// Called from onCall/onCallIndirect after a call to a function that
   /// uses a return buffer.
-  void emitRetBufLoads(const WasmFuncType &funcType);
+  ///
+  /// \p rbI, \p rbF and \p refBuf are the three containers THIS call site
+  /// passed to THAT call. Every one of them must be the value the call site
+  /// handed over, not one obtained any other way -- not from the module
+  /// frame, and not from this function's own incoming parameters. Those are
+  /// the same object only within one module: a cross-module call_indirect
+  /// enters the callee carrying the CALLER's views, and reading one while the
+  /// callee wrote the other returned zeros.
+  ///
+  /// \p refBuf must be null exactly when !needsRefBuffer(funcType); \p rbI
+  /// and \p rbF are always required, since this is only called when the
+  /// callee returns through the buffer.
+  void emitRetBufLoads(
+      const WasmFuncType &funcType,
+      Value *rbI,
+      Value *rbF,
+      Value *refBuf);
 
   /// Read i64 from retBufI_[0] and retBufI_[1]. Used after i64 arithmetic
   /// builtins that write their result to the return buffer.

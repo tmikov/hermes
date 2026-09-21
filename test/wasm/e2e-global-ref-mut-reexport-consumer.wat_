@@ -1,0 +1,15 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-global-ref-mut-reexport.wat: imports a MUTABLE
+;; externref global and re-exports it under a new name. The import path keeps
+;; the WebAssembly.Global object for a mutable import, and the export loop
+;; republishes that object rather than building a new one.
+
+(module
+  (import "e" "g" (global (mut externref)))
+  (export "g_re" (global 0))
+  (func (export "get") (result externref) global.get 0)
+  (func (export "set") (param externref) (global.set 0 (local.get 0))))

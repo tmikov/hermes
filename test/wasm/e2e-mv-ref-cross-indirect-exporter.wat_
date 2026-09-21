@@ -1,0 +1,28 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-mv-ref-cross-indirect.wat. Both multi-value functions are
+;; put into a table the importer calls through, so their results are marshalled
+;; by THIS module and read by the other one.
+
+(module
+  (table 1 funcref)
+  (elem (i32.const 0) $target)
+  (func $target (result i32) (i32.const 7))
+
+  ;; The identity oracle: a single funcref result bypasses the buffer.
+  (func (export "svGet") (result funcref)
+    (table.get (i32.const 0)))
+
+  (func (export "mkpair") (result i32 funcref)
+    (i32.const 42)
+    (table.get (i32.const 0)))
+
+  (global $g (mut externref) (ref.null extern))
+  (func (export "put") (param externref)
+    (global.set $g (local.get 0)))
+  (func (export "mkext") (result externref i32)
+    (global.get $g)
+    (i32.const 9)))

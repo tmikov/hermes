@@ -317,6 +317,11 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
 
   /// Index of the current item whose init expr we are parsing.
   wabt::Index currentInitExprIndex_ = 0;
+
+  /// Size of the current element segment's item list when the element
+  /// expression now being parsed began. EndElemExpr() compares against it to
+  /// check that the expression contributed exactly one entry.
+  size_t elemExprItemBase_ = 0;
 };
 
 } // namespace wasm

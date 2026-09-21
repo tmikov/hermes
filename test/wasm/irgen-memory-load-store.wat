@@ -80,26 +80,37 @@
 ;; assertion here: a regression that re-added the property read ALONGSIDE the
 ;; builtin would satisfy every positive check below.
 ;; CHECK-LABEL: function __wasm_instantiate__(imports: any): object
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"WebAssembly"
+;; The constructor comes from the cached HermesInternal.intrinsics holder --
+;; globalThis.WebAssembly is writable and configurable, and so is .Memory on
+;; it, so both levels used to be script's to choose.
+;; CHECK: LoadFrameInst {{.*}}[%VS0.intrinsics]: any
+;; CHECK: LoadPropertyInst {{.*}}"WebAssembly"
 ;; CHECK: LoadPropertyInst {{.*}}"Memory"
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkMemory]
 ;; CHECK: BinaryStrictlyEqualInst {{.*}}null: null
 ;; CHECK: CondBranchInst
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkError]{{.*}}"WebAssembly.Memory did not construct a memory for this module's memory 0": string
 
-;; The brand is not the whole check. A replaced constructor can return a
-;; GENUINE Memory carrying limits of its own, and a defined memory's declared
-;; limits are what the module ASKED FOR, not what came back -- memory.grow
-;; then uses the compile-time literal and can grow the substitute past its own
-;; maximum. Both numbers are compared, by exact equality: this module declares
-;; (memory 1), so one page and the -1 that means "no maximum".
+;; The brand is not the whole check, and a pristine constructor does not make
+;; it so: the limits come out of a descriptor built with ordinary strict
+;; stores, which walk the prototype chain, so an `initial`/`maximum` accessor
+;; on Object.prototype can still answer the constructor's read with a number
+;; of its own. That yields a GENUINE Memory carrying limits nobody declared,
+;; while memory.grow keeps using the compile-time literal and can grow it past
+;; its own maximum -- see test/wasm/e2e-pristine-descriptor.wat. Both numbers
+;; are compared, by exact equality: this module declares (memory 1), so one
+;; page and the -1 that means "no maximum".
 ;; CHECK: [[PAGES:%[0-9]+]] = LoadPropertyInst {{.*}}0: number
 ;; CHECK-NEXT: [[MAX:%[0-9]+]] = LoadPropertyInst {{.*}}1: number
 ;; CHECK-NEXT: BinaryStrictlyEqualInst (:any) [[PAGES]]: any, 1: number
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkError]{{.*}}"WebAssembly.Memory did not construct a memory with this module's declared limits for memory 0": string
 ;; CHECK: BinaryStrictlyEqualInst (:any) [[MAX]]: any, -1: number
 
-;; Only then is the buffer taken, and the views built over it.
+;; Only then is the buffer taken, and the views built over it -- from the
+;; intrinsics holder, so the eight view constructors are out of script's reach
+;; too. A replaced Float64Array here fed the module's own linear memory
+;; through a UnionNarrowTrustedInst; see test/wasm/e2e-pristine-memviews.wat.
 ;; CHECK: LoadPropertyInst {{.*}}2: number
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"
+;; CHECK: LoadFrameInst {{.*}}[%VS0.intrinsics]: any
+;; CHECK: LoadPropertyInst {{.*}}"Int8Array"
+;; CHECK: LoadPropertyInst {{.*}}"Int32Array"

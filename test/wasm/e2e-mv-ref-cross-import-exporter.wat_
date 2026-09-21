@@ -1,0 +1,27 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-mv-ref-cross-import.wat. Its multi-value exports are
+;; imported as FUNCTIONS by the other module, so the results cross the boundary
+;; as this module's public result array, read back by the importer's trampoline.
+
+(module
+  (table 1 funcref)
+  (elem (i32.const 0) $target)
+  (func $target (result i32) (i32.const 7))
+
+  (func (export "svGet") (result funcref)
+    (table.get (i32.const 0)))
+
+  (func (export "mkpair") (result i32 funcref)
+    (i32.const 42)
+    (table.get (i32.const 0)))
+
+  (global $g (mut externref) (ref.null extern))
+  (func (export "put") (param externref)
+    (global.set $g (local.get 0)))
+  (func (export "mkext") (result externref i32)
+    (global.get $g)
+    (i32.const 9)))

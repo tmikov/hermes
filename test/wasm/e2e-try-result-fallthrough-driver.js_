@@ -1,0 +1,64 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-try-result-fallthrough.wat.
+
+var throwing = false;
+var e = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(
+    hermescli.loadFile(hermescli.getScriptArgs()[0])),
+  {e: {boom: function() { if (throwing) throw [e.t, 77]; }}}).exports;
+
+function show(label, v) {
+  print(label + ': ' + (Array.isArray(v) ? v.join(',') : v));
+}
+
+// The rethrowing cases must not pass merely because SOMETHING threw: a
+// handler that never ran, or an unrelated failure, would satisfy that. Each
+// handler raises an exception carrying a payload of its own, so the value
+// that arrives says which one ran.
+function attempt(label, payload, fn) {
+  try { show(label, fn()); }
+  catch (err) {
+    print(label + ': ' +
+        (Array.isArray(err) && err[0] === e.t && err[1] === payload
+            ? 'the handler rethrew, payload ' + payload
+            : 'UNEXPECTED ' + err));
+  }
+}
+
+throwing = false;
+show('c() with no throw', e.c());
+show('c2() with no throw', e.c2());
+show('cn() with no throw', e.cn());
+show('ca() with no throw', e.ca());
+show('i64c() with no throw', e.i64c());
+show('mix() with no throw', e.mix());
+show('cr() with no throw', e.cr());
+show('car() with no throw', e.car());
+show('p() with no throw', e.p());
+show('pi64() with no throw', e.pi64());
+show('pca() with no throw', e.pca());
+show('pafter() with no throw', e.pafter());
+show('pmix() with no throw', e.pmix());
+
+throwing = true;
+show('c() catching 77', e.c());
+show('c2() catching 77', e.c2());
+show('cn() catching 77', e.cn());
+show('ca() catching 77', e.ca());
+show('i64c() catching 77', e.i64c());
+show('mix() catching 77', e.mix());
+attempt('cr() catching 77', 55, function() { return e.cr(); });
+attempt('car() catching 77', 0, function() { return e.car(); });
+show('p() catching 77', e.p());
+show('pi64() catching 77', e.pi64());
+show('pca() catching 77', e.pca());
+show('pafter() catching 77', e.pafter());
+show('pmix() catching 77', e.pmix());
+
+print('done');

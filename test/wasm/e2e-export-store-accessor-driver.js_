@@ -1,0 +1,77 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-export-store-accessor.wat.
+
+var bytes = hermescli.loadFile(hermescli.getScriptArgs()[0]);
+var fired = 0;
+
+// One accessor per export name, installed BEFORE instantiating because the
+// stores happen during it. "name", "kind" and "module" are the property names
+// the export/import description objects use, and are stored the same way.
+// BOTH halves are counted. A setter firing means a store was intercepted; a
+// getter firing means something read a property that should have been an own
+// one and found the inherited accessor instead. Counting only setters would
+// let a missing definition pass unnoticed, because the read would then fall
+// through to the getter and quietly answer undefined.
+var NAMES = ['f', 'm', 't', 'g', 'e', 'name', 'kind', 'module', 'instantiate',
+             'exportDescs', 'importDescs', 'instance'];
+for (var i = 0; i < NAMES.length; i++) {
+  Object.defineProperty(Object.prototype, NAMES[i], {
+    configurable: true,
+    set: function(v) { fired++; },
+    get: function() { fired++; return undefined; },
+  });
+}
+
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+var e = new WebAssembly.Instance(mod).exports;
+// The PUBLIC description API builds its own objects natively, with the same
+// kind of store; exercise it while the accessors are still installed.
+var publicDescs = WebAssembly.Module.exports(mod);
+var publicImports = WebAssembly.Module.imports(mod);
+
+for (var i = 0; i < NAMES.length; i++)
+  delete Object.prototype[NAMES[i]];
+
+print('accessors fired during instantiation: ' + fired);
+print('Module.exports() names: ' +
+      publicDescs.map(function(d) { return d.name; }).sort().join(',') +
+      ', imports: ' + publicImports.length);
+
+print('f: ' + typeof e.f);
+print('m: ' + typeof e.m + ', a Memory: ' + (e.m instanceof WebAssembly.Memory));
+print('t: ' + typeof e.t + ', a Table: ' + (e.t instanceof WebAssembly.Table));
+print('g: ' + typeof e.g + ', a Global: ' + (e.g instanceof WebAssembly.Global));
+print('e: ' + typeof e.e + ', a Tag: ' + (e.e instanceof WebAssembly.Tag));
+
+print('frozen: ' + Object.isFrozen(e) +
+      ', keys: ' + Object.keys(e).sort().join(','));
+
+// --- the indexed half ----------------------------------------------------
+// The description arrays and the data/element segment arrays are filled with
+// indexed stores, which walk the prototype chain the same way.
+var idxFired = 0;
+for (var i = 0; i < 8; i++) {
+  Object.defineProperty(Object.prototype, String(i), {
+    configurable: true,
+    set: function(v) { idxFired++; },
+    get: function() { return undefined; },
+  });
+}
+var mod2 = WebAssembly.Module.fromHermesBytecode(bytes);
+var descs = WebAssembly.Module.exports(mod2);
+var e2 = new WebAssembly.Instance(mod2).exports;
+e2.init();
+var bytesOut = [e2.peek(0), e2.peek(1), e2.peek(2), e2.peek(3)];
+for (var i = 0; i < 8; i++) delete Object.prototype[String(i)];
+
+print('indexed accessors fired: ' + idxFired);
+var names = descs.map(function(d) { return d && d.name; }).sort().join(',');
+print('Module.exports() intact: ' + (names === 'e,f,g,init,m,peek,t'));
+print('memory.init copied the segment: ' + bytesOut.join(','));
+print('done');

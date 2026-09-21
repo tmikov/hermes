@@ -57,42 +57,65 @@ try {
 print('exporter wrote 43981 at 512; consumer reads: ' +
       (consumer ? consumer.peek(512) : 'n/a'));
 
-// --- A replaced constructor -----------------------------------------------
+// --- A replaced constructor is ignored ------------------------------------
 //
-// globalThis.WebAssembly.Memory is an ordinary property. What it returns is
-// not a memory at all, and the module must say so rather than run on it.
+// globalThis.WebAssembly.Memory is an ordinary writable property, but
+// createMemoryViews() reads the constructor from
+// HermesInternal.intrinsics.WebAssembly instead, so replacing it no longer
+// decides what a module's memory is.
 var savedCtor = WebAssembly.Memory;
-WebAssembly.Memory = function () { return {}; };
+var replacementUsed = false;
+WebAssembly.Memory = function () { replacementUsed = true; return {}; };
 try {
-  new WebAssembly.Instance(mod);
-  print('replaced Memory constructor: linked');
+  var ex = new WebAssembly.Instance(mod).exports;
+  print('replaced Memory constructor: linked, size = ' + ex.size());
 } catch (err) {
   print('replaced Memory constructor: ' + err.name + ': ' + err.message);
 }
+// The replacement really would have been used by anything that read it, so
+// the line above is not passing because the replacement was inert.
+new WebAssembly.Memory({initial: 1});
+print('replaced Memory constructor was live: ' + replacementUsed);
 WebAssembly.Memory = savedCtor;
 
-// --- A replaced constructor returning a GENUINE memory --------------------
+// --- A tampered DESCRIPTOR still reaches the limits check -----------------
 //
-// The brand check alone does not settle this: what comes back can be a real
-// WebAssembly.Memory with limits of its own. The declaration is what this
-// module asked for, not what it got, and memory.grow on a defined memory uses
-// the compile-time literal -- so a substituted memory with a smaller maximum
-// gets grown past its own ceiling and ends up with maxPages_ inconsistent
-// with its buffer.
-function withSubstitute(label, descriptor) {
-  var saved = WebAssembly.Memory;
-  WebAssembly.Memory = function () { return new saved(descriptor); };
+// The constructor is out of reach; the descriptor generated code hands it is
+// not. That descriptor is an ordinary object literal and its stores walk the
+// prototype chain, so accessors installed here swallow what the module wrote
+// and answer the constructor's reads with numbers of their own. The result is
+// a GENUINE WebAssembly.Memory carrying limits the module never declared,
+// while memory.grow on a defined memory keeps using the compile-time literal
+// -- so a smaller maximum gets grown past its own ceiling and ends up with
+// maxPages_ inconsistent with its buffer.
+//
+// Nothing inside these accessors assigns to another object: every ordinary
+// object inherits from Object.prototype, so that would re-enter them.
+function withDescriptor(label, initialVal, maximumVal) {
+  var installed = [];
+  function install(name, value) {
+    Object.defineProperty(Object.prototype, name, {
+      get: function () { return value; },
+      set: function (v) {},
+      configurable: true,
+    });
+    installed.push(name);
+  }
+  install('initial', initialVal);
+  install('maximum', maximumVal);
   try {
     var ex = new WebAssembly.Instance(mod).exports;
     print(label + ': linked, size = ' + ex.size());
   } catch (err) {
     print(label + ': ' + err.name + ': ' + err.message);
   }
-  WebAssembly.Memory = saved;
+  for (var i = 0; i < installed.length; i++)
+    delete Object.prototype[installed[i]];
 }
-// The module declares (memory 1 4).
-withSubstitute('substituted 1 page, no maximum', {initial: 1});
-withSubstitute('substituted 1 page, maximum 2', {initial: 1, maximum: 2});
-withSubstitute('substituted 2 pages, maximum 4', {initial: 2, maximum: 4});
-withSubstitute('substituted exactly as declared', {initial: 1, maximum: 4});
+// The module declares (memory 1 4). `undefined` for the maximum is how the
+// descriptor spells "no maximum".
+withDescriptor('descriptor said 1 page, no maximum', 1, undefined);
+withDescriptor('descriptor said 1 page, maximum 2', 1, 2);
+withDescriptor('descriptor said 2 pages, maximum 4', 2, 4);
+withDescriptor('descriptor said exactly what was declared', 1, 4);
 print('done');
