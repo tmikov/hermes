@@ -59,6 +59,7 @@ set(RTSources
   RuntimeConfigTest.cpp
   SamplingHeapProfilerTest.cpp
   SamplingProfilerTest.cpp
+  SHUnitABITest.cpp
   SmallHermesValueTest.cpp
   SmallXStringTest.cpp
   StaticBuiltinsTest.cpp

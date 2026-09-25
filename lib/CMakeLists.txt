@@ -346,4 +346,11 @@ string(APPEND HERMESVM_MODEL "_s" ${HERMESVM_LOG_HEAP_SEGMENT_SIZE})
 # The pointer size is not strictly necessary, but include it for completeness.
 string(APPEND HERMESVM_MODEL "_p" ${CMAKE_SIZEOF_VOID_P})
 
+# SHUnit ABI version. Generated C allocates a UnitData that embeds SHUnit by
+# value, so any change to the SHUnit layout makes previously generated object
+# files the wrong size. Bump this whenever SHUnit's layout changes: a stale
+# object then fails to link against the new runtime instead of reading past
+# its own allocation.
+string(APPEND HERMESVM_MODEL "_u1")
+
 configure_file(config/libhermesvm-config.h.in config/libhermesvm-config.h)
