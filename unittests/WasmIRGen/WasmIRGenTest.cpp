@@ -771,8 +771,10 @@ TEST(WasmIRGenTest, ExplicitReturn) {
   irgen.endFunction();
 
   auto *func = irgen.getIRFunctions()[0];
-  // Should have 2 basic blocks: entry and exit block (dead block removed).
-  EXPECT_EQ(func->getBasicBlockList().size(), 2u);
+  // Should have 1 basic block: the explicit return jumps directly to
+  // ReturnInst, so nothing branches to the function's exit block and it is
+  // deleted by deleteUnreachableBasicBlocks.
+  EXPECT_EQ(func->getBasicBlockList().size(), 1u);
 
   // Entry block should end with ReturnInst returning 42.
   auto &bb = func->getBasicBlockList().front();
@@ -1088,25 +1090,27 @@ TEST(WasmIRGenTest, LoopBrBack) {
   irgen.endFunction();
 
   auto *func = irgen.getIRFunctions()[0];
+  // Only the entry block and the loop header should survive: the loop's end
+  // block (dead, since br 0 always loops) and the function's exit block
+  // (dead, since nothing branches to it either) are both removed by
+  // deleteUnreachableBasicBlocks.
+  EXPECT_EQ(func->getBasicBlockList().size(), 2u);
+
   // The loop header should have a BranchInst targeting itself.
-  // Find a block with a BranchInst whose target is the block itself
-  // or another block that is the loop header.
   bool foundLoopBack = false;
   for (auto &bb : func->getBasicBlockList()) {
-    if (bb.empty())
-      continue;
-    if (auto *br = llvh::dyn_cast<BranchInst>(&bb.back())) {
-      // Check if we find a BranchInst targeting a block that has
-      // incoming branches from the loop body.
-      (void)br;
+    if (auto *br = llvh::dyn_cast<BranchInst>(bb.getTerminator())) {
+      if (br->getBranchDest() == &bb) {
+        foundLoopBack = true;
+      }
     }
   }
-  // Just verify it compiles and doesn't crash.
-  // The end block is unreachable (since br 0 always loops).
-  // The function should still have a return instruction somewhere.
+  EXPECT_TRUE(foundLoopBack);
+
+  // No ReturnInst remains anywhere in the function: with both dead blocks
+  // gone, this infinite loop genuinely has no reachable exit.
   auto *ret = findReturnInst(func);
-  ASSERT_NE(ret, nullptr);
-  (void)foundLoopBack;
+  ASSERT_EQ(ret, nullptr);
 }
 
 TEST(WasmIRGenTest, LoopWithBrIf) {

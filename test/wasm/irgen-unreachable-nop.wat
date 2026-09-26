@@ -11,17 +11,15 @@
 
 (module
   ;; Function 0: just unreachable
-  ;; unreachable calls wasmTrap helper then emits UnreachableInst.
-  ;; The exit block (BB1) is unreachable with a dead ReturnInst.
+  ;; unreachable calls wasmTrap helper then emits UnreachableInst. The exit
+  ;; block would be unreachable with a dead ReturnInst, so it is deleted.
   (func
     unreachable)
 
-;; CHECK-LABEL: function wasm_func_0(): undefined 
+;; CHECK-LABEL: function wasm_func_0(): undefined
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:   UnreachableInst
-;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
   ;; Function 1: just nop
@@ -52,16 +50,14 @@
 
   ;; Function 3: push value, then unreachable - dead code after unreachable.
   ;; The pushed constant before unreachable is live, but unreachable kills
-  ;; the control flow. Code after unreachable is dead.
+  ;; the control flow. Code after unreachable is dead, and so is the exit
+  ;; block nothing branches to, which is deleted.
   (func (result i32)
     i32.const 42
     unreachable))
 
-;; CHECK-LABEL: function wasm_func_3(): number 
+;; CHECK-LABEL: function wasm_func_3(): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:   UnreachableInst
-;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %{{.*}} = PhiInst (:notype)
-;; CHECK-NEXT:            ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end

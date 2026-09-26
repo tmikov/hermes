@@ -28,18 +28,17 @@
 
   ;; Test 2: Infinite loop (br 0 targets loop header)
   ;; The br 0 branches back to the loop header. The loop's end block and
-  ;; the dead block after br are unreachable.
+  ;; the dead block after br are unreachable and deleted, and so is the
+  ;; function's exit block, since nothing branches to it either.
   (func (export "infinite_loop")
     (loop
       (br 0)))
 
-;; CHECK-LABEL: function wasm_func_1(): undefined 
+;; CHECK-LABEL: function wasm_func_1(): undefined
 ;; CHECK: %BB0:
-;; CHECK:              BranchInst %BB2
+;; CHECK:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT:        ReturnInst undefined: undefined
-;; CHECK: %BB2:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK:   function_end
 
   ;; Test 3: Countdown loop

@@ -11,18 +11,15 @@
 
 (module
   ;; Function 0: explicit return
-  ;; The explicit return jumps directly to ReturnInst; the exit block (BB1)
-  ;; is unreachable with an empty PhiInst.
+  ;; The explicit return jumps directly to ReturnInst; the exit block would
+  ;; be unreachable with an empty PhiInst, so it is deleted.
   (func (result i32)
     i32.const 42
     return)
 
-;; CHECK-LABEL: function wasm_func_0(): number 
+;; CHECK-LABEL: function wasm_func_0(): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              ReturnInst 42: number
-;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %{{.*}} = PhiInst (:notype)
-;; CHECK-NEXT:            ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
   ;; Function 1: implicit return (fallthrough)
