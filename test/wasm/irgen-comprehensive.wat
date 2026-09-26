@@ -222,22 +222,20 @@
   return
 )
 
-;; CHECK-LABEL: function wasm_func_11(): number 
+;; CHECK-LABEL: function wasm_func_11(): number
 ;; CHECK: %BB0:
 ;; CHECK:   ReturnInst 42: number
-;; CHECK: %BB1:
-;; CHECK:   function_end
+;; CHECK: function_end
 
 ;; --- Test 13: Unreachable ---
 (func $unreachable_test
   unreachable
 )
 
-;; CHECK-LABEL: function wasm_func_12(): undefined 
+;; CHECK-LABEL: function wasm_func_12(): undefined
 ;; CHECK: %BB0:
 ;; CHECK:   UnreachableInst
-;; CHECK: %BB1:
-;; CHECK:   function_end
+;; CHECK: function_end
 
 ;; --- Test 14: br_table ---
 (func $br_table_test (param i32) (result i32)

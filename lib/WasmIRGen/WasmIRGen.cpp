@@ -11,6 +11,7 @@
 #include "hermes/IR/Analysis.h"
 #include "hermes/IR/IR.h"
 #include "hermes/IR/IRBuilder.h"
+#include "hermes/IR/IRUtils.h"
 #include "hermes/IR/Instrs.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 
@@ -3551,6 +3552,17 @@ void WasmIRGen::endFunction() {
   for (auto *BB : deadBlocks) {
     BB->eraseFromParent();
   }
+
+  // Delete blocks left unreachable by `unreachable` in non-tail position.
+  // createResultPhis() creates a continuation block's result phis when the
+  // control entry is set up, before it is known whether anything will branch
+  // there; if nothing does, those phis are left with zero operands, which the
+  // verifier rejects as a NoType instruction with an output. ESTreeIRGen does
+  // the same thing at the end of every function for the same reason.
+  //
+  // This must run BEFORE fixupCatchTargets, matching ESTreeIRGen-func.cpp,
+  // so that catch targets are not assigned to blocks about to be deleted.
+  deleteUnreachableBasicBlocks(currentFunc_);
 
   // Fix up catch targets on ThrowInst instructions inside try blocks.
   fixupCatchTargets(currentFunc_);
