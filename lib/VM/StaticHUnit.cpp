@@ -18,6 +18,29 @@
 using namespace hermes;
 using namespace hermes::vm;
 
+/// Generated C `calloc`s a `UnitData` that embeds an `SHUnit` by value,
+/// sized and laid out however the generating compiler saw the struct. The
+/// "_u" component of HERMESVM_MODEL (see lib/CMakeLists.txt) exists so that
+/// a stale object file -- one compiled against an older `SHUnit` layout --
+/// fails to link against a runtime with a different layout, rather than
+/// silently reading past the end of its own allocation. That guard only
+/// works if "_u" is bumped whenever the layout actually changes, so pin the
+/// size here as a tripwire: if this fires, bump the "_u" suffix in
+/// lib/CMakeLists.txt.
+///
+/// `sizeof(SHUnit)` depends on pointer width -- already captured by the
+/// separate "_p" component of HERMESVM_MODEL -- so the constant below is
+/// only meaningful, and is only checked, on 64-bit configurations (verified
+/// against a Linux/x86-64 build). Guarding on `sizeof(void*)` rather than a
+/// compiler/OS macro keeps this correct for every 64-bit target without
+/// having to enumerate them, and avoids asserting a 32-bit value that
+/// hasn't been verified.
+static_assert(
+    sizeof(void *) != 8 || sizeof(SHUnit) == 216,
+    "SHUnit's layout changed: bump the \"_u\" component of HERMESVM_MODEL "
+    "in lib/CMakeLists.txt so a stale generated object file fails to link "
+    "instead of corrupting memory at runtime.");
+
 static void sh_unit_init_symbols(Runtime &runtime, SHUnit *unit);
 static SHLegacyValue sh_unit_run(SHRuntime *shr, SHUnit *unit);
 

@@ -27,10 +27,16 @@
 #include "hermes/TypedLib/TypedLib.h"
 #include "hermes/Utils/CompilerRuntimeFlags.h"
 
+#ifdef HERMES_ENABLE_WASM
+#include "hermes/WasmFrontend/WasmCompile.h"
+#include "hermes/WasmFrontend/WasmModuleInfo.h"
+#endif
+
 #include "llvh/ADT/ScopeExit.h"
 #include "llvh/Support/CommandLine.h"
 #include "llvh/Support/InitLLVM.h"
 #include "llvh/Support/MemoryBuffer.h"
+#include "llvh/Support/Path.h"
 #include "llvh/Support/Process.h"
 #include "llvh/Support/Program.h"
 
@@ -288,6 +294,12 @@ static cl::opt<std::string> ExportedUnit(
     cl::desc(
         "Produce an SHUnit with the given name to be used by other code. "
         "When this is specified, no main function will be produced."),
+    cl::cat(CompilerCategory));
+
+static cl::opt<bool> WasmMode(
+    "wasm",
+    cl::desc("The input is a WebAssembly binary module."),
+    cl::init(false),
     cl::cat(CompilerCategory));
 
 cl::opt<bool> DumpBetweenPasses(
@@ -929,6 +941,47 @@ bool compileFromCommandLineOptions() {
       return false;
     }
   }
+#ifdef HERMES_ENABLE_WASM
+  // Auto-detect by extension, as CompilerDriver.cpp:1026 does, and accept an
+  // explicit flag for inputs that are not named .wasm.
+  bool wasmInput = cli::WasmMode ||
+      (cli::InputFilenames.size() == 1 &&
+       llvh::sys::path::extension(cli::InputFilenames[0]) == ".wasm");
+  if (wasmInput) {
+    if (cli::InputFilenames.size() != 1) {
+      llvh::errs() << "Error: exactly one input file is required for Wasm\n";
+      return false;
+    }
+    // A Wasm module's top level returns a module object whose instantiate()
+    // needs an import object the embedder supplies, so a generated main has
+    // nothing useful to do with it. The only supported output is a unit.
+    if (cli::ExportedUnit.empty()) {
+      llvh::errs() << "Error: Wasm input requires --exported-unit=NAME\n";
+      return false;
+    }
+    // There is no AST and no sema for a Wasm module. shermesCompile asserts
+    // that the output level is at least IR (compile.cpp:528), so these modes
+    // must be rejected here rather than falling through to it.
+    if (cli::OutputLevel.getNumOccurrences() &&
+        cli::OutputLevel < OutputLevelKind::CFG) {
+      llvh::errs()
+          << "Error: this output mode is not supported for WebAssembly input\n";
+      return false;
+    }
+  }
+#else
+  // Wasm support is compiled out, but the flag (and .wasm auto-detection)
+  // still exist so we can report a clear error instead of silently handing
+  // the binary to the JavaScript parser.
+  bool wasmInput = cli::WasmMode ||
+      (cli::InputFilenames.size() == 1 &&
+       llvh::sys::path::extension(cli::InputFilenames[0]) == ".wasm");
+  if (wasmInput) {
+    llvh::errs() << "Error: WebAssembly support is not compiled into this "
+                    "build of shermes\n";
+    return false;
+  }
+#endif
   if (cli::InputFilenames.empty()) {
     llvh::errs() << "Error: must provide an input filename.\n";
     return false;
@@ -956,32 +1009,52 @@ bool compileFromCommandLineOptions() {
   flow::FlowContext flowContext{};
   std::vector<std::unique_ptr<llvh::MemoryBuffer>> fileBufs{};
 
-  for (llvh::StringRef filename : cli::InputFilenames) {
+  if (wasmInput) {
+#ifdef HERMES_ENABLE_WASM
     std::unique_ptr<llvh::MemoryBuffer> fileBuf =
-        memoryBufferFromFile(filename, "input file", true);
+        memoryBufferFromFile(cli::InputFilenames[0], "input file", true);
     if (!fileBuf)
       return false;
-    fileBufs.push_back(std::move(fileBuf));
-  }
+    wasm::WasmModuleInfo moduleInfo;
+    std::string errorMsg;
+    if (!compileWasmModule(
+            reinterpret_cast<const uint8_t *>(fileBuf->getBufferStart()),
+            fileBuf->getBufferSize(),
+            M,
+            moduleInfo,
+            errorMsg)) {
+      llvh::errs() << "Error: " << errorMsg << '\n';
+      return false;
+    }
+#endif
+  } else {
+    for (llvh::StringRef filename : cli::InputFilenames) {
+      std::unique_ptr<llvh::MemoryBuffer> fileBuf =
+          memoryBufferFromFile(filename, "input file", true);
+      if (!fileBuf)
+        return false;
+      fileBufs.push_back(std::move(fileBuf));
+    }
 
-  // TODO: support input source map.
-  ESTree::NodePtr ast = parseJS(
-      context,
-      semCtx,
-      cli::Typed ? &flowContext : nullptr,
-      declFileList,
-      std::move(fileBufs),
-      cli::InputSourceMap);
-  if (!ast) {
-    auto N = context->getSourceErrorManager().getErrorCount();
-    llvh::errs() << "Emitted " << N << " errors. exiting.\n";
-    return false;
+    // TODO: support input source map.
+    ESTree::NodePtr ast = parseJS(
+        context,
+        semCtx,
+        cli::Typed ? &flowContext : nullptr,
+        declFileList,
+        std::move(fileBufs),
+        cli::InputSourceMap);
+    if (!ast) {
+      auto N = context->getSourceErrorManager().getErrorCount();
+      llvh::errs() << "Emitted " << N << " errors. exiting.\n";
+      return false;
+    }
+    if (cli::OutputLevel.getNumOccurrences() &&
+        cli::OutputLevel < OutputLevelKind::CFG) {
+      return true;
+    }
+    generateIRFromESTree(&M, semCtx, flowContext, ast);
   }
-  if (cli::OutputLevel.getNumOccurrences() &&
-      cli::OutputLevel < OutputLevelKind::CFG) {
-    return true;
-  }
-  generateIRFromESTree(&M, semCtx, flowContext, ast);
 
   // Bail out if there were any errors. We can't ensure that the module is in
   // a valid state.
@@ -1061,6 +1134,7 @@ bool compileFromCommandLineOptions() {
   genOptions.emitMain = cli::ExportedUnit.empty();
   if (!cli::ExportedUnit.empty())
     genOptions.unitName = cli::ExportedUnit;
+  genOptions.wasmUnit = wasmInput;
 
   genOptions.smallC = cli::SmallC;
 

@@ -1,0 +1,36 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for native-e2e-add.wat. The Wasm unit is linked into this
+// executable and reached by name; no bytecode is involved anywhere. Note
+// there is no hermescli.loadFile() preamble -- that is what the bytecode
+// drivers need and this one does not.
+
+var mod = WebAssembly.Module.fromNativeUnit('addmod');
+var inst = new WebAssembly.Instance(mod, {});
+print('add(2,40): ' + inst.exports.add(2, 40));
+
+// Descriptors come from running the unit's top level, the same route the
+// bytecode path uses.
+print('exports: ' + WebAssembly.Module.exports(mod).map(function (e) {
+  return e.name + ':' + e.kind;
+}).join(','));
+
+// A second instance must not alias the first. Isolation comes from
+// __wasm_instantiate__ creating its own scope per call.
+var inst2 = new WebAssembly.Instance(mod, {});
+print('second instance distinct: ' + (inst2.exports.add !== inst.exports.add));
+
+// An unknown name is a TypeError, not a crash.
+try {
+  WebAssembly.Module.fromNativeUnit('nosuchunit');
+  print('MISSING THROW');
+} catch (e) {
+  print('unknown unit: ' + (e instanceof TypeError));
+}
+
+print('done');

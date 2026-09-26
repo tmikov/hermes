@@ -27,6 +27,7 @@
 #include "hermes/VM/JSWebAssemblyTable.h"
 #include "hermes/VM/Runtime.h"
 #include "hermes/VM/RuntimeModule.h"
+#include "hermes/VM/StaticHUtils.h"
 #include "hermes/BCGen/HBC/BCProvider.h"
 #include "hermes/Support/Conversions.h"
 #include "hermes/Support/MemoryBuffer.h"
@@ -602,6 +603,95 @@ enum class WasmBytesMode {
   UntrustedBytecode,
 };
 
+/// Run \p creator's unit main and return the module info object it produces,
+/// converting an SH exception into ExecutionStatus::EXCEPTION.
+///
+/// The bare _sh_unit_init reaches sh_unit_run, which calls _legacyCall with
+/// no guard installed; a throw from there reaches _sh_throw_current, which
+/// aborts when no handler exists and otherwise longjmps past the live
+/// LocalsRAII and GCScope objects in this file. The guarded form installs its
+/// own jmpbuf and reports by return value instead.
+///
+/// The returned value is unrooted -- the guarded call's GCScope is gone by
+/// the time it returns -- so the caller must pin it before anything else can
+/// allocate.
+static CallResult<HermesValue> runNativeWasmUnit(
+    Runtime &runtime,
+    SHUnitCreatorFn creator) {
+  SHLegacyValue resOrExc;
+  if (!_sh_unit_init_guarded(getSHRuntime(runtime), creator, &resOrExc)) {
+    // _sh_catch returns _sh_get_clear_thrown_value, so the runtime no longer
+    // holds the exception. Put it back for the CallResult caller;
+    // setThrownValue itself returns ExecutionStatus::EXCEPTION.
+    return runtime.setThrownValue(HermesValue::fromRaw(resOrExc.raw));
+  }
+  return HermesValue::fromRaw(resOrExc.raw);
+}
+
+/// Run an already-selected artifact's top level and build the WasmModuleData
+/// from the module info object it returns. Exactly one of \p bcProvider and
+/// \p creator is non-null.
+/// \param errorMsg [out] set on failure.
+/// \return the populated data, or nullptr on failure.
+static std::unique_ptr<WasmModuleData> buildModuleDataFromArtifact(
+    Runtime &runtime,
+    std::shared_ptr<hbc::BCProviderBase> bcProvider,
+    SHUnitCreatorFn creator,
+    std::string &errorMsg) {
+  assert(
+      (bool)bcProvider != (bool)creator &&
+      "exactly one artifact must be supplied");
+
+  struct : public Locals {
+    PinnedValue<JSObject> moduleInfoObj;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  CallResult<HermesValue> runRes{ExecutionStatus::EXCEPTION};
+  if (creator) {
+    runRes = runNativeWasmUnit(runtime, creator);
+  } else {
+    auto bcCopy = bcProvider;
+    runRes = runtime.runBytecode(
+        std::move(bcCopy),
+        RuntimeModuleFlags{},
+        "wasm-module",
+        Runtime::makeNullHandle<Environment>());
+  }
+
+  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+    errorMsg = "failed to run Wasm module top-level";
+    return nullptr;
+  }
+
+  if (!runRes->isObject()) {
+    errorMsg = "Wasm module top-level did not return an object";
+    return nullptr;
+  }
+
+  // Pin before anything that can allocate on the JS heap: the native path
+  // returns an unrooted value.
+  lv.moduleInfoObj.castAndSetHermesValue<JSObject>(*runRes);
+
+  auto moduleData = std::make_unique<WasmModuleData>();
+  // Both artifacts are recorded here. The code this was lifted from set only
+  // bytecodeProvider, and lifting it verbatim would leave every native
+  // module with neither artifact set, failing the completeness check in
+  // instantiateModuleImpl.
+  moduleData->bytecodeProvider = std::move(bcProvider);
+  moduleData->unitCreator = creator;
+
+  if (LLVM_UNLIKELY(
+          extractDescriptorsFromModuleInfo(
+              runtime, lv.moduleInfoObj, *moduleData) ==
+          ExecutionStatus::EXCEPTION)) {
+    errorMsg = "failed to extract descriptors from module info";
+    return nullptr;
+  }
+
+  return moduleData;
+}
+
 /// Shared helper: create a WasmModuleData from raw bytes.
 /// \p mode says how the bytes are to be interpreted; the bytes are never
 /// content-sniffed unless \p mode is SpecEntry and the embedder has opted
@@ -665,41 +755,8 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
   }
 
   // Run the lightweight top-level to extract descriptors.
-  auto bcCopy = bcProvider;
-  auto runRes = runtime.runBytecode(
-      std::move(bcCopy),
-      RuntimeModuleFlags{},
-      "wasm-module",
-      Runtime::makeNullHandle<Environment>());
-
-  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
-    errorMsg = "failed to run Wasm module top-level";
-    return nullptr;
-  }
-
-  if (!runRes->isObject()) {
-    errorMsg = "Wasm module top-level did not return an object";
-    return nullptr;
-  }
-
-  auto moduleData = std::make_unique<WasmModuleData>();
-  moduleData->bytecodeProvider = bcProvider;
-
-  struct : public Locals {
-    PinnedValue<JSObject> moduleInfoObj;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
-  lv.moduleInfoObj.castAndSetHermesValue<JSObject>(*runRes);
-
-  if (LLVM_UNLIKELY(
-          extractDescriptorsFromModuleInfo(
-              runtime, lv.moduleInfoObj, *moduleData) ==
-          ExecutionStatus::EXCEPTION)) {
-    errorMsg = "failed to extract descriptors from module info";
-    return nullptr;
-  }
-
-  return moduleData;
+  return buildModuleDataFromArtifact(
+      runtime, std::move(bcProvider), nullptr, errorMsg);
 }
 
 //===----------------------------------------------------------------------===//
@@ -782,10 +839,13 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     return ExecutionStatus::EXCEPTION;
   }
 
-  if (!moduleData->bytecodeProvider) {
+  if (!moduleData->bytecodeProvider && !moduleData->unitCreator) {
     raiseLinkError(runtime, "module was not fully compiled");
     return ExecutionStatus::EXCEPTION;
   }
+  assert(
+      !(moduleData->bytecodeProvider && moduleData->unitCreator) &&
+      "a module carries exactly one artifact");
 
   struct : public Locals {
     PinnedValue<JSWebAssemblyInstance> inst;
@@ -806,20 +866,27 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     return ExecutionStatus::EXCEPTION;
   }
 
-  // Run the compiled bytecode top-level to get the module info object.
-  // The top-level returns {instantiate, exportDescs, importDescs}.
-  auto bcProvider = moduleData->bytecodeProvider;
-  auto runRes = runtime.runBytecode(
-      std::move(bcProvider),
-      RuntimeModuleFlags{},
-      "wasm-module",
-      Runtime::makeNullHandle<Environment>());
+  // Run the module's top level to get the module info object, from whichever
+  // artifact it carries. The top-level returns
+  // {instantiate, exportDescs, importDescs} either way.
+  CallResult<HermesValue> runRes{ExecutionStatus::EXCEPTION};
+  if (moduleData->unitCreator) {
+    runRes = runNativeWasmUnit(runtime, moduleData->unitCreator);
+  } else {
+    auto bcProvider = moduleData->bytecodeProvider;
+    runRes = runtime.runBytecode(
+        std::move(bcProvider),
+        RuntimeModuleFlags{},
+        "wasm-module",
+        Runtime::makeNullHandle<Environment>());
+  }
 
   if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
 
-  lv.moduleInfoObj = std::move(*runRes);
+  // Pinned immediately: the native path returns an unrooted value.
+  lv.moduleInfoObj = *runRes;
 
   if (!lv.moduleInfoObj->isObject()) {
     raiseLinkError(
@@ -1001,6 +1068,24 @@ wasmInstantiate(void *context, Runtime &runtime) {
 // WebAssembly.Module
 //===----------------------------------------------------------------------===//
 
+/// Wrap \p moduleData, which must be non-null, in a new WebAssembly.Module JS
+/// object, whatever artifact the data carries. The returned value is unrooted
+/// -- callers must return it directly, not store it.
+static CallResult<HermesValue> wrapModuleData(
+    Runtime &runtime,
+    std::unique_ptr<WasmModuleData> moduleData) {
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyModule> mod;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  Handle<JSObject> prototype{runtime.wasmModulePrototype};
+  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
+  lv.mod->setModuleData(std::move(moduleData));
+
+  return lv.mod.getHermesValue();
+}
+
 /// Interpret \p data / \p size according to \p mode and wrap the result in a
 /// new WebAssembly.Module JS object. On failure raises a CompileError (unless
 /// an exception is already pending) and returns EXCEPTION. Shared by the
@@ -1021,16 +1106,7 @@ static CallResult<HermesValue> createAndBuildModule(
     return ExecutionStatus::EXCEPTION;
   }
 
-  struct : public Locals {
-    PinnedValue<JSWebAssemblyModule> mod;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
-
-  Handle<JSObject> prototype{runtime.wasmModulePrototype};
-  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
-  lv.mod->setModuleData(std::move(moduleData));
-
-  return lv.mod.getHermesValue();
+  return wrapModuleData(runtime, std::move(moduleData));
 }
 
 /// new WebAssembly.Module(bytes) — compile a Wasm binary module or load
@@ -1144,6 +1220,68 @@ wasmModuleFromHermesURL(void *context, Runtime &runtime) {
       reinterpret_cast<const uint8_t *>(bytecode.data()),
       bytecode.size(),
       WasmBytesMode::TrustedBytecode);
+}
+
+/// WebAssembly.Module.fromNativeUnit(name) -- look up a natively compiled
+/// Wasm unit that registered itself under \p name when its object was linked
+/// into this binary, and wrap it in a WebAssembly.Module. Everything
+/// downstream is unchanged: the unit's top level returns the same module info
+/// object the bytecode path produces.
+///
+/// Not gated on enableUntrustedBytecodeFromJS: script can name a linked unit
+/// but cannot introduce one, which is stronger authorization than the
+/// embedder-installed resolver behind the ungated fromHermesURL.
+static CallResult<HermesValue>
+wasmModuleFromNativeUnit(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<StringPrimitive> nameStr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // ToString(name). This may allocate and may run user JS (a toString
+  // method), so the result is pinned before anything else happens.
+  auto strRes = toString_RJS(runtime, args.getArgHandle(0));
+  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.nameStr = std::move(*strRes);
+
+  llvh::SmallVector<char16_t, 32> nameBuf;
+  lv.nameStr->appendUTF16String(nameBuf);
+  std::string name;
+  convertUTF16ToUTF8WithReplacements(name, nameBuf);
+
+  // A unit name cannot contain a NUL (isValidSHUnitName permits only
+  // alphanumerics and underscore), so an embedded NUL can never match a real
+  // unit. Reject rather than letting c_str() silently truncate.
+  if (name.find('\0') != std::string::npos) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Module.fromNativeUnit(): invalid unit name");
+  }
+
+  SHUnitCreatorFn creator = _sh_wasm_find_unit(name.c_str());
+  if (!creator) {
+    std::string msg = "WebAssembly.Module.fromNativeUnit(): no unit named '";
+    msg += name;
+    msg += '\'';
+    return runtime.raiseTypeError(llvh::StringRef(msg));
+  }
+
+  std::string errorMsg;
+  auto moduleData =
+      buildModuleDataFromArtifact(runtime, nullptr, creator, errorMsg);
+  if (!moduleData) {
+    // The unit's top level may have thrown; that exception says more than
+    // errorMsg does, so it is left in place rather than overwritten.
+    if (runtime.getThrownValue().isEmpty()) {
+      return runtime.raiseTypeError(llvh::StringRef(errorMsg));
+    }
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  return wrapModuleData(runtime, std::move(moduleData));
 }
 
 /// Return the Predefined string for an export/import kind.
@@ -3177,6 +3315,14 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::fromHermesURL),
       nullptr,
       wasmModuleFromHermesURL,
+      1);
+
+  defineMethod(
+      runtime,
+      lv.moduleCons,
+      Predefined::getSymbolID(Predefined::fromNativeUnit),
+      nullptr,
+      wasmModuleFromNativeUnit,
       1);
 
   // Register Module constructor as a property of WebAssembly.

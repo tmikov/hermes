@@ -1,0 +1,29 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for native-multivalue.wat, run both against the natively compiled
+// unit and, so the two backends' behavior is checked against the same
+// expectations, against the same module compiled to bytecode. The bytecode
+// path is selected when hermescli (present only under
+// -Xhermes-internal-test-methods) was given a script argument to load;
+// otherwise this falls back to the linked-in native unit.
+//
+// A multi-value result comes back as a JS array; join(',') stringifies the
+// i64 element (a BigInt) without the TypeError that '+' would raise on a
+// BigInt/string mix.
+
+var mod;
+if (typeof hermescli !== 'undefined' && hermescli.getScriptArgs().length > 0) {
+  mod = WebAssembly.Module.fromHermesBytecode(
+      hermescli.loadFile(hermescli.getScriptArgs()[0]));
+} else {
+  mod = WebAssembly.Module.fromNativeUnit('mvmod');
+}
+var e = new WebAssembly.Instance(mod, {}).exports;
+print('outer(): ' + e.outer().join(','));
+print('outerIndirect(): ' + e.outerIndirect().join(','));
+print('done');

@@ -2124,6 +2124,36 @@ class InstrGen {
         return;
       }
     }
+#ifdef HERMES_ENABLE_WASM
+    if (inst.getBuiltinIndex() ==
+        BuiltinMethod::HermesBuiltin_wasmDataSegmentInit) {
+      // The only constructor of this builtin call, WasmHelpers::
+      // emitDataSegmentInit, always passes exactly 4 arguments (plus the
+      // implicit 'this' at index 0), which is what lets us read arguments
+      // 1-4 below by index. Assert it so a future constructor with a
+      // different argument count fails loudly here instead of silently
+      // reading past the operand list.
+      assert(
+          inst.getNumArguments() == 5 &&
+          "HermesBuiltin_wasmDataSegmentInit must have this + 4 arguments");
+      // The builtin finds the blob through the calling CodeBlock's
+      // RuntimeModule, which an SH frame does not have.
+      os_.indent(2);
+      os_ << "_sh_wasm_data_segment_init(shr, shUnit, ";
+      generateValue(*inst.getArgument(1));
+      for (unsigned i = 2; i <= 4; ++i) {
+        os_ << ", _sh_to_uint32_double(_sh_ljs_get_double(";
+        generateValue(*inst.getArgument(i));
+        os_ << "))";
+      }
+      os_ << ");\n";
+      // The helper returns void; the instruction's result is undefined.
+      os_.indent(2);
+      generateRegister(inst);
+      os_ << " = _sh_ljs_undefined();\n";
+      return;
+    }
+#endif
     os_.indent(2);
     generateRegister(inst);
     os_ << " = _sh_ljs_call_builtin(shr, frame, " << inst.getNumArguments() - 1
@@ -3147,6 +3177,26 @@ static SHNativeFuncInfo s_function_info_table[];
     // conflicts.
     OS << "#define CREATE_THIS_UNIT sh_export_" << options.unitName << "\n";
 
+    // Wasm data-segment bytes. Emitted for every unit, empty for those with
+    // none, so the UnitData initializer needs no special case. A zero-length
+    // array is not valid ISO C, hence the one-element fallback.
+    {
+      auto binaryData = M->getBinaryDataStorage();
+      OS << "static const unsigned char s_binary_data["
+         << (binaryData.empty() ? 1 : binaryData.size()) << "] = {";
+      if (binaryData.empty()) {
+        OS << "0";
+      } else {
+        for (size_t i = 0, e = binaryData.size(); i < e; ++i) {
+          if (i % 16 == 0)
+            OS << "\n   ";
+          OS << ' ' << (unsigned)binaryData[i] << ',';
+        }
+        OS << "\n";
+      }
+      OS << "};\n";
+    }
+
     OS << "struct UnitData {\n"
        << "  SHUnit unit;\n"
        << "  SHSymbolID symbol_data[" << moduleGen.stringTable.size() << "];\n"
@@ -3181,7 +3231,9 @@ static SHNativeFuncInfo s_function_info_table[];
        << ".source_locations_size = " << moduleGen.srcLocationTable.size()
        << ", " << ".unit_main = _0_global, "
        << ".unit_main_info = &s_function_info_table[0], "
-       << ".unit_name = \"sh_compiled\" }};\n"
+       << ".unit_name = \"sh_compiled\""
+       << ", .binary_data = s_binary_data, .binary_data_size = "
+       << M->getBinaryDataStorage().size() << " }};\n"
        << "  return (SHUnit *)unit_data;\n}\n"
        << R"(
 SHSymbolID *get_symbols(SHUnit *unit) {
@@ -3198,6 +3250,31 @@ SHPrivateNameCacheEntry *get_private_name_cache(SHUnit *unit) {
   return ((struct UnitData *)unit)->private_name_cache_data;
 }
 )";
+#ifdef HERMES_ENABLE_WASM
+    // A Wasm unit registers itself under its --exported-unit name so that
+    // WebAssembly.Module.fromNativeUnit() can find it with no embedder code.
+    // options.wasmUnit is only set for units compiled from WebAssembly
+    // input (see shermes.cpp); an ordinary JS unit that also happens to use
+    // --exported-unit must not acquire a registration.
+    if (options.wasmUnit) {
+      assert(
+          !options.emitMain &&
+          "a Wasm unit is always an exported unit, never a main");
+      OS << "\nstatic SHWasmUnitReg s_wasm_reg = {\"" << options.unitName
+         << "\", sh_export_" << options.unitName << ", NULL};\n"
+         // __attribute__((constructor)) is a GCC/Clang extension; MSVC has
+         // no equivalent and would need the ".CRT$XCU" section trick
+         // instead. Not yet implemented -- see dz/issues/01a0d7fa.
+         << "#ifdef _MSC_VER\n"
+         << "#error \"Wasm unit self-registration is not implemented for "
+            "MSVC (dz/issues/01a0d7fa)\"\n"
+         << "#endif\n"
+         << "__attribute__((constructor)) static void "
+            "_sh_wasm_reg_ctor(void) {\n"
+         << "  _sh_wasm_register_unit(&s_wasm_reg);\n"
+         << "}\n";
+    }
+#endif
     if (options.emitMain) {
       OS << R"(
 typedef struct SHConsoleContext SHConsoleContext;

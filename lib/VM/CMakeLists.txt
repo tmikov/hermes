@@ -193,6 +193,7 @@ if (HERMES_ENABLE_WASM)
     JSWebAssemblyMemory.cpp
     JSWebAssemblyModule.cpp
     JSWebAssemblyTable.cpp
+    StaticHWasm.cpp
   )
 endif()
 

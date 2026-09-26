@@ -1,0 +1,75 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for native-try.wat, run both against the natively compiled unit
+// and, so the two backends' behavior is checked against the same
+// expectations, against the same module compiled to bytecode. The bytecode
+// path is selected when hermescli (present only under
+// -Xhermes-internal-test-methods) was given a script argument to load;
+// otherwise this falls back to the linked-in native unit.
+//
+// Most of the calls and expected answers are the spec suite's assert_return
+// / assert_exception lines for the same module; see
+// test/wasm/e2e-try-delegate.wat for the full explanation.
+
+var mod;
+if (typeof hermescli !== 'undefined' && hermescli.getScriptArgs().length > 0) {
+  mod = WebAssembly.Module.fromHermesBytecode(
+      hermescli.loadFile(hermescli.getScriptArgs()[0]));
+} else {
+  mod = WebAssembly.Module.fromNativeUnit('trymod');
+}
+var e = new WebAssembly.Instance(mod, {}).exports;
+
+// A Wasm exception arrives as an array whose first element is the tag, and
+// the module exports both of its tags for this.
+function isWasmException(err) {
+  return Array.isArray(err) && (err[0] === e.e0 || err[0] === e.e1);
+}
+
+function run(label, fn) {
+  try {
+    print(label + ': ' + fn());
+  } catch (err) {
+    print(label + ': ' + (isWasmException(err) ? 'threw' : 'NOT A WASM EXCEPTION: ' + err));
+  }
+}
+
+run('delegate-no-throw()', function() { return e['delegate-no-throw'](); });
+run('delegate-throw(0)', function() { return e['delegate-throw'](0); });
+run('delegate-throw(1)', function() { return e['delegate-throw'](1); });
+run('delegate-throw-no-catch()',
+    function() { return e['delegate-throw-no-catch'](); });
+run('delegate-merge(1,0)', function() { return e['delegate-merge'](1, 0); });
+run('delegate-merge(2,0)', function() { return e['delegate-merge'](2, 0); });
+run('delegate-merge(0,1)', function() { return e['delegate-merge'](0, 1); });
+run('delegate-merge(0,2)', function() { return e['delegate-merge'](0, 2); });
+run('delegate-merge(0,0)', function() { return e['delegate-merge'](0, 0); });
+run('delegate-skip()', function() { return e['delegate-skip'](); });
+run('delegate-to-block()', function() { return e['delegate-to-block'](); });
+run('delegate-to-catch()', function() { return e['delegate-to-catch'](); });
+run('delegate-to-caller-trivial()',
+    function() { return e['delegate-to-caller-trivial'](); });
+run('delegate-to-caller-skipping()',
+    function() { return e['delegate-to-caller-skipping'](); });
+run('delegate-correct-targets()',
+    function() { return e['delegate-correct-targets'](); });
+run('delegate-targets-obs()',
+    function() { return e['delegate-targets-obs'](); });
+run('delegate-skip-two()', function() { return e['delegate-skip-two'](); });
+run('delegate-past-block()',
+    function() { return e['delegate-past-block'](); });
+run('delegate-to-loop()', function() { return e['delegate-to-loop'](); });
+run('delegate-block-first()',
+    function() { return e['delegate-block-first'](); });
+run('break-try-delegate()',
+    function() { return e['break-try-delegate'](); });
+run('break-and-call-throw()',
+    function() { return e['break-and-call-throw'](); });
+run('break-and-throw()', function() { return e['break-and-throw'](); });
+
+print('done');

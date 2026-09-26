@@ -1,0 +1,17 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+var e = new WebAssembly.Instance(
+    WebAssembly.Module.fromNativeUnit('trapmod'), {}).exports;
+var caught = false;
+try {
+  e.boom();
+} catch (err) {
+  caught = true;
+}
+print('caught: ' + caught);
+print('done');

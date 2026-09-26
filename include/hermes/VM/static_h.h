@@ -66,6 +66,32 @@ typedef struct SHNativeFuncInfo {
 /// with a runtime.
 typedef SHUnit *(*SHUnitCreator)(void);
 
+/// One entry in the process-global registry of natively compiled Wasm units.
+/// The node is allocated statically inside the unit's own object file, so
+/// registration allocates nothing and can run from a static constructor.
+typedef struct SHWasmUnitReg {
+  /// The --exported-unit name. Not SHUnit::unit_name, which is a fixed
+  /// string.
+  const char *name;
+  /// The unit creator, i.e. sh_export_<name>.
+  SHUnitCreator creator;
+  /// Next entry. Set by _sh_wasm_register_unit; initialize to NULL.
+  struct SHWasmUnitReg *next;
+} SHWasmUnitReg;
+
+/// Add \p reg to the process-global Wasm unit registry. Safe from a static
+/// constructor: the list head is zero-initialized before any constructor
+/// runs. Aborts if another unit is already registered under the same name --
+/// two independently linked shared libraries can collide where a single
+/// static link cannot. The registry keeps \p reg, so the image it lives in
+/// must stay loaded; there is no unregistration.
+SHERMES_EXPORT void _sh_wasm_register_unit(SHWasmUnitReg *reg);
+
+/// \return the creator registered under \p name, or NULL.
+/// Lookup is not a static-initialization-time operation: a unit whose
+/// constructor has not yet run will not be found. See the design document.
+SHERMES_EXPORT SHUnitCreator _sh_wasm_find_unit(const char *name);
+
 /// SHUnit describes a compilation unit.
 ///
 /// <h2>Restrictions</h2>
@@ -158,6 +184,16 @@ typedef struct SHUnit {
   const SHNativeFuncInfo *unit_main_info;
   /// Unit name.
   const char *unit_name;
+
+  /// Binary data blob: Wasm data-segment bytes concatenated in segment order.
+  /// The emitter always points this at a generated (possibly empty) buffer,
+  /// even for units that have none -- which is every unit not compiled from
+  /// a Wasm module -- so this is never null; binary_data_size is 0 in that
+  /// case. Declared unconditionally because generated C does not see
+  /// HERMES_ENABLE_WASM and must agree with the runtime about this layout.
+  const unsigned char *binary_data;
+  /// Size of binary_data in bytes.
+  uint32_t binary_data_size;
 
   /// Data managed by the runtime. Field populated by the runtime.
   SHUnitExt *runtime_ext;
@@ -261,6 +297,24 @@ SHERMES_EXPORT SHLegacyValue _sh_get_template_object(
     bool dup,
     uint32_t argCount,
     ...);
+
+/// Copy \p length bytes of \p unit's binary data, starting at \p blobOffset,
+/// into the typed array \p heapu8 at offset \p dest. This is the SH
+/// counterpart of the wasmDataSegmentInit builtin, which cannot be used from
+/// native code because it locates the blob through the calling CodeBlock's
+/// RuntimeModule and an SH frame has no CodeBlock.
+///
+/// Throws a JS error, via _sh_throw_current, if \p heapu8 is not an attached
+/// typed array or if either range is out of bounds. Does nothing when
+/// \p length is zero. Declared unconditionally so that generated C can call
+/// it; defined only when Wasm is enabled.
+SHERMES_EXPORT void _sh_wasm_data_segment_init(
+    SHRuntime *shr,
+    SHUnit *unit,
+    SHLegacyValue heapu8,
+    uint32_t blobOffset,
+    uint32_t length,
+    uint32_t dest);
 
 /// Given \p templateObjectID, retrieve the cached template object.
 /// if it doesn't exist, return a nullptr.

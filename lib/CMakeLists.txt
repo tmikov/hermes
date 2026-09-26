@@ -351,6 +351,6 @@ string(APPEND HERMESVM_MODEL "_p" ${CMAKE_SIZEOF_VOID_P})
 # files the wrong size. Bump this whenever SHUnit's layout changes: a stale
 # object then fails to link against the new runtime instead of reading past
 # its own allocation.
-string(APPEND HERMESVM_MODEL "_u1")
+string(APPEND HERMESVM_MODEL "_u2")
 
 configure_file(config/libhermesvm-config.h.in config/libhermesvm-config.h)
