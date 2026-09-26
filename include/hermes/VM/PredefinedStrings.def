@@ -632,6 +632,7 @@ STR(context, "context")
 STR(exports, "exports")
 STR(fromHermesBytecode, "fromHermesBytecode")
 STR(fromHermesURL, "fromHermesURL")
+STR(fromNativeUnit, "fromNativeUnit")
 STR(dotSlash, "./")
 STR(defaultExport, "?default")
 

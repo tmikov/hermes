@@ -1,0 +1,25 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Run both against the natively compiled unit and, so the two backends'
+// behavior is checked against the same expectations, against the same
+// module compiled to bytecode. The bytecode path is selected when
+// hermescli (present only under -Xhermes-internal-test-methods) was given
+// a script argument to load; otherwise this falls back to the linked-in
+// native unit.
+var mod;
+if (typeof hermescli !== 'undefined' && hermescli.getScriptArgs().length > 0) {
+  mod = WebAssembly.Module.fromHermesBytecode(
+      hermescli.loadFile(hermescli.getScriptArgs()[0]));
+} else {
+  mod = WebAssembly.Module.fromNativeUnit('dsegmod');
+}
+var e = new WebAssembly.Instance(mod, {}).exports;
+[0, 4, 17, 18].forEach(function (i) {
+  print('at(' + i + '): ' + e.at(i));
+});
+print('done');
