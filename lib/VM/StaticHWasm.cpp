@@ -46,17 +46,16 @@ extern "C" void _sh_wasm_data_segment_init(
     _sh_throw_current(shr);
   }
 
-  if (LLVM_UNLIKELY((uint64_t)dest + length > arr->getLength())) {
+  if (LLVM_UNLIKELY((uint64_t)dest + length > arr->getByteLength())) {
     (void)runtime.raiseError(
         "wasmDataSegmentInit: out of bounds memory access");
     _sh_throw_current(shr);
   }
 
-  // Nothing between here and the memcpy allocates, so the raw data pointers
+  // Nothing between here and the memcpy allocates, so the raw data pointer
   // cannot be invalidated by a GC.
-  JSArrayBuffer *memBuf = arr->getBuffer(runtime);
-  std::memcpy(
-      memBuf->getDataBlock() + dest, unit->binary_data + blobOffset, length);
+  uint8_t *memData = arr->data(runtime);
+  std::memcpy(memData + dest, unit->binary_data + blobOffset, length);
 }
 
 namespace {

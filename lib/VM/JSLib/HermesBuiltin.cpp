@@ -1138,7 +1138,7 @@ CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
   uint32_t size =
       static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
 
-  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  uint32_t memSize = heapu8->getByteLength();
   // Bounds check: dest + size must not exceed memory size.
   // Use uint64_t to avoid overflow.
   if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + size > memSize)) {
@@ -1147,8 +1147,7 @@ CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
 
   // Perform the fill.
   if (size > 0) {
-    JSArrayBuffer *buf = heapu8->getBuffer(runtime);
-    uint8_t *data = buf->getDataBlock();
+    uint8_t *data = heapu8->data(runtime);
     std::memset(data + dest, static_cast<uint8_t>(value), size);
   }
 
@@ -1171,7 +1170,7 @@ CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
   uint32_t size =
       static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
 
-  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  uint32_t memSize = heapu8->getByteLength();
   // Bounds check both regions.
   if (LLVM_UNLIKELY(
           static_cast<uint64_t>(src) + size > memSize ||
@@ -1181,8 +1180,7 @@ CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
 
   // Perform the copy (memmove handles overlapping regions).
   if (size > 0) {
-    JSArrayBuffer *buf = heapu8->getBuffer(runtime);
-    uint8_t *data = buf->getDataBlock();
+    uint8_t *data = heapu8->data(runtime);
     std::memmove(data + dest, data + src, size);
   }
 
@@ -1228,7 +1226,7 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
         "Wasm data segment is not a typed array");
     if (LLVM_UNLIKELY(!segArr))
       return ExecutionStatus::EXCEPTION;
-    segLen = static_cast<uint32_t>(segArr->getLength());
+    segLen = segArr->getByteLength();
   }
 
   // Bounds check against data segment.
@@ -1237,17 +1235,15 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
   }
 
   // Bounds check against linear memory.
-  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  uint32_t memSize = heapu8->getByteLength();
   if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + size > memSize)) {
     return runtime.raiseError("memory.init: out of bounds memory access");
   }
 
   // Perform the copy.
   if (size > 0) {
-    JSArrayBuffer *memBuf = heapu8->getBuffer(runtime);
-    uint8_t *memData = memBuf->getDataBlock();
-    JSArrayBuffer *segBuf = segArr->getBuffer(runtime);
-    uint8_t *segData = segBuf->getDataBlock();
+    uint8_t *memData = heapu8->data(runtime);
+    uint8_t *segData = segArr->data(runtime);
     std::memcpy(memData + dest, segData + src, size);
   }
 
@@ -1319,15 +1315,14 @@ CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
   }
 
   // Bounds check against linear memory.
-  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  uint32_t memSize = heapu8->getByteLength();
   if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + length > memSize)) {
     return runtime.raiseError(
         "wasmDataSegmentInit: out of bounds memory access");
   }
 
   // Perform the bulk copy.
-  JSArrayBuffer *memBuf = heapu8->getBuffer(runtime);
-  uint8_t *memData = memBuf->getDataBlock();
+  uint8_t *memData = heapu8->data(runtime);
   std::memcpy(memData + dest, storage.data() + blobOffset, length);
 
   return HermesValue::encodeUndefinedValue();

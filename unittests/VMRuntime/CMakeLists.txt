@@ -81,6 +81,8 @@ set(RTSources
 # also guarded, so this only keeps it out of the build entirely.
 if(HERMES_ENABLE_WASM)
   list(APPEND RTSources WasmBuiltinTest.cpp)
+  list(APPEND RTSources WasmDataSegmentOffsetTest.cpp)
+  list(APPEND RTSources WasmBulkMemoryOffsetTest.cpp)
 endif()
 
 add_hermes_unittest(HermesVMRuntimeTests
