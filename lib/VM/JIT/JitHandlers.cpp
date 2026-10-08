@@ -9,10 +9,11 @@
 #if HERMESVM_JIT
 #include "JitHandlers.h"
 
-#include "../../JSLib/JSLibInternal.h"
+#include "../JSLib/JSLibInternal.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/CodeBlock.h"
 #include "hermes/VM/Interpreter.h"
+#include "hermes/VM/JIT/JitFunctionData.h"
 #include "hermes/VM/JSError.h"
 #include "hermes/VM/JSObject-inline.h"
 #include "hermes/VM/RuntimeModule-inline.h"
@@ -310,15 +311,26 @@ JSObject *_jit_new_empty_object_for_buffer(
 
 void _jit_put_by_id(
     SHRuntime *shr,
-    SHCodeBlock *codeBlock,
+    SHJitVersionData *versionData,
     SHLegacyValue *shBase,
     SHLegacyValue *shValue,
     uint8_t cacheIdx,
     SHSymbolID symID,
     bool strictMode,
     bool tryProp) {
+  // Recompilation trigger: every call to this helper is a decline of
+  // the inline PutById tier of the CALLING BODY, whose version record
+  // identifies it. Threshold crossings hand off to the JITContext;
+  // retired bodies' events land in their own frozen records and spend
+  // nothing. Runs before any raw object pointer is derived:
+  // recompilation may allocate.
+  JitVersionData *vd = reinterpret_cast<JitVersionData *>(versionData);
+  if (LLVM_UNLIKELY(++vd->declineCount >= vd->declineThreshold)) {
+    getRuntime(shr).getJITContext().considerRecompile(getRuntime(shr), vd);
+  }
+
   Runtime &runtime = getRuntime(shr);
-  CodeBlock *curCodeBlock = (CodeBlock *)codeBlock;
+  CodeBlock *curCodeBlock = vd->codeBlock;
   Handle<> value{toPHV(shValue)};
   SmallHermesValue shv = SmallHermesValue::encodeHermesValue(*value, runtime);
 
@@ -372,6 +384,127 @@ void _jit_put_by_id(
   if (LLVM_UNLIKELY(status == ExecutionStatus::EXCEPTION)) {
     _sh_throw_current(shr);
   }
+}
+
+/// Record one ByVal (Put or Get) decline's observed target shape into
+/// \p vd's entry for \p siteId. \p isSupportedKind is the caller's own
+/// operation's typed-array support predicate -- store or load -- so
+/// taKind is only ever set to a kind the RECORDING operation itself
+/// validated. Reads the target's kind as a scalar and retains no raw
+/// pointer; allocates only native memory.
+static void recordByValObservation(
+    JitVersionData *vd,
+    uint32_t siteId,
+    SHLegacyValue *target,
+    bool (*isSupportedKind)(CellKind)) {
+  if (!vd->consumerRecords)
+    vd->consumerRecords = std::make_unique<JitConsumerRecords>();
+  JitByValSiteRecord &site =
+      vd->consumerRecords->findOrCreateByValSite(siteId);
+  HermesValue t = *toPHV(target);
+  if (!t.isObject()) {
+    if (!site.otherSeen)
+      site.changed = 1;
+    site.otherSeen = 1;
+    return;
+  }
+  CellKind kind = static_cast<GCCell *>(t.getObject())->getKind();
+  if (kind == CellKind::JSArrayKind) {
+    if (!site.jsArraySeen)
+      site.changed = 1;
+    site.jsArraySeen = 1;
+  } else if (isSupportedKind(kind)) {
+    uint8_t k8 = (uint8_t)kind;
+    if (site.taKind == JitByValSiteRecord::kTAKindNone) {
+      site.taKind = k8;
+      site.changed = 1;
+    } else if (site.taKind != k8) {
+      // Poison keeps the first kind: the site still gets (or keeps) its
+      // taKind tier, and the poison flag records that no further kind
+      // can ever be added, i.e. that the site cannot progress again.
+      if (!site.taPoisoned)
+        site.changed = 1;
+      site.taPoisoned = 1;
+    }
+  } else {
+    if (!site.otherSeen)
+      site.changed = 1;
+    site.otherSeen = 1;
+  }
+}
+
+void _jit_put_by_val_loose(
+    SHRuntime *shr,
+    SHLegacyValue *target,
+    SHLegacyValue *key,
+    SHLegacyValue *value,
+    SHJitVersionData *versionData,
+    uint32_t siteId) {
+  JitVersionData *vd = reinterpret_cast<JitVersionData *>(versionData);
+  recordByValObservation(vd, siteId, target, isJitSupportedTypedArrayStoreKind);
+  // Recompilation trigger, as in _jit_put_by_id: every call is a
+  // decline of the calling body's ByVal tiers; the shared counter and
+  // threshold pool ById and ByVal declines. Runs after recording (see
+  // above) but before the store logic derives raw pointers.
+  if (LLVM_UNLIKELY(++vd->declineCount >= vd->declineThreshold)) {
+    getRuntime(shr).getJITContext().considerRecompile(getRuntime(shr), vd);
+  }
+  _sh_ljs_put_by_val_loose_rjs(shr, target, key, value);
+}
+
+/// Strict-mode variant of _jit_put_by_val_loose; see its documentation.
+void _jit_put_by_val_strict(
+    SHRuntime *shr,
+    SHLegacyValue *target,
+    SHLegacyValue *key,
+    SHLegacyValue *value,
+    SHJitVersionData *versionData,
+    uint32_t siteId) {
+  JitVersionData *vd = reinterpret_cast<JitVersionData *>(versionData);
+  recordByValObservation(vd, siteId, target, isJitSupportedTypedArrayStoreKind);
+  if (LLVM_UNLIKELY(++vd->declineCount >= vd->declineThreshold)) {
+    getRuntime(shr).getJITContext().considerRecompile(getRuntime(shr), vd);
+  }
+  _sh_ljs_put_by_val_strict_rjs(shr, target, key, value);
+}
+
+/// Slow path of GetByVal, and the recording site for the ByVal load
+/// tier's declines: records the observed source shape into
+/// \p versionData's entry for \p siteId using the LOAD predicate, then
+/// forwards to the plain SH helper and returns its value. Installed by
+/// getByValImpl's indirect helper slot (JitEmitter-property.cpp) as the
+/// shared slow path for the JSArray and typed-array load tiers.
+SHLegacyValue _jit_get_by_val(
+    SHRuntime *shr,
+    SHLegacyValue *source,
+    SHLegacyValue *key,
+    SHJitVersionData *versionData,
+    uint32_t siteId) {
+  JitVersionData *vd = reinterpret_cast<JitVersionData *>(versionData);
+  recordByValObservation(vd, siteId, source, isJitSupportedTypedArrayLoadKind);
+  if (LLVM_UNLIKELY(++vd->declineCount >= vd->declineThreshold)) {
+    getRuntime(shr).getJITContext().considerRecompile(getRuntime(shr), vd);
+  }
+  return _sh_ljs_get_by_val_rjs(shr, source, key);
+}
+
+/// Slow path of GetByIndex, and the recording site for the ByIndex load
+/// tier's declines: records the observed source shape into
+/// \p versionData's entry for \p siteId using the LOAD predicate, then
+/// forwards to the plain SH helper and returns its value. Installed by
+/// getByIndexImpl() into the site's own mutable helper slot.
+SHLegacyValue _jit_get_by_index(
+    SHRuntime *shr,
+    SHLegacyValue *source,
+    uint32_t key,
+    SHJitVersionData *versionData,
+    uint32_t siteId) {
+  JitVersionData *vd = reinterpret_cast<JitVersionData *>(versionData);
+  recordByValObservation(vd, siteId, source, isJitSupportedTypedArrayLoadKind);
+  if (LLVM_UNLIKELY(++vd->declineCount >= vd->declineThreshold)) {
+    getRuntime(shr).getJITContext().considerRecompile(getRuntime(shr), vd);
+  }
+  return _sh_ljs_get_by_index_rjs(shr, source, key);
 }
 
 #ifdef HERMESVM_PROFILER_BB
@@ -511,14 +644,14 @@ SHLegacyValue _jit_call_builtin(
   return res->getHermesValue();
 }
 
-void *_jit_string_switch_imm_table_lookup(
+int64_t _jit_string_switch_imm_table_lookup(
     RuntimeModule *runtimeModule,
     uint32_t tableIndex,
     SHLegacyValue *switchValueLegacy) {
   PinnedHermesValue *switchValue = toPHV(switchValueLegacy);
   if (!switchValue->isString()) {
     // Not a string; should branch to the default case.
-    return nullptr;
+    return -1;
   }
 
   assert(
@@ -530,9 +663,9 @@ void *_jit_string_switch_imm_table_lookup(
   auto iter = table->find(switchValue->getString());
   if (iter == table->end()) {
     // Not found; branch to the default case.
-    return nullptr;
+    return -1;
   }
-  return iter->second.jitCodeTarget;
+  return iter->second.caseIndex;
 }
 
 } // namespace hermes::vm

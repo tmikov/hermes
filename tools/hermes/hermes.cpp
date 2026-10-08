@@ -121,6 +121,8 @@ static int executeHBCBytecodeFromCL(
           .withForceJIT(flags.JIT == cli::VMOnlyRuntimeFlags::JITMode::Force)
           .withJITThreshold(flags.JITThreshold)
           .withJITMemoryLimit(flags.JITMemoryLimit)
+          .withJITMaxRecompiles(flags.JITMaxRecompiles)
+          .withJITRecompileThreshold(flags.JITRecompileThreshold)
           .withEnableEval(cl::compilerRuntimeFlags.EnableEval)
           .withEnableAsyncGenerators(
               cl::compilerRuntimeFlags.EnableAsyncGenerators)
@@ -156,6 +158,7 @@ static int executeHBCBytecodeFromCL(
   options.dumpJITCode = flags.DumpJITCode;
   options.jitCrashOnError = flags.JITCrashOnError;
   options.jitEmitAsserts = flags.JITEmitAsserts;
+  options.jitEmitTypeAsserts = flags.JITEmitTypeAsserts;
   options.jitEmitCounters = flags.JITEmitCounters;
   options.jitHCIdLimit = flags.JITHCIdLimit;
   options.stopAfterInit = flags.StopAfterInit;

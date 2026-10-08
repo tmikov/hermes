@@ -871,6 +871,7 @@ if(HERMES_ENABLE_TEST_SUITE)
     unittests_dir=${CMAKE_CURRENT_BINARY_DIR}/unittests
     debugger_enabled=${HERMES_ENABLE_DEBUGGER}
     jit_enabled=${HERMESVM_ALLOW_JIT}
+    jit_arch=${CMAKE_SYSTEM_PROCESSOR}
     intl_enabled=${HERMES_ENABLE_INTL}
     regexp_unicode_properties_enabled=${HERMES_ENABLE_UNICODE_REGEXP_PROPERTY_ESCAPES}
     hbc_deltaprep=${HERMES_TOOLS_OUTPUT_DIR}/hbc-deltaprep
@@ -887,8 +888,10 @@ if(HERMES_ENABLE_TEST_SUITE)
     exception_on_oom_enabled=${HERMESVM_EXCEPTION_ON_OOM}
     profiler=${HERMES_PROFILER_MODE_IN_LIT_TEST}
     gc=${HERMESVM_GCKIND}
+    heap_hv_mode=${HERMESVM_HEAP_HV_MODE}
     ubsan=${HERMES_ENABLE_UNDEFINED_BEHAVIOR_SANITIZER}
     asan=${HERMES_ENABLE_ADDRESS_SANITIZER}
+    handle_san=${HERMESVM_SANITIZE_HANDLES}
     coverage=${coverage_directory}
     shermes=${HERMES_TOOLS_OUTPUT_DIR}/shermes
     check_native_stack=${HERMES_CHECK_NATIVE_STACK}

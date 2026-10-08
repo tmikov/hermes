@@ -22,9 +22,14 @@
 #include "hermes/VMLayouts/StackFrameLayout.h"
 
 #include "llvh/ADT/DenseMap.h"
+#include "llvh/ADT/SmallVector.h"
 
 #include <cstdarg>
 #include <deque>
+#include <new>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace hermes::vm::arm64 {
 
@@ -197,10 +202,11 @@ static constexpr auto xRuntime = a64::x19;
 // x20 is frame
 static constexpr auto xFrame = a64::x20;
 
-/// Scratch register. x16/x17 sit outside the register allocator and are used
-/// as scratch (thunk targets, IP materialization); nothing holds a value in
-/// them across an emitter call.
+/// Scratch registers. x16/x17 sit outside the register allocator and are
+/// used as scratch (call targets, IP materialization, type assert check
+/// sequences); nothing holds a value in them across an emitter call.
 static constexpr auto xScratch = a64::x16;
+static constexpr auto xScratch2 = a64::x17;
 
 /// GP arg registers (inclusive).
 // static constexpr std::pair<uint8_t, uint8_t> kGPArgs(0, 7);
@@ -294,6 +300,43 @@ class TempRegAlloc {
  private:
 };
 
+/// A property of an FR's value that a fast path relies on. These are the
+/// predicates the emitters actually exploit, which is narrower and more
+/// useful than the declared FRType.
+enum class TypePred : uint8_t {
+  /// Unsigned-below (HVTag_First << kHV_NumDataBits).
+  IsNumber,
+  /// ETag == HVETag_Bool.
+  IsBool,
+  /// Tag unsigned-below the pointer range. This is the GC-safety predicate.
+  NotPointer,
+  /// NotPointer && !IsNumber: the raw bits are the value's identity under
+  /// strict equality, so `===` is a bit compare. Doubles are excluded
+  /// because NaN is not equal to itself while its bits are, and -0 and +0
+  /// are equal while their bits are not; pointers because strings compare
+  /// by content rather than address.
+  BitComparable,
+  /// Tag == HVTag_Object.
+  IsObject,
+};
+
+/// \return a human-readable name for \p pred, for diagnostics.
+const char *typePredName(TypePred pred);
+
+/// One emitted type check, recorded so the failure handler can name it.
+struct TypeAssertSite {
+  CodeBlock *codeBlock;
+  uint32_t bytecodeOfs;
+  uint16_t frIndex;
+  TypePred pred;
+};
+
+/// Report a failed JIT type assertion and abort. Called only from JIT'ed
+/// code, and never returns, so it needs no register or frame preservation.
+[[noreturn]] void _jit_type_assert_failed(
+    uint32_t siteIdx,
+    const std::vector<TypeAssertSite> *sites);
+
 class Emitter {
   Runtime &runtime_;
   JITContext::Impl &jitImpl_;
@@ -302,6 +345,8 @@ class Emitter {
   unsigned const dumpJitCode_;
   /// Whether to emit asserts in the JIT'ed code.
   bool const emitAsserts_;
+  /// Whether to verify FR type assumptions in the JIT'ed code.
+  bool const emitTypeAsserts_;
   /// Whether to emit counters in the JIT'ed code.
   bool const emitCounters_;
 
@@ -320,44 +365,94 @@ class Emitter {
   /// VecD temp registers.
   TempRegAlloc vecTemp_{kVecTemp1, kVecTemp2};
 
-  /// Keep enough information to generate a slow path at the end of the
-  /// function.
-  struct SlowPath {
+  /// A deferred slow path, emitted at the end of the function.
+  ///
+  /// Everything the slow path needs beyond the common fields below is held in
+  /// the lambda passed to the constructor, stored inline in \c storage_. This
+  /// keeps each slow path's state private to the one place that produces and
+  /// consumes it, instead of a shared set of fields that any slow path could
+  /// read whether or not its producer set them.
+  class SlowPath {
+   public:
     /// Label of the slow path.
     asmjit::Label slowPathLab;
     /// Label to jump to after the slow path.
     asmjit::Label contLab;
-    /// Target if this is a branch.
-    asmjit::Label target;
-
-    /// Name of the slow path.
-    const char *name;
-    /// Frame register indexes;
-    FR frRes, frInput1, frInput2;
-    /// Optional hardware register for the result.
-    HWReg hwRes;
-    /// Whether to invert a condition.
-    bool invert;
-    /// Whether to pass arguments by value to the slow path.
-    bool passArgsByVal;
-    /// Some number or index that needs to be passed to the slow path.
-    unsigned sizeOrIdx;
-    /// Another number or index that needs to be passed to the slow path.
-    unsigned sizeOrIdx2;
-
-    /// Pointer to the slow path function that must be called.
-    void *slowCall;
-    /// The name of the slow path function.
-    const char *slowCallName;
-
     /// Bytecode IP of the instruction that this is a slow path for.
     const inst::Inst *emittingIP;
 
-    /// Callback to actually emit.
-    void (*emit)(Emitter &em, SlowPath &sl);
+    /// \param l is invoked as l(Emitter &, SlowPath &) to emit the slow path.
+    /// Its captures are copied into \c storage_ and never destroyed, so they
+    /// must be trivially destructible and must fit.
+    template <typename L>
+    SlowPath(
+        asmjit::Label slowPathLab,
+        asmjit::Label contLab,
+        const inst::Inst *emittingIP,
+        L &&l)
+        : slowPathLab(slowPathLab),
+          contLab(contLab),
+          emittingIP(emittingIP),
+          emit_([](Emitter &em, SlowPath &sp) {
+            (*reinterpret_cast<std::decay_t<L> *>(sp.storage_))(em, sp);
+          }) {
+      using Lambda = std::decay_t<L>;
+      static_assert(
+          sizeof(Lambda) <= sizeof(storage_),
+          "slow path captures too much; enlarge storage_ or capture less");
+      static_assert(
+          alignof(Lambda) <= alignof(void *),
+          "slow path captures are over-aligned");
+      static_assert(
+          std::is_trivially_destructible_v<Lambda>,
+          "slow path captures must be trivially destructible");
+      ::new (storage_) Lambda(std::forward<L>(l));
+    }
+
+    /// Overload for slow paths that do not branch back to a continuation.
+    template <typename L>
+    SlowPath(asmjit::Label slowPathLab, const inst::Inst *emittingIP, L &&l)
+        : SlowPath(
+              slowPathLab,
+              asmjit::Label(),
+              emittingIP,
+              std::forward<L>(l)) {}
+
+    /// Non-copyable and non-movable: \c storage_ holds a type-erased lambda
+    /// that cannot be relocated by the implicit memberwise copy. std::deque
+    /// never relocates existing elements, so emplace_back and pop_front are
+    /// all that is needed.
+    SlowPath(const SlowPath &) = delete;
+    SlowPath &operator=(const SlowPath &) = delete;
+
+    /// Emit this slow path.
+    void emit(Emitter &em) {
+      emit_(em, *this);
+    }
+
+   private:
+    void (*emit_)(Emitter &em, SlowPath &sp);
+    /// Inline storage for the lambda's captures. Sized to the largest current
+    /// slow path, jCond, whose captures include an asmjit::Label (16 bytes, an
+    /// Operand) plus three pointers, two FRs and two bools. Raising this is
+    /// fine; the static_assert above is what keeps a too-large capture from
+    /// becoming a silent heap allocation.
+    alignas(void *) char storage_[56];
   };
   /// Queue of slow paths.
   std::deque<SlowPath> slowPaths_{};
+
+  /// Records for every emitted type check, in site-index order. Owned by
+  /// JITContext::Impl, which outlives the emitted code that refers to it;
+  /// this is only a pointer to that entry, claimed on first use.
+  std::vector<TypeAssertSite> *typeAssertSites_ = nullptr;
+  /// The shared failure tail, bound only if there is at least one site.
+  asmjit::Label typeAssertFailLab_{};
+
+  /// FRs written by the bytecode instruction currently being emitted whose
+  /// global register class requires a check. Drained at each instruction
+  /// boundary by emitPendingTypeAsserts().
+  llvh::SmallVector<FR, 4> typeAssertPendingWrites_{};
 
   /// Descriptor for a single RO data entry.
   struct DataDesc {
@@ -372,10 +467,6 @@ class Emitter {
   std::vector<DataDesc> roDataDesc_{};
   std::vector<uint8_t> roData_{};
   asmjit::Label roDataLabel_{};
-
-  /// Each thunk contains the offset of the function pointer in roData.
-  std::vector<std::pair<asmjit::Label, int32_t>> thunks_{};
-  llvh::DenseMap<void *, size_t> thunkMap_{};
 
   /// Map from the bit pattern of a double value to offset in constant pool.
   llvh::DenseMap<hermes::DenseUInt64, int32_t> fp64ConstMap_{};
@@ -395,6 +486,12 @@ class Emitter {
 
   /// The bytecode codeblock.
   CodeBlock *const codeBlock_;
+
+  /// The version record of the body being emitted, owned by the compile
+  /// driver until install. Its address is embedded as the identity
+  /// argument of the recording runtime helpers, so the body they are
+  /// called from is the body they report about.
+  JitVersionData *const versionData_;
 
   /// Optionally, the offset of the string name, used for debug printing.
   int32_t roOfsDebugFunctionName_ = -1;
@@ -417,6 +514,26 @@ class Emitter {
   a64::Assembler a{};
   /// The IP of the instruction being emitted.
   const inst::Inst *emittingIP{nullptr};
+  /// Write-cache indices of PutById sites whose specialization was
+  /// skipped in this compile because the cache had no class yet. Fresh
+  /// per compile (the Emitter is per-compile); moved into the candidate
+  /// JitVersionData::coldWriteCacheIdxs by the compile driver, which
+  /// uses them to require that one of these specific sites -- not some
+  /// unrelated cache -- has warmed before spending recompile budget.
+  llvh::SmallVector<uint8_t, 4> coldWriteCacheIdxs_;
+  /// Read-cache indices of GetById sites whose specialization was
+  /// skipped in this compile because the cache had no class yet. Same
+  /// role as coldWriteCacheIdxs_, for GetById sites.
+  llvh::SmallVector<uint8_t, 4> coldReadCacheIdxs_;
+
+  /// \return the candidate version record's ByVal site entry for
+  /// \p siteId, creating the records and/or entry if absent. The
+  /// entry's address is stable (deque) and may be embedded in code.
+  JitByValSiteRecord &byValSiteRecord(uint32_t siteId) {
+    if (!versionData_->consumerRecords)
+      versionData_->consumerRecords = std::make_unique<JitConsumerRecords>();
+    return versionData_->consumerRecords->findOrCreateByValSite(siteId);
+  }
 
   /// Create an Emitter, but do not emit any actual code.
   /// Use \c enter to set up the stack frame before emitting the actual code.
@@ -425,9 +542,11 @@ class Emitter {
       JITContext::Impl &jitImpl,
       unsigned dumpJitCode,
       bool emitAsserts,
+      bool emitTypeAsserts,
       bool emitCounters,
       PerfJitDump *perfJitDump,
       CodeBlock *codeBlock,
+      JitVersionData *versionData,
       const std::function<void(std::string &&message)> &longjmpError);
 
   /// Add the jitted function to the JIT runtime and return a pointer to it.
@@ -456,7 +575,7 @@ class Emitter {
   /// line so that vsnprintf is not duplicated into every caller.
   void commentV(const char *fmt, va_list args);
 
-  /// Emit the catch table, slow paths, thunks and RO data,
+  /// Emit the catch table, slow paths and RO data,
   /// then reset the stack, end any try, and return.
   /// \param exceptionHandlers the labels for the exception handler table.
   void leave(llvh::ArrayRef<const asmjit::Label *> exceptionHandlers);
@@ -564,6 +683,9 @@ class Emitter {
   })
   DECL_BIT_BINOP(urShift, true, "rshiftu", _sh_ljs_unsigned_right_shift_rjs, {
     a.lsr(res.w(), dl.w(), dr.w());
+  })
+  DECL_BIT_BINOP(imul, false, "imul", _sh_ljs_imul_rjs, {
+    a.mul(res.w(), dl.w(), dr.w());
   })
 
 #undef DECL_BIT_BINOP
@@ -716,42 +838,32 @@ class Emitter {
       uint32_t minVal,
       uint32_t maxVal);
 
-  /// Information for a case of a StringSwitchImm instruction.
-  struct StringSwitchCase {
-    // The string id of the case label.
-    uint32_t caseLabelStringId;
-    // A JIT label for the start of JITted code for the the basic block
-    // corresponding to the case.
-    const asmjit::Label *target;
-
-    StringSwitchCase(uint32_t caseLabelStringId, const asmjit::Label *target)
-        : caseLabelStringId(caseLabelStringId), target(target) {}
-  };
-
   /// Emit a string switch. The lookup table is identified at runtime by
   /// (\p runtimeModule, \p tableIndex) rather than by baking its address into
   /// the code, since the module's table vector may be reallocated after this
   /// code is compiled (e.g. by lazy compilation).
+  ///
+  /// \p caseLabels is indexed by the case index the lookup helper returns --
+  /// so it has one entry per distinct case string, in the order the runtime
+  /// table numbered them, not in bytecode order. Any index with no case in
+  /// this body must be filled with \p defaultLabel by the caller.
   void stringSwitchImm(
       FR frInput,
       RuntimeModule *runtimeModule,
       uint32_t tableIndex,
       const asmjit::Label &defaultLabel,
-      llvh::ArrayRef<StringSwitchCase> cases);
+      llvh::ArrayRef<const asmjit::Label *> caseLabels);
 
   void getByVal(FR frRes, FR frSource, FR frKey);
   void getByIndex(FR frRes, FR frSource, uint32_t key);
 
-#define DECL_PUT_BY_VAL(methodName, commentStr, shFn)                \
-  void methodName(FR frTarget, FR frKey, FR frValue) {               \
-    putByValImpl(frTarget, frKey, frValue, commentStr, shFn, #shFn); \
+#define DECL_PUT_BY_VAL(methodName, commentStr, strict)         \
+  void methodName(FR frTarget, FR frKey, FR frValue) {          \
+    putByValImpl(frTarget, frKey, frValue, commentStr, strict); \
   }
 
-  DECL_PUT_BY_VAL(putByValLoose, "putByValLoose", _sh_ljs_put_by_val_loose_rjs);
-  DECL_PUT_BY_VAL(
-      putByValStrict,
-      "putByValStrict",
-      _sh_ljs_put_by_val_strict_rjs);
+  DECL_PUT_BY_VAL(putByValLoose, "putByValLoose", false);
+  DECL_PUT_BY_VAL(putByValStrict, "putByValStrict", true);
 
   void putByValWithReceiver(
       FR frTarget,
@@ -926,6 +1038,41 @@ class Emitter {
 
   void loadParentNoTraps(FR frRes, FR frObj);
   void typedLoadParent(FR frRes, FR frObj);
+
+  /// Emit, only when emitTypeAsserts_ is set, a trap-on-violation check
+  /// that the value of \p fr, currently held in \p hwVal, satisfies
+  /// \p pred.
+  ///
+  /// Uses only xScratch/xScratch2 and never touches the register
+  /// allocator, so it is a pure insertion. It clobbers NZCV, so the caller
+  /// must have verified that flags are dead at the insertion point. That
+  /// is an obligation, not a property emitters have in general: see
+  /// selectObject, which holds flags across getOrAllocFRInGpX.
+  ///
+  /// Where an emitter knows a type fact per operand, guard each check on
+  /// that operand's own fact, never on the emitter's combined fast-path
+  /// condition: the point is to assert every fact the JIT holds, not only
+  /// the ones the chosen code shape happens to rely on.
+  void emitTypeAssert(FR fr, HWReg hwVal, TypePred pred);
+
+  /// Emit, at a bytecode instruction boundary, the global-register-class
+  /// checks for every FR recorded by recordFRWriteForAssert() since the
+  /// last call, then clear the recorded set. Called from compileBB as a
+  /// sibling of assertPostInstructionInvariants(), never from inside it:
+  /// that function's body is compiled out under NDEBUG, and emitting
+  /// checks from within it would silently disable Class C in
+  /// release-with-flag builds.
+  ///
+  /// This checks the value each FR holds at the boundary, not at the
+  /// instruction's write to it. An instruction that writes a
+  /// non-conforming value, calls the runtime (a GC safepoint), and then
+  /// overwrites it with a conforming one is not caught; only the value
+  /// that survives the instruction is.
+  void emitPendingTypeAsserts() {
+    if (LLVM_LIKELY(typeAssertPendingWrites_.empty()))
+      return;
+    emitPendingTypeAssertsSlow();
+  }
 
  private:
   /// \return the byte offset of \p fr's slot from xFrame.
@@ -1197,25 +1344,36 @@ class Emitter {
   /// Register a 64-bit constant in RO DATA and return its offset.
   int32_t uint64Const(uint64_t bits, const char *comment);
 
-  /// Register \p fn as a thunk and return its label.
-  /// \param name is an optional name for the thunk.
-  asmjit::Label registerThunk(void *fn, const char *name = nullptr);
+  /// Emit a call to \p fn, saving the bytecode IP to Runtime::currentIP
+  /// before making the call. This should be used for all calls that may
+  /// observe the IP, such as calls that may throw exceptions, or perform
+  /// allocations.
+  void callRuntimeWithSavedIP(void *fn, const char *name);
 
-  /// Register a call as a thunk and emit a call to it. Note that most calls
-  /// into runtime functions should use \c callThunkWithSavedIP below.
-  void callThunk(void *fn, const char *name);
+  /// Emit a call to \p fn without saving the IP. This should be used only
+  /// where saving the IP is unnecessary or incorrect.
+  void callRuntime(void *fn, const char *name);
 
-  /// Register a call as a thunk and emit a call to it, saving the bytecode IP
-  /// to Runtime::currentIP before making the call. This should be used for all
-  /// calls that may observe the IP, such as calls that may throw exceptions, or
-  /// perform allocations.
-  void callThunkWithSavedIP(void *fn, const char *name);
+  /// Indirect sibling of callRuntimeWithSavedIP: saves the bytecode IP,
+  /// then calls through the mutable function pointer slot at
+  /// \p slotAddr rather than a compile-time-constant address. Used for
+  /// per-site helper slots (e.g. JitByValSiteRecord::helper) that the
+  /// runtime may flip, after emission, from a recording helper to a
+  /// plain one; the callee currently stored in the slot is called, and
+  /// both possible callees follow the ordinary saved-IP call protocol.
+  /// \p name is used only for the disassembly comment.
+  void callRuntimeWithSavedIPIndirect(uint64_t slotAddr, const char *name);
 
-  /// Call a function without registering it as a thunk. This should be used for
-  /// functions that will only have a single call site in the emitted function,
-  /// and therefore do not benefit from a thunk. Note that like \c callThunk,
-  /// this does not save the IP.
-  void callWithoutThunk(void *fn, const char *name);
+  /// Indirect sibling of callRuntime: emits
+  /// `mov xScratch, slotAddr; ldr xScratch, [xScratch]; blr xScratch`,
+  /// calling whatever function pointer currently lives at \p slotAddr
+  /// instead of a compile-time-constant address. Clobbers only
+  /// xScratch, exactly as the direct form does. A callee reached this
+  /// way may take fewer than the six argument registers the caller sets
+  /// up: under AAPCS64, extra argument registers (e.g. x4/x5 for a
+  /// four-argument callee) are simply unread, so one call sequence
+  /// serves every callee the slot may hold.
+  void callRuntimeIndirect(uint64_t slotAddr, const char *name);
 
   /// Emit the code that runs when this function is longjmped to.
   /// Performs the catch table lookup and jumps to the appropriate catch block,
@@ -1223,8 +1381,42 @@ class Emitter {
   /// exception.
   void emitCatchTable(llvh::ArrayRef<const asmjit::Label *> exceptionHandlers);
   void emitSlowPaths();
-  void emitThunks();
   void emitROData();
+
+  /// Emit \c emitTypeAssert's check sequence for \p pred against \p xVal,
+  /// which holds the current value of \p fr, recording a TypeAssertSite.
+  /// The caller emits the dump comment, so that it precedes any load it
+  /// had to emit to produce \p xVal.
+  void emitTypeAssertGpX(FR fr, const a64::GpX &xVal, TypePred pred);
+
+  /// Like \c emitTypeAssert, but for an \p fr that the fast path never
+  /// materializes into a register: reads it with \c readFRForAssert first.
+  /// Like \c emitTypeAssert, it does nothing unless emitTypeAsserts_ is
+  /// set, so callers need not check it themselves.
+  void emitTypeAssertFR(FR fr, TypePred pred);
+
+  /// Read the current value of \p fr into xScratch, for use immediately
+  /// before an \c emitTypeAssertGpX call, without allocating or perturbing
+  /// any FRState. Honors the FRState up-to-date invariants rather than
+  /// merely the location priority: the local register if any (locals are
+  /// always current), else the global register only if
+  /// globalRegUpToDate, else the frame slot (asserting frameUpToDate).
+  /// \pre \p fr is not dirty (regIsDirty).
+  void readFRForAssert(FR fr);
+
+  /// The out-of-line body of \c emitPendingTypeAsserts.
+  /// \pre the pending set is not empty.
+  void emitPendingTypeAssertsSlow();
+
+  /// Emit the shared out-of-line tail that all type assert failure stubs
+  /// jump to, if any type assert was emitted for this function.
+  void emitTypeAssertFailTail();
+
+  /// Record that \p fr was written, so that the instruction boundary can
+  /// check the value against its global register class. Records nothing
+  /// unless the FR owns a global register. Callers must check
+  /// emitTypeAsserts_ themselves; this does not.
+  void recordFRWriteForAssert(FR fr);
 
  private:
   /// Set up the call frame and perform the call. The caller should have already
@@ -1307,12 +1499,14 @@ class Emitter {
       FR frKey,
       FR frValue,
       const char *name,
-      void (*shImpl)(
-          SHRuntime *shr,
-          SHLegacyValue *target,
-          SHLegacyValue *key,
-          SHLegacyValue *value),
-      const char *shImplName);
+      bool strict);
+
+  /// Split out of getByVal(): the full tier-selection sequence, mirroring
+  /// putByValImpl() -- the evidence-driven typed-array tier first (kind
+  /// miss chains into the next tier), then the unconditional JSArray
+  /// tier, then the indirect recording helper call as the shared slow
+  /// path. The result lands in the same register on every path.
+  void getByValImpl(FR frRes, FR frSource, FR frKey);
 
   class GetByIdImpl;
   void getByIdImpl(
@@ -1335,6 +1529,520 @@ class Emitter {
       uint8_t cacheIdx,
       bool strictMode,
       bool tryProp);
+
+#if HERMES_JIT_INLINE_SAFE_STORE
+  /// Emit an inline store of the already-encoded slot value in \p shv to the
+  /// heap slot whose address is in \p loc, performed only when the Hades
+  /// write barrier for that store is provably either a no-op or a single
+  /// card-dirty. In every other case -- concurrent marking active, a
+  /// compaction in progress, or a segment whose card array is not the inline
+  /// one -- nothing is stored and control jumps to \p slowLab, whose code is
+  /// expected to perform the store through the runtime, barrier included.
+  ///
+  /// A heap slot holds a SmallHermesValue, not a HermesValue, and under
+  /// HERMESVM_BOXED_DOUBLES the two differ. Callers produce \p shv with
+  /// emit_shv_encode_for_slot_or_slow(), which is where the one value this
+  /// path cannot store is declined -- a double whose bits do not fit inline
+  /// needs a heap-allocated BoxedDouble. That happens BEFORE the caller's
+  /// guards, not here, because a value that cannot be encoded is the cheapest
+  /// thing to reject and rejecting it early skips the whole guard chain; on
+  /// Box2D two thirds of the stores reaching these tiers are exactly that.
+  /// In the default heap-value mode the encode emits nothing and \p shv is
+  /// \p value.
+  ///
+  /// Everything here, the card decision included, is phrased in terms of the
+  /// ORIGINAL 64-bit \p value rather than \p shv: the two agree on which
+  /// values are pointers (the BoxedDouble that would not is already gone),
+  /// and a HermesValue carries its pointer uncompressed, which is what the
+  /// segment compare needs.
+  ///
+  /// The emitted predicate mirrors HadesGC::writeBarrier() and
+  /// HadesGC::relocationWriteBarrier() exactly:
+  ///
+  ///     segLoc = loc & ~(kSegmentUnitSize-1)
+  ///     if (segLoc == runtime.heap_.youngGen_.lowLim_)  // young target
+  ///       *loc = shv; done                              //   no barrier
+  ///     if (runtime.heap_.ogMarkingBarriers_)  goto slow  // snapshot barrier
+  ///     if (compactee active)                  goto slow  // relocation into
+  ///     if (segLoc's size != 1 unit)           goto slow  //   the compactee
+  ///     *loc = shv
+  ///     if (value is a pointer &&
+  ///         (value.ptr & ~(kSegmentUnitSize-1)) == youngGen lowLim)
+  ///       segLoc[(loc - segLoc) >> kLogCardSize] = CardStatus::Dirty
+  ///
+  /// The order matters: the snapshot barrier reads the OLD contents of the
+  /// slot, so the marking test has to precede the store. It does, and the
+  /// path that stores is precisely the path on which marking is off, so the
+  /// requirement holds by construction rather than by convention.
+  ///
+  /// PRECONDITION on \p loc: it must lie within the first kSegmentUnitSize
+  /// bytes of its segment. Everything here derives the segment start as
+  /// `loc & ~(kSegmentUnitSize-1)`, which is the true start only under that
+  /// bound: a JumboHeapSegment is aligned to kSegmentUnitSize but is N units
+  /// long, so for a \p loc further in, that mask yields the start of a later
+  /// unit, and the segment-size test below then reads object payload instead
+  /// of SHSegmentInfo. Should those bytes happen to hold a 1, the guard
+  /// passes and the card-dirty store writes a byte into the cell's own data
+  /// while the real, out-of-line card stays clean -- a missed old-to-young
+  /// root. Callers are responsible for the bound:
+  ///  - PutById: WritePropertyCacheEntry::kMaxSlot is 0xff, which puts \p loc
+  ///    at most ~2KB past a cell head, and every cell head lives in the first
+  ///    unit of its segment (see the AlignedHeapSegment class comment).
+  ///  - Array element stores must gate on the storage cell's size; a large
+  ///    array's indexed storage genuinely is a jumbo cell.
+  ///
+  /// Note the asymmetry that makes this bound load-bearing: the runtime's
+  /// large-object barrier derives the segment start from the OWNING CELL
+  /// (AlignedHeapSegment::dirtyCardForAddressInLargeObj takes owningObj),
+  /// whereas this code derives it from \p loc. The two coincide only while
+  /// \p loc is in the same unit as the cell head.
+  ///
+  /// Given the bound, the segment-size test is what makes the card math
+  /// valid: only a segment exactly one unit long keeps its card status array
+  /// inline at offset 0, which is what the card-dirty store assumes. A jumbo
+  /// segment holds that array out of line, so its stores go to the helper.
+  ///
+  /// \param loc address of the slot; preserved.
+  /// \param shv the encoded slot value to store; read only up to the store.
+  ///   It MAY be \p t2 -- and under boxed doubles it is, because the caller
+  ///   encoded into t2 before its guards -- which is sound precisely because
+  ///   t2 is not touched here until after the store.
+  /// \param value the original 64-bit HermesValue, used for the card
+  ///   decision; preserved.
+  /// \param t1 scratch, clobbered. Must differ from \p loc and \p value.
+  /// \param t2 scratch, clobbered after the store. Must differ from \p loc
+  ///   and \p value.
+  /// \param slowLab where to jump when the store was NOT performed.
+  ///
+  /// NZCV is clobbered, and so is xScratch: unlike x86-64, which compares
+  /// against memory directly, arm64 has to load each of the runtime words it
+  /// tests into a register, and neither temporary is free to be it -- \p t1
+  /// holds the segment start the card store indexes off, and \p t2 may be
+  /// carrying the encoded value. Nothing else is touched: in particular this
+  /// emits no call, so no register needs to be synced or freed around it.
+  void emitSafeStoreOrSlow(
+      const a64::GpX &loc,
+      const a64::GpX &shv,
+      const a64::GpX &value,
+      const a64::GpX &t1,
+      const a64::GpX &t2,
+      const asmjit::Label &slowLab);
+
+  /// Emit the PutById inline tier: a guard that the target is an object of
+  /// the hidden class the write cache recorded at compile time, followed by
+  /// an inline store into the cached slot through emitSafeStoreOrSlow().
+  /// Falling through means the store is done; every guard that fails jumps
+  /// to \p helperLab.
+  ///
+  /// On entry \p frTarget and \p frValue must already be synced to the frame,
+  /// because \p helperLab reads them from there. On return every temp this
+  /// used is free again and no FR is registered in one, so the helper call
+  /// that follows is safe (see the free-after-call invariant in doc/JIT.md).
+  ///
+  /// \param clazzID the lazy JIT id of the cached hidden class, non-zero.
+  /// \param slot the cached slot index.
+  void emitPutByIdInlineTier(
+      FR frTarget,
+      FR frValue,
+      uint16_t clazzID,
+      SlotIndex slot,
+      const asmjit::Label &helperLab);
+
+  /// Emit the PutByVal inline fast array store: a chain of guards that the
+  /// target is a fast JSArray and the key an existing element of it,
+  /// followed by an inline store into that element through
+  /// emitSafeStoreOrSlow(). Falling through means the store is done; every
+  /// guard that fails jumps to \p helperLab.
+  ///
+  /// The guards replicate, one for one, the fast path
+  /// putByValWithReceiver_RJS() takes in StaticH.cpp -- which is itself
+  /// JSObject::putComputedWithReceiver_RJS()'s first branch. Anything the
+  /// runtime would not have handled there is declined:
+  ///   - the target is an object;
+  ///   - of CellKind JSArray exactly, which is what pins haveOwnIndexed()
+  ///     and setOwnIndexed() to ArrayImpl's implementations (Arguments,
+  ///     FastArray, JSTypedArray and friends have their own);
+  ///   - flags_.fastIndexProperties is set and flags_.frozen is clear, the
+  ///     latter because ArrayImpl::_setOwnIndexedImpl() refuses a frozen
+  ///     array and freezing does not clear fastIndexProperties;
+  ///   - the key is a double that converts to a uint32 and back unchanged
+  ///     and is not 0xFFFFFFFF -- exactly toArrayIndexFastPath();
+  ///   - `index - beginIndex_ < elemCount_` unsigned, the storage range test
+  ///     of _haveOwnIndexedImpl() and of _setOwnIndexedImpl()'s in-range
+  ///     branch;
+  ///   - the element is not a hole. _haveOwnIndexedImpl() reports false for
+  ///     an `empty` element, so a write to a hole is NOT a fast-path write:
+  ///     the runtime resolves the property normally and may find a setter on
+  ///     the prototype chain.
+  /// The receiver-equals-target test of putByValWithReceiver_RJS() needs no
+  /// code: PutByVal passes the target as the receiver.
+  ///
+  /// One further guard has no counterpart in the runtime and exists only for
+  /// emitSafeStoreOrSlow()'s precondition: the indexed storage cell's
+  /// allocated size must be at most RuntimeOffsets::kMaxInlineStorage, which
+  /// is what proves the cell -- and therefore the element address -- lies in
+  /// a one-unit FixedSizeHeapSegment. A large array's indexed storage
+  /// genuinely is a multi-unit jumbo cell whose card status array is out of
+  /// line, and for an element more than one unit into it the predicate's own
+  /// segment-size test would read object payload instead of SHSegmentInfo.
+  ///
+  /// On entry all three operands must already be synced to the frame,
+  /// because \p helperLab reads them from there. On return every temp this
+  /// used is free again and no FR is registered in one, so the helper call
+  /// that follows is safe (see the free-after-call invariant in doc/JIT.md).
+  ///
+  /// \param targetKnownObject true when an earlier tier at this site has
+  ///   already proved the target an object, in which case the object check
+  ///   below is skipped. Everything else is still emitted: this tier derives
+  ///   its own object pointer and re-reads the cell kind.
+  void emitPutByValFastArrayTier(
+      FR frTarget,
+      FR frKey,
+      FR frValue,
+      const asmjit::Label &helperLab,
+      bool targetKnownObject);
+#endif // HERMES_JIT_INLINE_SAFE_STORE
+
+  /// Emit the inline typed-array store tier specialized for exactly \p kind.
+  /// A kind mismatch on an object target branches to \p kindMissLab (the
+  /// JSArray tier at duo sites, else the helper); every other guard declines
+  /// to \p helperLab, whose helper call preserves exact JS semantics and
+  /// keeps recording. Emits no write barrier: typed-array storage holds no
+  /// GC pointers, so unlike the fast array tier this one is not gated on
+  /// HERMES_JIT_INLINE_SAFE_STORE and exists under every GC.
+  ///
+  /// The guards, in emission order (which is not the spec's listing order --
+  /// the object and kind checks come first so that a duo site's non-number
+  /// stores reach the JSArray tier rather than the helper):
+  ///   - the target is an object of CellKind \p kind exactly;
+  ///   - flags_.fastIndexProperties is set and flags_.frozen is clear, the
+  ///     same masked compare the fast array tier emits: an out-of-range
+  ///     defineProperty clears fastIndexProperties, and a frozen typed array
+  ///     must throw on a strict store rather than be written;
+  ///   - the value is a number that the element type can hold without a
+  ///     helper -- see the conversion comments at the emission site;
+  ///   - the key is a double that converts to a uint32 and back unchanged,
+  ///     exactly emit_double_is_uint32() as in the fast array tier;
+  ///   - the index is below length_;
+  ///   - the buffer is attached, i.e. its data_ is non-null.
+  ///
+  /// On entry all three operands must already be synced to the frame,
+  /// because \p helperLab and \p kindMissLab read them from there. On return
+  /// every temp this used is free again and no FR is registered in one, so
+  /// the helper call that follows is safe (see the free-after-call invariant
+  /// in doc/JIT.md).
+  void emitPutByValTypedArrayTier(
+      FR frTarget,
+      FR frKey,
+      FR frValue,
+      CellKind kind,
+      const asmjit::Label &kindMissLab,
+      const asmjit::Label &helperLab);
+
+  /// The register assignment the inline GetByVal tiers run on. It is made
+  /// ONCE, by getByValImpl(), and handed to every tier, for two reasons:
+  /// the tiers must agree on which register the result lands in (they are
+  /// alternatives reached by a chain of kind guards, and the shared slow
+  /// path and the frame update that follow them name one register), and
+  /// the source and the key are loaded once for the whole chain rather
+  /// than reloaded per tier. Contrast the PutByVal tiers, which each own
+  /// their prologue: a store has no result register to agree on.
+  ///
+  /// Every field is a temp the caller has ALREADY released back to the
+  /// allocator (see getByValImpl()), so a tier may clobber any of them
+  /// freely -- except that \c source and \c key must survive a tier that
+  /// declines, because the next tier in the chain reads them, and \c res
+  /// must be written LAST, since it may alias \c loc or \c idx.
+  struct GetByValRegs {
+    /// The source operand, as a raw HermesValue.
+    a64::GpX source;
+    /// The key operand, as the raw 64 bits of the double it has to be.
+    a64::VecD key;
+    /// Scratch: the object pointer, then the storage or buffer, then the
+    /// element base address.
+    a64::GpX loc;
+    /// Scratch: the key converted to a uint32 element index, zero-extended
+    /// so its W view is directly usable as a UXTW-scaled index.
+    a64::GpX idx;
+    /// General scratch.
+    a64::GpX temp1;
+    /// Scratch for the key conversion's round trip.
+    a64::VecD keyTmp;
+    /// Scratch holding the typed-array element as a double. Invalid unless
+    /// a typed-array tier is emitted at this site.
+    a64::VecD valTmp;
+    /// Where the result HermesValue must land, on every path.
+    a64::GpX res;
+  };
+
+  /// Emit the GetByVal inline fast array load: a chain of guards that the
+  /// source is a fast JSArray and the key an existing, non-hole element of
+  /// it, followed by an inline unbox of that element's SmallHermesValue
+  /// into \c regs.res. Falling through means the load is done and
+  /// \c regs.res holds it; every guard that fails jumps to \p helperLab,
+  /// whose helper call resolves the read exactly (the prototype chain may
+  /// carry the answer).
+  ///
+  /// Unconditional: this tier is emitted at every GetByVal site, in every
+  /// version, on every build configuration and every GC/heap-value mode --
+  /// unlike emitPutByValFastArrayTier() it needs no
+  /// HERMES_JIT_INLINE_SAFE_STORE gate, because a load takes no write
+  /// barrier. Nothing observes its hits, so it is a static prior rather
+  /// than an evidence-driven decision.
+  ///
+  /// The guards mirror ArrayImpl::at() (JSArray.h) and
+  /// tryFastGetComputedNoAlloc()'s JSArray branch (JSObject-inline.h),
+  /// reusing emitPutByValFastArrayTier()'s object/kind/key-conversion
+  /// sequence VERBATIM but dropping everything that exists only for the
+  /// store side:
+  ///   - the source is an object (unless \p sourceKnownObject);
+  ///   - of CellKind JSArray exactly -- the same narrower-than-ArrayImpl
+  ///     guard the put tier uses, which is why an Arguments object (a
+  ///     different CellKind that shares ArrayImpl's storage layout)
+  ///     declines here instead of being read inline;
+  ///   - NO flags_.fastIndexProperties/frozen check: unlike the store side,
+  ///     the read side needs none. tryFastGetComputedNoAlloc()'s own
+  ///     comment explains why -- "We don't need to check for fast index
+  ///     properties here, because if there are non-fast ones, the
+  ///     corresponding slot will be empty" -- so the empty check below
+  ///     already subsumes it;
+  ///   - the key is a double that converts to a uint32 and back unchanged
+  ///     and is not 0xFFFFFFFF -- exactly toArrayIndexFastPath(), the put
+  ///     tier's own key-conversion sequence, unchanged;
+  ///   - `index - beginIndex_ < elemCount_` unsigned, ArrayImpl::at()'s
+  ///     range test. Out of range is a DECLINE to \p helperLab, not an
+  ///     inline `undefined`: the prototype chain may carry indexed
+  ///     properties at that index, so only the full path can answer;
+  ///   - the loaded SmallHermesValue element is not `empty` (a hole):
+  ///     ArrayImpl::at() returns `empty` for one, and a hole read must
+  ///     resolve through the prototype chain (a data property or an
+  ///     accessor may live there), so it is also a decline, not
+  ///     `undefined`.
+  ///
+  /// The one guard emitPutByValFastArrayTier() has that this omits besides
+  /// the flags check: the "not a jumbo cell" size gate. That guard exists
+  /// solely to satisfy emitSafeStoreOrSlow()'s precondition on the write
+  /// barrier's card math; a load touches no card and needs no such bound.
+  ///
+  /// \param sourceKnownObject true when an earlier tier at this site has
+  ///   already proved the source an object, in which case the object check
+  ///   is skipped. Everything else is still emitted: this tier derives its
+  ///   own object pointer and re-reads the cell kind.
+  ///
+  /// On entry the source and the key must already be synced to the frame,
+  /// because \p helperLab reads them from there, and they must be live in
+  /// \c regs.source and \c regs.key. This emits no register-allocator
+  /// bookkeeping at all -- getByValImpl() has already left the allocator
+  /// in the state the shared helper call needs.
+  void emitGetByValFastArrayTier(
+      const GetByValRegs &regs,
+      const asmjit::Label &helperLab,
+      bool sourceKnownObject);
+
+  /// Emit the inline typed-array load tier specialized for exactly \p kind,
+  /// the load-side sibling of emitPutByValTypedArrayTier(). A kind mismatch
+  /// on an object source branches to \p kindMissLab (the JSArray tier,
+  /// which is always emitted after this one); a non-object source or a key
+  /// that is not an exact uint32 declines to \p helperLab.
+  ///
+  /// Semantics authority: tryFastGetComputedNoAlloc()'s typed-array branch
+  /// (JSObject-inline.h). Two differences from the store tier follow from
+  /// it, and both are load-side ONLY:
+  ///   - NO object-flags check. The read path tests neither
+  ///     fastIndexProperties nor frozen for a typed array: an element read
+  ///     is answered by length and attachedness alone, so a tier that
+  ///     checked the flags would decline where the interpreter does not.
+  ///   - An out-of-bounds index, and a detached buffer, are NOT declines.
+  ///     Both read as `undefined`, so both branch to this tier's own inline
+  ///     `undefined`, never to the helper -- which also means they record
+  ///     nothing, and rightly so: the site's shape at that point IS the
+  ///     specialized kind, and there is nothing left to learn.
+  ///
+  /// The element is loaded, widened to a double per \p kind, and encoded as
+  /// a number HermesValue. For the two float kinds the widened value is
+  /// NaN-canonicalized first: a raw f32/f64 element may hold ANY NaN bit
+  /// pattern, including one that aliases the NaN-box tag space, and
+  /// encoding that verbatim would forge a non-number HermesValue. The
+  /// integer kinds always produce a finite double and skip it.
+  ///
+  /// On entry the source and the key must already be synced to the frame,
+  /// because \p helperLab reads them from there, and they must be live in
+  /// \c regs.source and \c regs.key. \c regs.valTmp must be valid. Like the
+  /// fast array tier, this emits no register-allocator bookkeeping.
+  void emitGetByValTypedArrayTier(
+      const GetByValRegs &regs,
+      CellKind kind,
+      const asmjit::Label &kindMissLab,
+      const asmjit::Label &helperLab);
+
+  /// Emit the per-kind element access of an inline typed-array load: the
+  /// sized load of one element of \p kind, its widening to a double, the
+  /// NaN canonicalization the two float kinds need, and the encode of the
+  /// result as a number HermesValue in \p xRes. Every path ends in a jump
+  /// to \p doneLab, so nothing falls out of this.
+  ///
+  /// \p elemBase is the address of the element to load, in one of the two
+  /// natural AArch64 addressing forms: a base register plus a W index
+  /// register extended with `uxtw #logWidth` (an ELEMENT index, which the
+  /// Mem itself scales -- there is no separate scaled add here), or a base
+  /// register plus a scaled unsigned immediate. The caller builds it,
+  /// because only the caller knows which form its index is; this asserts
+  /// that whichever form arrived is the one \p kind's width can encode.
+  ///
+  /// This is the tail shared by the typed-array load tiers; everything
+  /// before it -- the guards, the bounds check, and the materialization of
+  /// \p elemBase -- belongs to the individual tier, as does the
+  /// `undefined` block \p doneLab's binding follows.
+  ///
+  /// Allocates nothing: \p xRes, \p xTemp1 and \p dValTmp are all chosen by
+  /// the tier's caller, which must have finished its register-allocator
+  /// bookkeeping before any of the chain was emitted.
+  void emitTypedArrayElementLoad(
+      CellKind kind,
+      const a64::Mem &elemBase,
+      const a64::GpX &xRes,
+      const a64::GpX &xTemp1,
+      const a64::VecD &dValTmp,
+      const asmjit::Label &doneLab);
+
+  /// The register assignment the inline GetByIndex tiers run on -- the
+  /// GetByValRegs of the constant-key opcode. It is made ONCE, by
+  /// getByIndexImpl(), and handed to every tier, for the same two reasons
+  /// GetByValRegs exists: the tiers must agree on which register the
+  /// result lands in, and the source is loaded once for the whole chain.
+  /// There is no \c key/\c keyTmp pair: the key is an emit-time uint8
+  /// constant, never a frame value, so there is nothing to load or
+  /// convert. The typed-array tier reuses \c loc/\c temp1/\c res exactly
+  /// as GetByValRegs's typed-array tier does, plus its own \c valTmp; it
+  /// has no use for \c idx at all, since the constant element index is
+  /// folded into the element access's displacement.
+  ///
+  /// Every field is a temp the caller has ALREADY released back to the
+  /// allocator (see getByIndexImpl()), so a tier may clobber any of them
+  /// freely -- except that \c source must survive a tier that declines,
+  /// because the next tier in the chain reads it, and \c res must be
+  /// written LAST, since it may alias \c loc or \c idx.
+  struct GetByIndexRegs {
+    /// The source operand, as a raw HermesValue.
+    a64::GpX source;
+    /// Scratch: the object pointer, then the storage or buffer, then the
+    /// element base address.
+    a64::GpX loc;
+    /// Scratch: the constant key K, then K's storage-relative index
+    /// (K - beginIndex_), zero-extended so its X view is directly usable
+    /// as a scaled 64-bit index.
+    a64::GpX idx;
+    /// General scratch.
+    a64::GpX temp1;
+    /// Scratch holding the typed-array element as a double. Invalid unless
+    /// a typed-array tier is emitted at this site.
+    a64::VecD valTmp;
+    /// Where the result HermesValue must land, on every path.
+    a64::GpX res;
+  };
+
+  /// Emit the GetByIndex inline fast array load: the constant-key twin of
+  /// emitGetByValFastArrayTier(), reusing its object/kind guard and its
+  /// hole-check/unbox tail verbatim but replacing the key-conversion block
+  /// with nothing (K is an emit-time constant) and its range test with the
+  /// constant-K begin-relative form. Falling through means the load is
+  /// done and \c regs.res holds it; every guard that fails jumps to
+  /// \p helperLab, whose helper call resolves the read exactly (the
+  /// prototype chain may carry the answer).
+  ///
+  /// Unconditional, for the same reason as emitGetByValFastArrayTier(): a
+  /// load takes no write barrier, so this needs no
+  /// HERMES_JIT_INLINE_SAFE_STORE gate and is emitted at every GetByIndex
+  /// site, in every version, under every GC/heap-value mode.
+  ///
+  /// The guards mirror ArrayImpl::at() (JSArray.h) and
+  /// tryFastGetComputedNoAlloc()'s JSArray branch (JSObject-inline.h),
+  /// exactly as emitGetByValFastArrayTier()'s doc comment describes, with
+  /// one storage-layout correction the constant key does NOT remove: K
+  /// being constant does not make the storage offset constant, because the
+  /// stored fields are \c beginIndex_ and \c elemCount_ (JSArray.h) and a
+  /// first indexed write can set \c beginIndex_ to any index
+  /// (JSArray.cpp). The range test is therefore still
+  /// `K - beginIndex_ < elemCount_` unsigned -- one comparison that covers
+  /// both `K < beginIndex_` (via unsigned wrap) and
+  /// `K >= beginIndex_ + elemCount_` -- emitted as
+  /// `mov wIdx, #K`, `ldr wTemp1, [loc, #beginIndex_]`,
+  /// `sub wIdx, wIdx, wTemp1`, `ldr wTemp1, [loc, #elemCount_]`,
+  /// `cmp wIdx, wTemp1`, `b.hs helperLab`. Out of range is a DECLINE, not
+  /// `undefined`, and so is a hole (an `empty` slot), exactly as on the
+  /// ByVal side.
+  ///
+  /// \param sourceKnownObject true when an earlier tier at this site -- a
+  ///   typed-array tier, at a site that earned one -- has already proved
+  ///   the source an object, in which case the object check is skipped.
+  ///
+  /// On entry the source must already be synced to the frame, because
+  /// \p helperLab reads it from there, and it must be live in
+  /// \c regs.source. This emits no register-allocator bookkeeping at all
+  /// -- getByIndexImpl() has already left the allocator in the state the
+  /// shared helper call needs.
+  void emitGetByIndexFastArrayTier(
+      const GetByIndexRegs &regs,
+      uint32_t key,
+      const asmjit::Label &helperLab,
+      bool sourceKnownObject);
+
+  /// Emit the inline typed-array load tier of GetByIndex, specialized for
+  /// exactly \p kind at the emit-time constant index \p key -- the
+  /// constant-key twin of emitGetByValTypedArrayTier(). A kind mismatch on
+  /// an object source branches to \p kindMissLab (the JSArray tier, which
+  /// is always emitted after this one); a non-object source declines to
+  /// \p helperLab. There is nothing else left to decline: with the key a
+  /// constant there is no key conversion and so no parity exit.
+  ///
+  /// Semantics authority, and the two load-side-only differences from the
+  /// store tier (no object-flags check; an out-of-bounds index and a
+  /// detached buffer are inline `undefined` rather than declines, and
+  /// therefore record nothing), are exactly as
+  /// emitGetByValTypedArrayTier()'s doc comment describes.
+  ///
+  /// Two things differ from that tier, both consequences of the constant
+  /// key:
+  ///   - the bounds test compares the length field against Imm(K)
+  ///     DIRECTLY -- `ldr wTemp1, [loc, #length_]`, `cmp wTemp1, #K`,
+  ///     `b.ls undefined` -- the reverse operand order of the ByVal tier's
+  ///     `cmp idx, length_` / `b.hs`, and therefore the reverse condition.
+  ///     Both accept STRICTLY: `b.ls` is taken when `length_ <= K`, i.e.
+  ///     exactly when K is NOT a valid index. K is a uint8, so it is
+  ///     always an `cmp` immediate;
+  ///   - the shared element-load tail is handed the IMMEDIATE addressing
+  ///     form -- the `data_ + offset_` base register plus a
+  ///     `K * elementWidth` scaled unsigned displacement, and NO index
+  ///     register -- rather than the UXTW base+index form. The product is
+  ///     at most 255 * 8 = 2040, which is inside every width's scaled
+  ///     12-bit range.
+  ///
+  /// On entry the source must already be synced to the frame, because
+  /// \p helperLab reads it from there, and it must be live in
+  /// \c regs.source. \c regs.valTmp must be valid. Like the fast array
+  /// tier, this emits no register-allocator bookkeeping.
+  void emitGetByIndexTypedArrayTier(
+      const GetByIndexRegs &regs,
+      uint32_t key,
+      CellKind kind,
+      const asmjit::Label &kindMissLab,
+      const asmjit::Label &helperLab);
+
+  /// Split out of getByIndex(): the tier-selection sequence for the
+  /// constant-key twin of getByValImpl(), and the same shape -- the
+  /// evidence-driven typed-array tier first (its kind miss chaining into
+  /// the JSArray tier, never into the helper), the unconditional JSArray
+  /// tier second, and the per-site INDIRECT recording call to
+  /// _jit_get_by_index as the shared slow path. Registers, including the
+  /// result register, are allocated ONCE here and handed to the tiers via
+  /// GetByIndexRegs, never allocated by a tier itself.
+  ///
+  /// Tier selection reads the PRIOR version's record for this site, with
+  /// the LOAD predicate, exactly as getByValImpl() does; GetByIndex sites
+  /// join the same JitConsumerRecords::byValSites deque (siteId is the
+  /// bytecode offset, and GetByIndex is a distinct opcode, so no
+  /// collision with a ByVal site is possible).
+  void getByIndexImpl(FR frRes, FR frSource, uint32_t key);
 
   void getArgumentsPropByValImpl(
       FR frRes,

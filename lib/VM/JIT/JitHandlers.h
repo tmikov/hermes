@@ -15,6 +15,7 @@
 typedef struct SHRuntime SHRuntime;
 typedef struct SHRuntimeModule SHRuntimeModule;
 typedef struct SHCodeBlock SHCodeBlock;
+typedef struct SHJitVersionData SHJitVersionData;
 
 namespace hermes::vm {
 
@@ -168,9 +169,13 @@ SHLegacyValue _jit_call_builtin(
     uint32_t argCount,
     uint32_t builtinMethodID);
 
+/// Slow path of PutById, and the recording site for the PutById tier's
+/// declines.
+/// \param versionData the version record of the CALLING body; the
+///   CodeBlock is reached through it.
 void _jit_put_by_id(
     SHRuntime *shr,
-    SHCodeBlock *codeBlock,
+    SHJitVersionData *versionData,
     SHLegacyValue *base,
     SHLegacyValue *value,
     uint8_t cacheIdx,
@@ -178,14 +183,67 @@ void _jit_put_by_id(
     bool strictMode,
     bool tryProp);
 
+/// Slow path of PutByVal (loose), and the recording site for ByVal
+/// tier declines: records the observed target shape into
+/// \p versionData's entry for \p siteId, counts the decline (possibly
+/// triggering a recompile), then forwards to the plain SH helper.
+/// \param siteId the PutByVal instruction's bytecode offset.
+void _jit_put_by_val_loose(
+    SHRuntime *shr,
+    SHLegacyValue *target,
+    SHLegacyValue *key,
+    SHLegacyValue *value,
+    SHJitVersionData *versionData,
+    uint32_t siteId);
+/// Strict-mode variant of _jit_put_by_val_loose.
+void _jit_put_by_val_strict(
+    SHRuntime *shr,
+    SHLegacyValue *target,
+    SHLegacyValue *key,
+    SHLegacyValue *value,
+    SHJitVersionData *versionData,
+    uint32_t siteId);
+
+/// Slow path of GetByVal, and the recording site for the ByVal load
+/// tier's declines: records the observed source shape into
+/// \p versionData's entry for \p siteId, counts the decline (possibly
+/// triggering a recompile), then forwards to the plain SH helper and
+/// returns its value.
+/// \param siteId the GetByVal instruction's bytecode offset.
+SHLegacyValue _jit_get_by_val(
+    SHRuntime *shr,
+    SHLegacyValue *source,
+    SHLegacyValue *key,
+    SHJitVersionData *versionData,
+    uint32_t siteId);
+
+/// Slow path of GetByIndex, and the recording site for the ByIndex load
+/// tier's declines: records the observed source shape into
+/// \p versionData's entry for \p siteId, counts the decline (possibly
+/// triggering a recompile), then forwards to the plain SH helper and
+/// returns its value.
+/// \param siteId the GetByIndex instruction's bytecode offset.
+SHLegacyValue _jit_get_by_index(
+    SHRuntime *shr,
+    SHLegacyValue *source,
+    uint32_t key,
+    SHJitVersionData *versionData,
+    uint32_t siteId);
+
 /// Assumes that table  at index \p tableIndex is an initialized string switch
 /// runtime table. Pass the runtimeModule+index in order to avoid relying on
 /// potentially reallocating storage in RuntimeModule.
 ///
-/// If \p switchValue is found as a case in that table, returns the
-/// corresponding JIT code target for that case.  Otherwise, returns nullptr.
-/// (This assumes that nullptr is not a valid branch target.)
-void *_jit_string_switch_imm_table_lookup(
+/// If \p switchValue is found as a case in that table, returns that case's
+/// index, which is dense in [0, table size). Otherwise -- \p switchValue is
+/// not a string, or is a string no case matches -- returns -1, meaning the
+/// default case.
+///
+/// The result deliberately identifies the case rather than a code address:
+/// the table is shared by every compiled version of the function, while the
+/// address of a case's code is specific to one body. The caller turns the
+/// index into an address using the jump table embedded in its own body.
+int64_t _jit_string_switch_imm_table_lookup(
     RuntimeModule *runtimeModule,
     uint32_t tableIndex,
     SHLegacyValue *switchValue);

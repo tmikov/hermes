@@ -32,8 +32,11 @@
 
 // If the JIT is allowed by configuration, enable it on platforms that support
 // it.
-#if !defined(HERMESVM_JIT) && (defined(__aarch64__) || defined(_M_ARM64)) && \
-    (!defined(HERMESVM_COMPRESSED_POINTERS) ||                               \
+#if !defined(HERMESVM_JIT) &&                                  \
+    (defined(__aarch64__) || defined(_M_ARM64) ||              \
+     ((defined(__x86_64__) || defined(_M_X64)) &&              \
+      !defined(_WIN32))) &&                                    \
+    (!defined(HERMESVM_COMPRESSED_POINTERS) ||                 \
      defined(HERMESVM_CONTIGUOUS_HEAP))
 #define HERMESVM_JIT 1
 #else
@@ -42,6 +45,43 @@
 
 #else
 #error HERMESVM_ALLOW_JIT must have a value of 1 or 2
+#endif
+
+// Per-architecture JIT selectors. Exactly one is 1 when HERMESVM_JIT is 1;
+// both are 0 when the JIT is disabled. Arch-specific sources self-guard on
+// these so that both backend subtrees can be listed in the build
+// unconditionally.
+#if HERMESVM_JIT && (defined(__aarch64__) || defined(_M_ARM64))
+#define HERMESVM_JIT_ARM64 1
+#else
+#define HERMESVM_JIT_ARM64 0
+#endif
+#if HERMESVM_JIT && (defined(__x86_64__) || defined(_M_X64)) && !defined(_WIN32)
+#define HERMESVM_JIT_X86_64 1
+#else
+#define HERMESVM_JIT_X86_64 0
+#endif
+
+// Non-zero when the selected JIT backend emits inline heap stores guarded by
+// its inline write-barrier predicate (Emitter::emitSafeStoreOrSlow()). Every
+// store site in a build where this is 0 emits exactly the runtime helper call
+// it emitted before the predicate existed.
+//
+// MallocGC is the only thing that switches it off: it has neither a young
+// generation nor a card table for the predicate to reason about. Both
+// backends otherwise cover every heap-value mode, including the two that do
+// not store a HermesValue verbatim -- HERMESVM_COMPRESSED_POINTERS, where a
+// slot is a 32-bit compressed value, and HERMESVM_BOXED_DOUBLES, where
+// encoding some doubles requires a heap allocation. Each tier encodes the
+// value first and declines the one case emitted code cannot perform.
+//
+// This stays one definition rather than a copy in each backend header
+// because a translation unit that sees both must never see them disagree.
+// See doc/JIT.md's heap-value-mode build matrix.
+#if !HERMESVM_JIT || HERMESVM_GCKIND != _HERMESVM_GCVALUE_HADES
+#define HERMES_JIT_INLINE_SAFE_STORE 0
+#else
+#define HERMES_JIT_INLINE_SAFE_STORE 1
 #endif
 
 // Only enable perf profiling support on Linux/Android when JIT is enabled and

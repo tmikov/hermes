@@ -1,5 +1,8 @@
 name: Hermes
 components:
   - bytecode
+  - compiler
   - gc
+  - jit
+  - vm
   - wasm

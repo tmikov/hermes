@@ -16,14 +16,6 @@
 
 namespace hermes::vm::arm64 {
 
-// Disable warnings about missing designated initializers since they occur often
-// when we construct SlowPaths.
-#ifdef __clang__
-#if __has_warning("-Wmissing-designated-field-initializers")
-#pragma clang diagnostic ignored "-Wmissing-designated-field-initializers"
-#endif
-#endif
-
 // Ensure that HermesValue tags are handled correctly by updating this every
 // time the HERMESVALUE_VERSION changes, and going through the JIT and updating
 // any relevant code.
@@ -67,7 +59,7 @@ inline void emit_sh_ljs_tag_is_object(
     a64::Assembler &a,
     const a64::GpX &xTagReg) {
   static_assert(
-      (int16_t)HVTag_Object == (int16_t)(-1) && "HV_TagObject must be -1");
+      (int16_t)HVTag_Object == (int16_t)(-1), "HVTag_Object must be -1");
   a.cmn(xTagReg, -HVTag_Object);
 }
 
@@ -79,7 +71,7 @@ inline void emit_sh_ljs_tag_is_string(
     a64::Assembler &a,
     const a64::GpX &xTagReg) {
   static_assert(
-      (int16_t)HVTag_Str == (int16_t)(-3) && "HV_TagObject must be -1");
+      (int16_t)HVTag_Str == (int16_t)(-3), "HVTag_Str must be -3");
   a.cmn(xTagReg, -HVTag_Str);
 }
 
@@ -187,7 +179,7 @@ inline void emit_sh_ljs_is_bigint(
     const a64::GpX &xInputReg) {
   // Get the tag bits by right shifting.
   static_assert(
-      (int16_t)HVTag_BigInt == (int16_t)(-2) && "HVTag_BigInt must be -2");
+      (int16_t)HVTag_BigInt == (int16_t)(-2), "HVTag_BigInt must be -2");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits);
   a.cmn(xTempReg, -HVTag_BigInt);
 }
@@ -203,7 +195,7 @@ inline void emit_sh_ljs_is_empty(
     const a64::GpX &xInputReg) {
   // Get the tag bits by right shifting.
   static_assert(
-      (int16_t)HVETag_Empty == (int16_t)(-14) && "HVETag_Empty must be -14");
+      (int16_t)HVETag_Empty == (int16_t)(-14), "HVETag_Empty must be -14");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits - 1);
   a.cmn(xTempReg, -HVETag_Empty);
 }
@@ -219,7 +211,7 @@ inline void emit_sh_ljs_is_null(
     const a64::GpX &xInputReg) {
   // Get the tag bits by right shifting.
   static_assert(
-      (int16_t)HVETag_Null == (int16_t)(-11) && "HVETag_Null must be -11");
+      (int16_t)HVETag_Null == (int16_t)(-11), "HVETag_Null must be -11");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits - 1);
   a.cmn(xTempReg, -HVETag_Null);
 }
@@ -235,7 +227,7 @@ inline void emit_sh_ljs_is_bool(
     const a64::GpX &xInputReg) {
   // Get the tag bits by right shifting.
   static_assert(
-      (int16_t)HVETag_Bool == (int16_t)(-10) && "HVETag_Bool must be -10");
+      (int16_t)HVETag_Bool == (int16_t)(-10), "HVETag_Bool must be -10");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits - 1);
   a.cmn(xTempReg, -HVETag_Bool);
 }
@@ -254,7 +246,7 @@ inline void emit_sh_ljs_is_undefined(
       HERMESVALUE_VERSION == 2,
       "HVETag_Undefined must be at kHV_NumDataBits - 1");
   static_assert(
-      (int16_t)HVETag_Undefined == (int16_t)(-12) &&
+      (int16_t)HVETag_Undefined == (int16_t)(-12),
       "HVETag_Undefined must be -12");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits - 1);
   a.cmn(xTempReg, -HVETag_Undefined);
@@ -273,7 +265,7 @@ inline void emit_sh_ljs_is_symbol(
   static_assert(
       HERMESVALUE_VERSION == 2, "HVETag_Symbol must be at kHV_NumDataBits - 1");
   static_assert(
-      (int16_t)HVETag_Symbol == (int16_t)(-9) && "HVETag_Symbol must be -9");
+      (int16_t)HVETag_Symbol == (int16_t)(-9), "HVETag_Symbol must be -9");
   a.asr(xTempReg, xInputReg, kHV_NumDataBits - 1);
   a.cmn(xTempReg, -HVETag_Symbol);
 }
@@ -286,7 +278,7 @@ inline void emit_sh_ljs_bool(a64::Assembler &a, const a64::GpX inOut) {
   // a shifted 16 bit value. We can exploit this to use movk to set the tag.
   static_assert(HERMESVALUE_VERSION == 2);
   static_assert(
-      (llvh::isShiftedUInt<16, kHV_NumDataBits>(baseBool.raw)) &&
+      (llvh::isShiftedUInt<16, kHV_NumDataBits>(baseBool.raw)),
       "Boolean tag must be 16 bits.");
   a.lsl(inOut, inOut, kHV_BoolBitIdx);
   // Add the bool tag.
@@ -301,7 +293,7 @@ emit_sh_ljs_bool_const(a64::Assembler &a, const a64::GpX &out, bool val) {
   // a shifted 16 bit value. We can exploit this to use movk to set the tag.
   static_assert(HERMESVALUE_VERSION == 2);
   static_assert(
-      (llvh::isShiftedUInt<16, kHV_NumDataBits>(baseBool.raw)) &&
+      (llvh::isShiftedUInt<16, kHV_NumDataBits>(baseBool.raw)),
       "Boolean tag must be 16 bits.");
   if (val) {
     // Put 1 at the value and add the bool tag.
@@ -721,6 +713,109 @@ inline void emit_sh_shv_decode(
   Emit_sh_shv_decode(a, xInOut, doneLab).emitAll(a);
 }
 
+#ifdef HERMESVM_BOXED_DOUBLES
+/// Encode the HermesValue in \p xIn into the SmallHermesValue that a heap slot
+/// holds, leaving the result in \p xOut. This is the inverse of
+/// Emit_sh_shv_decode and mirrors HermesValue32::encodeHermesValue() case for
+/// case, with one difference that is the whole reason it takes a label: a
+/// double whose bits do not fit an inline "compressed HV64" has to be boxed
+/// in a heap-allocated BoxedDouble, and emitted code cannot allocate. Such a
+/// value is DECLINED -- control jumps to \p slowLab with nothing written --
+/// and the caller's slow path, which reaches the runtime, boxes it there.
+///
+/// Declared only under HERMESVM_BOXED_DOUBLES, unlike Emit_sh_shv_decode
+/// which is always declared and emits nothing in the default build. The
+/// decode can afford that because it works in place; an encode that produced
+/// nothing would still owe its caller a register, so the caller selects
+/// between this and using the HermesValue itself with the same #ifdef. Its
+/// one caller is emit_shv_encode_for_slot_or_slow() below.
+///
+/// \param xOut receives the SmallHermesValue. Must differ from \p xIn.
+/// \param xIn the HermesValue to encode; preserved.
+/// \param xTemp scratch, clobbered. Must differ from \p xIn and \p xOut.
+/// \param slowLab where to jump when the value cannot be encoded inline.
+///
+/// NZCV is clobbered.
+void emit_shv_encode_or_slow(
+    a64::Assembler &a,
+    const a64::GpX &xOut,
+    const a64::GpX &xIn,
+    const a64::GpX &xTemp,
+    const asmjit::Label &slowLab);
+#endif
+
+/// Encode \p xValue into the SmallHermesValue a heap slot holds, ready to be
+/// handed to Emitter::emitSafeStoreOrSlow(), and return the register that
+/// holds it. This is the mode-selecting wrapper the inline write tiers call,
+/// so that they need no #ifdef of their own: under boxed doubles it emits
+/// emit_shv_encode_or_slow() above and returns \p xOut; in the default build a
+/// slot holds the HermesValue itself, so it emits nothing at all and returns
+/// \p xValue.
+///
+/// Call it BEFORE the tier's guards. Nothing has been stored at that point,
+/// so the decline costs nothing -- and a value that cannot be encoded is by
+/// far the cheapest thing to reject, because rejecting it there skips the
+/// whole guard chain. See doc/JIT.md's "Inline write barrier".
+///
+/// \param xOut receives the SmallHermesValue under boxed doubles; unused
+///   otherwise. Must differ from \p xValue and \p xTemp.
+/// \param xValue the HermesValue to encode; preserved.
+/// \param xTemp scratch, clobbered under boxed doubles.
+/// \param slowLab where to jump when the value cannot be encoded inline.
+[[nodiscard]] inline const a64::GpX &emit_shv_encode_for_slot_or_slow(
+    [[maybe_unused]] a64::Assembler &a,
+    [[maybe_unused]] const a64::GpX &xOut,
+    const a64::GpX &xValue,
+    [[maybe_unused]] const a64::GpX &xTemp,
+    [[maybe_unused]] const asmjit::Label &slowLab) {
+#ifdef HERMESVM_BOXED_DOUBLES
+  emit_shv_encode_or_slow(a, xOut, xValue, xTemp, slowLab);
+  return xOut;
+#else
+  return xValue;
+#endif
+}
+
+/// Load the SmallHermesValue at \p mem into \p xTempReg and compare it against
+/// the "empty" value, i.e. an array hole. NZCV is updated as a result; b.eq
+/// on success.
+///
+/// The two branches are not a width difference alone, and the invariant that
+/// selects between them is the slot width, which is why this switches on
+/// sizeof the way emit_load_shv()/emit_store_shv() next door do rather than
+/// on the compressed-pointer macro. When a SmallHermesValue is 8 bytes -- the
+/// default build, and the boxed build without compressed pointers -- an
+/// inline value holds the HermesValue's bits unshifted, so HermesValue's own
+/// ETag test applies verbatim. When it is 4 bytes those bits have been
+/// shifted down and the ETag is no longer where a shift can find it, so the
+/// encoded empty value is compared as a whole instead; it is a compile-time
+/// constant either way.
+///
+/// arm64: that constant does not encode as a compare immediate, so the
+/// narrow form materializes it first. It does so in xScratch rather than
+/// taking a second scratch parameter. A caller could supply one -- the
+/// PutByVal tier's index register is dead by the time it reaches the hole
+/// test -- but that is a fact about one caller's liveness, and threading it
+/// through the signature would buy nothing: this emits no call, so nothing
+/// can be holding xScratch across it, and xScratch is available to every
+/// caller unconditionally.
+inline void emit_shv_load_is_empty(
+    a64::Assembler &a,
+    const a64::GpX &xTempReg,
+    const a64::Mem &mem) {
+  if constexpr (sizeof(SmallHermesValue) == 4) {
+    emit_load_shv(a, xTempReg, mem);
+    emit_cmp_imm32(
+        a,
+        xTempReg.w(),
+        (uint32_t)SmallHermesValue::encodeEmptyValue().getRaw(),
+        xScratch.w());
+  } else {
+    a.ldr(xTempReg, mem);
+    emit_sh_ljs_is_empty(a, xTempReg, xTempReg);
+  }
+}
+
 /// \return true if i is a valid immediate offset to use in an stp instruction
 /// storing two GpX registers, false otherwise. Note that the limits are
 /// different if storing GpW registers, or vector registers.
@@ -750,12 +845,12 @@ inline bool isStpGpXImm(int i) {
 /// Save the current IP and emit a call to a runtime function. This should be
 /// used in most cases when invoking slow paths and handlers for complex
 /// functionality.
-#define EMIT_RUNTIME_CALL(em, type, func)           \
-  do {                                              \
-    using _FnT = type;                              \
-    _FnT _fn = func;                                \
-    (void)_fn;                                      \
-    (em).callThunkWithSavedIP((void *)func, #func); \
+#define EMIT_RUNTIME_CALL(em, type, func)             \
+  do {                                                \
+    using _FnT = type;                                \
+    _FnT _fn = func;                                  \
+    (void)_fn;                                        \
+    (em).callRuntimeWithSavedIP((void *)func, #func); \
   } while (0)
 
 /// Call a runtime function without saving the IP. This is intended for special
@@ -766,19 +861,7 @@ inline bool isStpGpXImm(int i) {
     using _FnT = type;                                     \
     _FnT _fn = func;                                       \
     (void)_fn;                                             \
-    (em).callThunk((void *)func, #func);                   \
-  } while (0)
-
-/// Make call without creating a thunk for it or saving the IP. This is useful
-/// for specific functionality where saving the IP is either unnecessary or
-/// incorrect, and where the call target is only going to be invoked at most
-/// once in the function.
-#define EMIT_RUNTIME_CALL_WITHOUT_THUNK_AND_SAVED_IP(em, type, func) \
-  do {                                                               \
-    using _FnT = type;                                               \
-    _FnT _fn = func;                                                 \
-    (void)_fn;                                                       \
-    (em).callWithoutThunk((void *)func, #func);                      \
+    (em).callRuntime((void *)func, #func);                 \
   } while (0)
 
 /// Load the lengthAndFlags of a HermesValue that contains a StringPrimitive

@@ -259,6 +259,22 @@ struct VMOnlyRuntimeFlags {
       llvh::cl::desc("maximum size for JIT code (in bytes)"),
       llvh::cl::init(32u << 20)};
 
+  llvh::cl::opt<uint32_t> JITMaxRecompiles{
+      "Xjit-max-recompiles",
+      llvh::cl::Hidden,
+      llvh::cl::cat(RuntimeCategory),
+      llvh::cl::desc("maximum number of recompiles per function "
+                     "(0 disables recompilation)"),
+      llvh::cl::init(2)};
+
+  llvh::cl::opt<uint32_t> JITRecompileThreshold{
+      "Xjit-recompile-threshold",
+      llvh::cl::Hidden,
+      llvh::cl::cat(RuntimeCategory),
+      llvh::cl::desc("ById helper declines within one compiled body "
+                     "before a recompile is considered (0 means 1)"),
+      llvh::cl::init(64)};
+
   llvh::cl::opt<uint32_t> JITHCIdLimit{
       "Xjit-hc-id-limit",
       llvh::cl::Hidden,
@@ -315,6 +331,15 @@ struct VMOnlyRuntimeFlags {
       llvh::cl::init(true)
 #endif
   };
+
+  llvh::cl::opt<bool> JITEmitTypeAsserts{
+      "Xjit-emit-type-asserts",
+      llvh::cl::Hidden,
+      llvh::cl::cat(RuntimeCategory),
+      llvh::cl::desc(
+          "(default false) Whether to verify FR type assumptions in JIT "
+          "compiled code"),
+      llvh::cl::init(false)};
 
   llvh::cl::opt<bool> JITEmitCounters{
       "Xjit-emit-counters",
