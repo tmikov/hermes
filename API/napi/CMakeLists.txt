@@ -18,6 +18,7 @@ add_hermes_library(hermesNapi
   hermes_napi_promise.cpp
   hermes_napi_reference.cpp
   hermes_napi_scope.cpp
+  hermes_napi_sh_unit.cpp
   hermes_napi_string.cpp
   hermes_napi_tsfn.cpp
   hermes_napi_typedarray.cpp
