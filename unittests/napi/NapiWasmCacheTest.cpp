@@ -6,6 +6,7 @@
  */
 
 #include "NapiTestFixture.h"
+#include "hermes/VM/static_h.h"
 #include "hermes_napi.h"
 
 #include <cstddef>
@@ -27,6 +28,18 @@ struct FakeCache {
   std::string lastConfig;
   std::vector<uint8_t> stored;
   bool serve = false;
+  int nativeCalls = 0;
+  /// What lookup_native answers.
+  SHUnitCreator nativeAnswer = nullptr;
+  /// "native" and "lookup" in call order, to pin which tier is asked first.
+  std::vector<std::string> order;
+
+  static SHUnitCreator lookupNative(void *ctx, const uint8_t *, size_t) {
+    auto *self = static_cast<FakeCache *>(ctx);
+    self->nativeCalls++;
+    self->order.push_back("native");
+    return self->nativeAnswer;
+  }
 
   static bool lookup(
       void *ctx, const uint8_t *, size_t, const uint8_t *config,
@@ -35,6 +48,7 @@ struct FakeCache {
       void **finalizeHint, void **storeToken) {
     auto *self = static_cast<FakeCache *>(ctx);
     self->lookups++;
+    self->order.push_back("lookup");
     self->lastConfig.assign(
         reinterpret_cast<const char *>(config), configSize);
     // A token is produced on every path, hit or miss.
@@ -70,6 +84,7 @@ struct FakeCache {
     cbs.lookup = &FakeCache::lookup;
     cbs.store = &FakeCache::store;
     cbs.discard = &FakeCache::discard;
+    cbs.lookup_native = &FakeCache::lookupNative;
     return cbs;
   }
 };
@@ -120,6 +135,84 @@ static bool compileAdd(napi_env env) {
   }
   EXPECT_EQ(napi_ok, napi_close_handle_scope(env, scope));
   return ok;
+}
+
+/// Never called: a creator the native tier offers but Hermes must refuse. If
+/// Hermes ever ran it, the test process aborts, which is the failure.
+static SHUnit *creatorThatMustNotRun(void) {
+  ::abort();
+}
+
+TEST_F(NapiTestFixture, WasmCache_NativeTierIsAskedFirst) {
+  FakeCache cache;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(1, cache.nativeCalls);
+  EXPECT_EQ((std::vector<std::string>{"native", "lookup"}), cache.order);
+  EXPECT_EQ(1, cache.stores);
+}
+
+TEST_F(NapiTestFixture, WasmCache_UnregisteredCreatorFallsThrough) {
+  FakeCache cache;
+  cache.nativeAnswer = &creatorThatMustNotRun;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(1, cache.nativeCalls);
+  EXPECT_EQ(1, cache.lookups) << "a refused creator is a miss";
+  EXPECT_EQ(1, cache.stores);
+}
+
+static SHUnit *mismatchedCreator(void) {
+  ::abort();
+}
+static SHUnit *configlessCreator(void) {
+  ::abort();
+}
+
+TEST_F(NapiTestFixture, WasmCache_MismatchedRegistrationFallsThrough) {
+  // Registered once per process: the registry has no unregistration and
+  // aborts on a duplicate name.
+  static SHWasmUnitReg reg = {
+      "napitest_mismatch",
+      mismatchedCreator,
+      "hermes-wasm;bc=0;cg=0;t262=0",
+      nullptr};
+  static bool registered = (_sh_wasm_register_unit(&reg), true);
+  (void)registered;
+
+  FakeCache cache;
+  cache.nativeAnswer = &mismatchedCreator;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(1, cache.lookups);
+  EXPECT_EQ(1, cache.stores);
+}
+
+TEST_F(NapiTestFixture, WasmCache_ConfiglessRegistrationFallsThrough) {
+  static SHWasmUnitReg reg = {
+      "napitest_configless", configlessCreator, nullptr, nullptr};
+  static bool registered = (_sh_wasm_register_unit(&reg), true);
+  (void)registered;
+
+  FakeCache cache;
+  cache.nativeAnswer = &configlessCreator;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(1, cache.lookups);
+}
+
+TEST_F(NapiTestFixture, WasmCache_NullNativeAnswerIsTheBytecodePath) {
+  FakeCache cache;
+  auto cbs = cache.callbacks();
+  cbs.lookup_native = nullptr; // no native tier at all
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(0, cache.nativeCalls);
+  EXPECT_EQ(1, cache.lookups);
 }
 
 TEST_F(NapiTestFixture, WasmCache_MissCompilesAndStores) {

@@ -757,6 +757,30 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
     // Lives across the lookup call below, which is the whole of its
     // documented lifetime.
     const std::string codegenConfig = wasmCodegenConfig(runtime);
+
+    // Native tier first. A unit the embedder offers is used only if it is
+    // registered under exactly this runtime's codegen configuration; anything
+    // else -- no registration, a registration stating none, or a different
+    // one -- is a miss, and this module continues down the bytecode tiers as
+    // if no native tier existed. Nothing has been allocated at that point,
+    // and nothing is remembered: a unit whose registering constructor has not
+    // run yet may simply not be found today.
+    if (hooks.installed() && hooks.lookupNative) {
+      if (SHUnitCreatorFn nativeCreator =
+              hooks.lookupNative(hooks.ctx, data, size)) {
+        const SHWasmUnitReg *reg = _sh_wasm_find_unit_reg(nativeCreator);
+        if (reg && reg->codegen_config &&
+            codegenConfig == reg->codegen_config) {
+          // The unit is the artifact. If its top level fails, that is this
+          // module's error, raised exactly as fromNativeUnit() raises it --
+          // not a reason to compile: a broken artifact is not a slow one.
+          // Validation is skipped, as on a bytecode cache hit; the key is
+          // the embedder's, over the bytes the unit was compiled from.
+          return buildModuleDataFromArtifact(
+              runtime, nullptr, nativeCreator, errorMsg);
+        }
+      }
+    }
     void *storeToken = nullptr;
     // Tracked separately from storeToken's VALUE: the contract is that
     // lookup() always sets the token and that we then call exactly one of
