@@ -810,7 +810,11 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
         if (finalizeCb)
           finalizeCb(cachedHbc, cachedSize, finalizeHint);
         if (ret.first) {
-          // A good hit: the token is not needed.
+          // A good hit: the token is not needed. The finalizer has already
+          // run, just above; the order is part of the contract
+          // (hermes_napi.h).
+          if (hooks.accepted)
+            hooks.accepted(hooks.ctx, storeToken);
           hooks.discard(hooks.ctx, storeToken);
           tokenOutstanding = false;
           bcProvider =

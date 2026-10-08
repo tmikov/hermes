@@ -33,6 +33,23 @@ struct FakeCache {
   SHUnitCreator nativeAnswer = nullptr;
   /// "native" and "lookup" in call order, to pin which tier is asked first.
   std::vector<std::string> order;
+  int acceptedCalls = 0;
+  /// When set, a hit hands Hermes a heap copy of `stored` with a finalizer
+  /// that frees it -- a buffer that really is gone once finalized.
+  bool useFinalizer = false;
+  /// "lookup", "finalize", "accepted", "store", "discard", in call order.
+  std::vector<std::string> events;
+
+  static void finalize(const uint8_t *data, size_t, void *hint) {
+    static_cast<FakeCache *>(hint)->events.push_back("finalize");
+    delete[] data;
+  }
+
+  static void accepted(void *ctx, void *) {
+    auto *self = static_cast<FakeCache *>(ctx);
+    self->acceptedCalls++;
+    self->events.push_back("accepted");
+  }
 
   static SHUnitCreator lookupNative(void *ctx, const uint8_t *, size_t) {
     auto *self = static_cast<FakeCache *>(ctx);
@@ -49,6 +66,7 @@ struct FakeCache {
     auto *self = static_cast<FakeCache *>(ctx);
     self->lookups++;
     self->order.push_back("lookup");
+    self->events.push_back("lookup");
     self->lastConfig.assign(
         reinterpret_cast<const char *>(config), configSize);
     // A token is produced on every path, hit or miss.
@@ -56,10 +74,18 @@ struct FakeCache {
     *storeToken = self;
     if (!self->serve || self->stored.empty())
       return false;
-    *hbc = self->stored.data();
+    if (self->useFinalizer) {
+      auto *copy = new uint8_t[self->stored.size()];
+      std::memcpy(copy, self->stored.data(), self->stored.size());
+      *hbc = copy;
+      *finalizeCb = &FakeCache::finalize;
+      *finalizeHint = self;
+    } else {
+      *hbc = self->stored.data();
+      *finalizeCb = nullptr;
+      *finalizeHint = nullptr;
+    }
     *hbcSize = self->stored.size();
-    *finalizeCb = nullptr;
-    *finalizeHint = nullptr;
     return true;
   }
 
@@ -67,6 +93,7 @@ struct FakeCache {
       void *ctx, void *, const uint8_t *hbc, size_t hbcSize) {
     auto *self = static_cast<FakeCache *>(ctx);
     self->stores++;
+    self->events.push_back("store");
     self->outstandingTokens--;
     self->stored.assign(hbc, hbc + hbcSize);
   }
@@ -74,6 +101,7 @@ struct FakeCache {
   static void discard(void *ctx, void *) {
     auto *self = static_cast<FakeCache *>(ctx);
     self->discards++;
+    self->events.push_back("discard");
     self->outstandingTokens--;
   }
 
@@ -85,6 +113,7 @@ struct FakeCache {
     cbs.store = &FakeCache::store;
     cbs.discard = &FakeCache::discard;
     cbs.lookup_native = &FakeCache::lookupNative;
+    cbs.accepted = &FakeCache::accepted;
     return cbs;
   }
 };
@@ -136,6 +165,32 @@ static bool compileAdd(napi_env env) {
   EXPECT_EQ(napi_ok, napi_close_handle_scope(env, scope));
   return ok;
 }
+
+/// new WebAssembly.Module over \p bytes; true if it compiled. Leaves no
+/// exception pending.
+static bool compileBytes(napi_env env, const uint8_t *bytes, size_t size) {
+  napi_handle_scope scope = nullptr;
+  EXPECT_EQ(napi_ok, napi_open_handle_scope(env, &scope));
+  std::string src = "(function(){var b=new Uint8Array([";
+  for (size_t i = 0; i < size; ++i)
+    src += std::to_string(bytes[i]) + ",";
+  src += "]); new WebAssembly.Module(b); return true;})()";
+  napi_value script = nullptr, result = nullptr;
+  EXPECT_EQ(
+      napi_ok,
+      napi_create_string_utf8(env, src.c_str(), NAPI_AUTO_LENGTH, &script));
+  bool ok = napi_run_script(env, script, &result) == napi_ok;
+  if (!ok) {
+    napi_value ignored = nullptr;
+    napi_get_and_clear_last_exception(env, &ignored);
+  }
+  EXPECT_EQ(napi_ok, napi_close_handle_scope(env, scope));
+  return ok;
+}
+
+/// The right magic, a version Hermes does not know, nothing after it.
+static const uint8_t kGarbage[] =
+    {0x00, 0x61, 0x73, 0x6d, 0x09, 0x00, 0x00, 0x00};
 
 /// Never called: a creator the native tier offers but Hermes must refuse. If
 /// Hermes ever ran it, the test process aborts, which is the failure.
@@ -390,6 +445,68 @@ TEST_F(NapiTestFixture, WasmCache_OldSizedStructInstallsAndRoundTrips) {
 
   ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, nullptr));
   ::free(oldAlloc);
+}
+
+TEST_F(NapiTestFixture, WasmCache_AcceptedHitOrderIsFinalizeAcceptedDiscard) {
+  FakeCache cache;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_)); // populates
+  cache.serve = true;
+  cache.useFinalizer = true;
+  cache.events.clear();
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(
+      (std::vector<std::string>{"lookup", "finalize", "accepted", "discard"}),
+      cache.events);
+}
+
+TEST_F(NapiTestFixture, WasmCache_RejectedHitIsNeverAccepted) {
+  FakeCache cache;
+  cache.stored = {0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33};
+  cache.serve = true;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_TRUE(compileAdd(env_)); // rejected hit, recompiled, stored
+  EXPECT_EQ(0, cache.acceptedCalls);
+  EXPECT_EQ(1, cache.stores);
+}
+
+TEST_F(NapiTestFixture, WasmCache_RejectedHitThenFailedCompileIsABareDiscard) {
+  // Bytes that do not compile, and a cache entry for them that Hermes
+  // refuses: no store, no accepted, one discard.
+  FakeCache cache;
+  cache.stored = {0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33};
+  cache.serve = true;
+  auto cbs = cache.callbacks();
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, &cbs));
+  EXPECT_FALSE(compileBytes(env_, kGarbage, sizeof(kGarbage)));
+  EXPECT_EQ(0, cache.acceptedCalls);
+  EXPECT_EQ(0, cache.stores);
+  EXPECT_EQ(1, cache.discards);
+  EXPECT_EQ(0, cache.outstandingTokens);
+}
+
+/// A caller whose struct reaches lookup_native but stops before accepted.
+TEST_F(NapiTestFixture, WasmCache_StructWithoutAcceptedIsNotReadPastItsEnd) {
+  FakeCache cache;
+  hermes_wasm_cache_callbacks full = cache.callbacks();
+  const size_t size = offsetof(hermes_wasm_cache_callbacks, accepted);
+  full.struct_size = size;
+  void *alloc = ::malloc(size);
+  ASSERT_NE(nullptr, alloc);
+  std::memcpy(alloc, &full, size);
+  ASSERT_EQ(
+      napi_ok,
+      hermes_set_wasm_cache(
+          env_, static_cast<const hermes_wasm_cache_callbacks *>(alloc)));
+  EXPECT_TRUE(compileAdd(env_));
+  cache.serve = true;
+  EXPECT_TRUE(compileAdd(env_));
+  EXPECT_EQ(0, cache.acceptedCalls);
+  EXPECT_EQ(1, cache.discards);
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, nullptr));
+  ::free(alloc);
 }
 
 #else

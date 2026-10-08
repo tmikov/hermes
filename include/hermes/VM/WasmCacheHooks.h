@@ -75,6 +75,10 @@ struct WasmCacheHooks {
   NativeUnitCreator (
       *lookupNative)(void *ctx, const uint8_t *wasm, size_t wasmSize) = nullptr;
 
+  /// Optional: Hermes accepted the bytes \c lookup returned for
+  /// \p storeToken. Called after the finalizer and before \c discard.
+  void (*accepted)(void *ctx, void *storeToken) = nullptr;
+
   bool installed() const {
     return lookup != nullptr && store != nullptr && discard != nullptr;
   }

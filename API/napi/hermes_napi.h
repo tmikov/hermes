@@ -343,6 +343,18 @@ struct hermes_wasm_cache_callbacks {
   /// `discard`" is untouched.
   SHUnitCreator (*lookup_native)(
       void *ctx, const uint8_t *wasm, size_t wasm_size);
+
+  /// Called when Hermes has accepted the bytecode a `lookup` returned,
+  /// immediately before the `discard` for that token. Optional.
+  ///
+  /// The order on an accepted hit is fixed: the buffer's finalizer, then
+  /// `accepted`, then `discard`. So the bytes `lookup` returned may already
+  /// be released when this runs; an embedder that wants them here must copy
+  /// them during `lookup`. Never called for a miss, or for a hit Hermes
+  /// rejected -- that token goes on to `store` (the recompile succeeded) or
+  /// `discard` (it failed). It reports that a bytecode provider was
+  /// accepted, not that the bytecode corresponds to the bytes.
+  void (*accepted)(void *ctx, void *store_token);
 };
 
 /// Install \p callbacks on \p env's runtime. Passing NULL removes any

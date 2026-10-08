@@ -45,6 +45,10 @@ napi_status NAPI_CDECL hermes_set_wasm_cache(
       offsetof(hermes_wasm_cache_callbacks, lookup_native) +
           sizeof(callbacks->lookup_native))
     hooks.lookupNative = callbacks->lookup_native;
+  if (callbacks->struct_size >=
+      offsetof(hermes_wasm_cache_callbacks, accepted) +
+          sizeof(callbacks->accepted))
+    hooks.accepted = callbacks->accepted;
   runtime.setWasmCacheHooks(hooks);
   return napi_clear_last_error(env);
 #else
