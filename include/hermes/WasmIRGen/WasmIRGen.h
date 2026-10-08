@@ -1,0 +1,1378 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#ifndef HERMES_WASMIRGEN_WASMIRGEN_H
+#define HERMES_WASMIRGEN_WASMIRGEN_H
+
+#include "hermes/IR/IRBuilder.h"
+#include "hermes/WasmFrontend/WasmModuleInfo.h"
+#include "hermes/WasmIRGen/WasmHelpers.h"
+
+#include "llvh/ADT/DenseMap.h"
+#include "llvh/ADT/DenseSet.h"
+
+namespace hermes {
+
+class Module;
+
+namespace wasm {
+
+/// Translates a parsed Wasm module into Hermes IR.
+///
+/// Usage:
+///   1. Parse a Wasm binary into a WasmModuleInfo.
+///   2. Construct WasmIRGen with the target Module and the WasmModuleInfo.
+///   3. Call createFunctions() to create one Hermes IR Function per Wasm
+///      function (imported + defined).
+///   4. For each defined function body, the binary reader calls
+///      beginFunction() / instruction callbacks / endFunction().
+class WasmIRGen {
+ public:
+  WasmIRGen(Module &M, WasmModuleInfo &moduleInfo);
+
+  /// Create Hermes IR Functions for all Wasm functions (imported + defined),
+  /// plus a top-level wrapper function that serves as the module entry point.
+  /// Called once after module-level parsing is complete, before any function
+  /// bodies are translated.
+  void createFunctions();
+
+  /// Populate escapableFuncs_ with the function indices named by an element
+  /// segment or by a ref.func global initializer. It is not the whole set of
+  /// indices a funcref value can name -- exports and imports are added
+  /// separately -- and the comment on the definition says why a function body
+  /// contributes nothing. Called once by createFunctions(), before
+  /// exportedFuncVars_ is sized, because that set decides which indices get a
+  /// canonical Exported Function.
+  void computeEscapableFuncs();
+
+  /// Finalize the top-level function after all sections have been parsed.
+  /// Applies active data segments, calls the start function, builds the
+  /// exports object, and emits the return instruction.
+  /// Must be called after createFunctions() and after all function bodies
+  /// and data sections have been processed.
+  /// \return false, with getErrorMessage() describing why, if this module is
+  ///   refused -- either by a check made here, or by an earlier step that
+  ///   recorded its reason and had no way to fail the read (onRefFunc()).
+  ///   The IR module is left half-built in that case and must be discarded.
+  bool finalizeModule();
+
+  /// Why the module was refused. Empty until some step refuses it; a step
+  /// that runs before finalizeModule() can fill it, so a non-empty value here
+  /// does not mean finalizeModule() has run.
+  llvh::StringRef getErrorMessage() const {
+    return errorMsg_;
+  }
+
+  // --- Per-function translation (called by BinaryReaderHermesIRGen) ---
+
+  /// Begin translating a Wasm function body.
+  /// \p funcIndex is the Wasm function index (includes imports).
+  /// \p localTypes are the types of the function's declared locals (not
+  ///    including parameters, which are part of the function signature).
+  void beginFunction(
+      uint32_t funcIndex,
+      const std::vector<WasmValType> &localTypes);
+
+  /// End translating a Wasm function body.
+  void endFunction();
+
+  // --- i64 value stack helpers (G.1) ---
+
+  /// Push an i64 value as two stack slots: lo32 first, then hi32.
+  void pushI64(Value *lo, Value *hi);
+  /// Pop an i64 value from the stack (hi32 first, then lo32).
+  /// \return {lo, hi}.
+  std::pair<Value *, Value *> popI64();
+
+  // --- Instruction callbacks (added incrementally in subsequent steps) ---
+
+  /// Push an i32 constant onto the value stack.
+  void onI32Const(int32_t value);
+  /// Push an i64 constant onto the value stack (split into lo32, hi32).
+  void onI64Const(int64_t value);
+  /// Push an f32 constant onto the value stack.
+  void onF32Const(float value);
+  /// Push an f64 constant onto the value stack.
+  void onF64Const(double value);
+
+  /// Load a local variable onto the value stack.
+  void onLocalGet(uint32_t localIndex);
+  /// Pop the value stack and store into a local variable.
+  void onLocalSet(uint32_t localIndex);
+  /// Store the top of the value stack into a local variable without popping.
+  void onLocalTee(uint32_t localIndex);
+
+  // --- i32 arithmetic (D.3) ---
+
+  void onI32Add();
+  void onI32Sub();
+  void onI32Mul();
+  void onI32And();
+  void onI32Or();
+  void onI32Xor();
+  void onI32Shl();
+  void onI32ShrS();
+  void onI32ShrU();
+
+  // --- i32 trapping division (F.2) ---
+
+  void onI32DivS();
+  void onI32DivU();
+  void onI32RemS();
+  void onI32RemU();
+
+  // --- i32 bit manipulation (F.3) ---
+
+  void onI32Clz();
+  void onI32Ctz();
+  void onI32Popcnt();
+  void onI32Rotl();
+  void onI32Rotr();
+  void onI32Extend8S();
+  void onI32Extend16S();
+
+  // --- Return and drop (D.5) ---
+
+  /// Explicit return from the current function.
+  void onReturn();
+  /// Pop and discard the top value from the stack.
+  void onDrop();
+
+  // --- i32 comparisons (D.4) ---
+
+  void onI32Eq();
+  void onI32Ne();
+  void onI32LtS();
+  void onI32GtS();
+  void onI32LeS();
+  void onI32GeS();
+  void onI32LtU();
+  void onI32GtU();
+  void onI32LeU();
+  void onI32GeU();
+  void onI32Eqz();
+
+  // --- Control flow (D.6, D.7, D.8) ---
+
+  /// Enter a block with the given param and result types.
+  void onBlock(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Enter a loop with the given param and result types.
+  void onLoop(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Enter an if construct with the given param and result types.
+  /// Pops the condition from the value stack.
+  void onIf(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Switch to the else branch of the current if construct.
+  void onElse();
+  /// End the current block/loop/if.
+  void onEnd();
+  /// Unconditional branch to the control entry at \p depth.
+  void onBr(uint32_t depth);
+  /// Conditional branch: pop condition, branch if non-zero.
+  void onBrIf(uint32_t depth);
+  /// Table branch (switch): pop index, branch to labels[index] or default.
+  void onBrTable(
+      const uint32_t *depths,
+      uint32_t numTargets,
+      uint32_t defaultDepth);
+
+  // --- Parametric instructions (D.10) ---
+
+  /// select: pop condition, val2, val1; push (cond ? val1 : val2).
+  void onSelect();
+
+  // --- Function calls (D.12, J.2) ---
+
+  /// Call the function at \p funcIndex with arguments from the value stack.
+  void onCall(uint32_t funcIndex);
+
+  /// Indirect call through a table.
+  /// \p sigIndex is the expected type signature index.
+  /// \p tableIndex is the table to call from.
+  void onCallIndirect(uint32_t sigIndex, uint32_t tableIndex);
+
+  // --- unreachable and nop (D.11) ---
+
+  /// Emit an UnreachableInst (Wasm trap).
+  void onUnreachable();
+  /// No-op instruction (nothing is emitted).
+  void onNop();
+
+  // --- f64 arithmetic (E.1) ---
+
+  void onF64Add();
+  void onF64Sub();
+  void onF64Mul();
+  void onF64Div();
+  void onF64Neg();
+  void onF64Abs();
+  void onF64Sqrt();
+  void onF64Ceil();
+  void onF64Floor();
+  void onF64Trunc();
+  void onF64Nearest();
+  void onF64Min();
+  void onF64Max();
+
+  // --- f64 comparisons (E.1) ---
+
+  void onF64Eq();
+  void onF64Ne();
+  void onF64Lt();
+  void onF64Gt();
+  void onF64Le();
+  void onF64Ge();
+
+  // --- f32 arithmetic (E.2) ---
+  // f32 operations produce f32-precision results by wrapping the result
+  // in Math.fround via emitFround().
+
+  void onF32Add();
+  void onF32Sub();
+  void onF32Mul();
+  void onF32Div();
+  void onF32Neg();
+  void onF32Abs();
+  void onF32Sqrt();
+  void onF32Ceil();
+  void onF32Floor();
+  void onF32Trunc();
+  void onF32Nearest();
+  void onF32Min();
+  void onF32Max();
+
+  // --- f32 comparisons (E.3) ---
+
+  void onF32Eq();
+  void onF32Ne();
+  void onF32Lt();
+  void onF32Gt();
+  void onF32Le();
+  void onF32Ge();
+
+  // --- i64 arithmetic (G.3) ---
+
+  void onI64Add();
+  void onI64Sub();
+  void onI64Mul();
+  void onI64DivS();
+  void onI64DivU();
+  void onI64RemS();
+  void onI64RemU();
+  void onI64And();
+  void onI64Or();
+  void onI64Xor();
+  void onI64Shl();
+  void onI64ShrS();
+  void onI64ShrU();
+  void onI64Rotl();
+  void onI64Rotr();
+
+  // --- i64 unary (G.3) ---
+
+  void onI64Clz();
+  void onI64Ctz();
+  void onI64Popcnt();
+
+  // --- i64 comparisons (G.3) ---
+
+  void onI64Eqz();
+  void onI64Eq();
+  void onI64Ne();
+  void onI64LtS();
+  void onI64GtS();
+  void onI64LeS();
+  void onI64GeS();
+  void onI64LtU();
+  void onI64GtU();
+  void onI64LeU();
+  void onI64GeU();
+
+  // --- i64 conversions: inline IR (G.4a) ---
+
+  /// i32.wrap_i64: pop i64, push lo32 as i32 (discard hi32).
+  void onI32WrapI64();
+  /// i64.extend_i32_s: pop i32, sign-extend to i64.
+  void onI64ExtendI32S();
+  /// i64.extend_i32_u: pop i32, zero-extend to i64.
+  void onI64ExtendI32U();
+  /// i64.extend8_s: sign-extend lowest 8 bits of i64.
+  void onI64Extend8S();
+  /// i64.extend16_s: sign-extend lowest 16 bits of i64.
+  void onI64Extend16S();
+  /// i64.extend32_s: sign-extend lowest 32 bits of i64.
+  void onI64Extend32S();
+
+  // --- f64/f32 copysign (F.5) ---
+
+  void onF64Copysign();
+  void onF32Copysign();
+
+  // --- f64/f32 conversions (E.1, E.2) ---
+
+  void onF64PromoteF32();
+  void onF32DemoteF64();
+
+  // --- Type conversions (F.4) ---
+
+  /// Trapping truncation: float/double to signed i32.
+  void onI32TruncF32S();
+  void onI32TruncF64S();
+  /// Trapping truncation: float/double to unsigned i32.
+  void onI32TruncF32U();
+  void onI32TruncF64U();
+  /// Saturating truncation: float/double to signed i32.
+  void onI32TruncSatF32S();
+  void onI32TruncSatF64S();
+  /// Saturating truncation: float/double to unsigned i32.
+  void onI32TruncSatF32U();
+  void onI32TruncSatF64U();
+  /// Int-to-float conversion.
+  void onF32ConvertI32S();
+  void onF32ConvertI32U();
+  void onF64ConvertI32S();
+  void onF64ConvertI32U();
+  /// Reinterpret (bitcast).
+  void onI32ReinterpretF32();
+  void onF32ReinterpretI32();
+
+  // --- i64 conversion helpers: float→i64 truncations (G.4b) ---
+
+  /// Trapping truncation: float/double to signed i64.
+  void onI64TruncF32S();
+  void onI64TruncF64S();
+  /// Trapping truncation: float/double to unsigned i64.
+  void onI64TruncF32U();
+  void onI64TruncF64U();
+  /// Saturating truncation: float/double to signed i64.
+  void onI64TruncSatF32S();
+  void onI64TruncSatF64S();
+  /// Saturating truncation: float/double to unsigned i64.
+  void onI64TruncSatF32U();
+  void onI64TruncSatF64U();
+
+  // --- i64 conversion helpers: i64→float and reinterpret (G.4c) ---
+
+  /// f64.convert_i64_s: pop i64, push f64 (signed conversion).
+  void onF64ConvertI64S();
+  /// f64.convert_i64_u: pop i64, push f64 (unsigned conversion).
+  void onF64ConvertI64U();
+  /// f32.convert_i64_s: pop i64, push f32 (signed conversion, as double).
+  void onF32ConvertI64S();
+  /// f32.convert_i64_u: pop i64, push f32 (unsigned conversion, as double).
+  void onF32ConvertI64U();
+  /// i64.reinterpret_f64: pop f64, push i64 (bitcast).
+  void onI64ReinterpretF64();
+  /// f64.reinterpret_i64: pop i64, push f64 (bitcast).
+  void onF64ReinterpretI64();
+
+  // --- Memory access (H.1) ---
+
+  /// Emit a memory load instruction.
+  /// \p opcodeName identifies the load variant (e.g., "i32.load").
+  /// \p alignLog2 is the log2 of the alignment annotation.
+  /// \p offset is the static offset immediate.
+  void onLoad(
+      const char *opcodeName,
+      uint32_t alignLog2,
+      uint32_t offset);
+
+  /// Emit a memory store instruction.
+  /// \p opcodeName identifies the store variant (e.g., "i32.store").
+  /// \p alignLog2 is the log2 of the alignment annotation.
+  /// \p offset is the static offset immediate.
+  void onStore(
+      const char *opcodeName,
+      uint32_t alignLog2,
+      uint32_t offset);
+
+  // --- Memory size/grow (H.2) ---
+
+  /// Push the current memory size in pages onto the value stack.
+  void onMemorySize();
+
+  /// Pop delta, grow memory by that many pages.
+  /// Pushes old page count on success, or -1 on failure.
+  void onMemoryGrow();
+
+  // --- Globals (K.1) ---
+
+  /// global.get: push the value of the global at \p globalIndex.
+  void onGlobalGet(uint32_t globalIndex);
+  /// global.set: pop a value and store it into the global at \p globalIndex.
+  void onGlobalSet(uint32_t globalIndex);
+
+  // --- Exception handling (L.1) ---
+
+  /// Enter a try block whose body consumes \p paramTypes from the enclosing
+  /// stack and produces \p resultTypes.
+  void onTry(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Handle a catch clause for the given tag index. Emits the tag test and
+  /// the payload loads. A funcref payload item that is neither null nor a
+  /// WebAssembly Exported Function makes the emitted handler raise a
+  /// TypeError instead of continuing to the next catch clause.
+  void onCatch(uint32_t tagIndex);
+  /// Handle a catch_all clause.
+  void onCatchAll();
+  /// Throw an exception with the given tag index.
+  void onThrow(uint32_t tagIndex);
+  /// Re-throw the caught exception from the catch at the given depth.
+  void onRethrow(uint32_t depth);
+  /// Delegate exceptions to an outer handler at the given depth.
+  void onDelegate(uint32_t depth);
+
+  // --- Bulk memory operations (N.1) ---
+
+  /// memory.fill: pop size, value, dest; fill dest..dest+size with value.
+  void onMemoryFill();
+
+  /// memory.copy: pop size, src, dest; copy src..src+size to dest.
+  void onMemoryCopy();
+
+  /// memory.init: pop size, offset, dest; copy data segment to memory.
+  void onMemoryInit(uint32_t segmentIndex);
+
+  /// data.drop: mark data segment as no longer needed.
+  void onDataDrop(uint32_t segmentIndex);
+
+  // --- Table operations (J.1) ---
+
+  /// table.get: pop index, push the function reference at that index.
+  void onTableGet(uint32_t tableIndex);
+  /// table.set: pop value and index, set table[index] = value.
+  void onTableSet(uint32_t tableIndex);
+  /// table.size: push the current number of entries in the table.
+  void onTableSize(uint32_t tableIndex);
+  /// table.grow: pop fill value and delta, grow table by delta entries.
+  /// Pushes old size on success, or -1 on failure.
+  void onTableGrow(uint32_t tableIndex);
+
+  // --- Bulk table operations (N.2) ---
+
+  /// table.fill: pop count, val, idx; fill table entries with val.
+  void onTableFill(uint32_t tableIndex);
+  /// table.copy: pop count, src, dst; copy entries between tables.
+  void onTableCopy(uint32_t dstTableIndex, uint32_t srcTableIndex);
+  /// table.init: pop count, src, dst; copy from element segment to table.
+  void onTableInit(uint32_t segmentIndex, uint32_t tableIndex);
+  /// elem.drop: mark element segment as no longer needed.
+  void onElemDrop(uint32_t segmentIndex);
+
+  /// ref.null: push the null reference. A funcref is an Exported Function or
+  /// null, so the null reference is JS null -- there is nothing to synthesize
+  /// and nothing unsupported about it. It used to go through
+  /// warnUnsupported(), which pushed `undefined`; that value then had to be
+  /// tolerated by every consumer of a funcref, and a slot cleared with it
+  /// could not be told apart from one cleared by a missing JS argument.
+  void onRefNull();
+
+  /// ref.is_null: pop a reference and push i32 1 if it is null, else 0. The
+  /// comparison is strict, so `undefined` -- a legal non-null externref --
+  /// answers 0. It also depends on wasmValTypeToIRType annotating a funcref
+  /// as nullable; test/wasm/ref-is-null.wat goes red if that changes.
+  void onRefIsNull();
+
+  /// ref.func: push the canonical Exported Function of \p funcIndex -- the
+  /// wrapper, not the internal closure, because this value can reach script
+  /// through a funcref global, a table slot or a funcref result. The wrapper
+  /// exists because Wasm validation only lets a function body name an index
+  /// that an element segment, a ref.func global initializer or an export also
+  /// names, and all three already get one; see computeEscapableFuncs(). If it
+  /// is absent anyway, this records an error message and finalizeModule()
+  /// refuses the module.
+  void onRefFunc(uint32_t funcIndex);
+
+  // --- Unsupported opcode handling (D.13) ---
+
+  /// Emit a warning for an unsupported opcode. Pops \p numInputs values
+  /// from the stack and pushes \p numOutputs placeholder values.
+  void warnUnsupported(
+      const char *opcodeName,
+      uint32_t numInputs,
+      uint32_t numOutputs);
+
+  /// \return the array of IR Functions created by createFunctions(), indexed
+  ///   by Wasm function index.
+  llvh::ArrayRef<Function *> getIRFunctions() const {
+    return irFunctions_;
+  }
+
+ private:
+  WasmModuleInfo &moduleInfo_;
+  IRBuilder builder_;
+  WasmHelpers helpers_;
+
+  /// Why the module was refused, set by whichever step refuses it --
+  /// finalizeModule()'s own checks, or onRefFunc() during body translation,
+  /// which has no way to fail the read and leaves its reason here for
+  /// finalizeModule() to report. See getErrorMessage().
+  std::string errorMsg_;
+
+  /// Check that every export names an index that exists in its index space.
+  /// \return false, having set errorMsg_, for the first one that does not.
+  bool validateExportIndices();
+
+  /// \return the declared type of the global at module-wide global index
+  ///   \p index, which may name either an imported or a defined global.
+  /// \pre \p index is in range for the module's global index space.
+  ///   validateExportIndices() establishes that for an exported index; for
+  ///   an index named by a function body, Wasm validation does, which
+  ///   compileWasmModule runs before any IR is built. Callers that walk the
+  ///   index space themselves are in range by construction.
+  WasmGlobalType globalTypeAt(uint32_t index) const;
+
+  /// Check that no exported global has a type the exports object cannot
+  /// represent, which today means v128.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateGlobalExportTypes();
+
+  /// Check that no tag has a parameter type the engine cannot represent,
+  /// which today means v128: globalValTypeCode maps it to 0xFF and wasmMakeTag
+  /// rejects that code. Every tag is checked, defined or imported and whether
+  /// or not it is exported, because createTagObjects() builds an object for
+  /// each defined one and the import check passes the same codes for each
+  /// imported one.
+  /// \return false, having set errorMsg_, for the first one that does.
+  bool validateTagTypes();
+
+  /// Whether to enable strict Wasm memory bounds checking (from --test262).
+  bool test262_ = false;
+
+  /// One IR Function per Wasm function, indexed by Wasm function index.
+  /// Includes both imported and defined functions.
+  std::vector<Function *> irFunctions_;
+
+  /// One Variable per Wasm function in the top-level scope, holding the
+  /// pre-created closure. Indexed by Wasm function index.
+  std::vector<Variable *> closureVars_;
+
+  /// One Variable per Wasm function index holding that function's CANONICAL
+  /// Exported Function -- the single JS-visible wrapper object for the index,
+  /// created once in the instantiate body and used by every view of the
+  /// function (each export name, and later every table slot), so all of them
+  /// are the same object. Each wrapper carries the WasmFuncClosure and
+  /// WasmFuncTypeId internal properties.
+  ///
+  /// A slot is null when the index needs no wrapper: only indices that are
+  /// exported, imported, or in escapableFuncs_ (element segments and ref.func
+  /// global initializers) can have their function reach script at all.
+  std::vector<Variable *> exportedFuncVars_;
+
+  /// Function indices a funcref VALUE can name -- those listed by an element
+  /// segment or by a ref.func global initializer. Such a function needs a
+  /// canonical Exported Function even when it is neither exported nor
+  /// imported, because that wrapper is what a table slot, a funcref result, a
+  /// funcref global and an import-trampoline argument all carry.
+  ///
+  /// The name is historical and now overstates things: these indices are the
+  /// ones whose function can be NAMED by a funcref, not ones whose internal
+  /// closure escapes. Nothing hands the closure out any more, which is what
+  /// let the J4 parameter coercion go (see createFunctions()). Populated once
+  /// by createFunctions(); read only when sizing exportedFuncVars_.
+  llvh::DenseSet<uint32_t> escapableFuncs_;
+
+  /// One Variable per imported function, holding the JS callable passed
+  /// via the imports object. Indexed by import function order (0-based,
+  /// same as Wasm function index for imports since they come first).
+  std::vector<Variable *> importFuncVars_;
+
+  /// One Variable per imported global, holding the import resolved during
+  /// validation. For an immutable import this is its value (a plain JS
+  /// number/BigInt, or the WebAssembly.Global's `.value`), which
+  /// initializeGlobals() snapshots into the global's frame slot. For a
+  /// mutable import it is the WebAssembly.Global OBJECT itself, because a
+  /// mutable global is shared state: global.get/global.set must go through
+  /// its `.value` so writes are visible in both directions.
+  std::vector<Variable *> importGlobalVals_;
+
+  /// Variable holding the imported memory's OWN maximum (max pages, or -1 if
+  /// unbounded), read out of the memory's internal field by wasmLinkMemory
+  /// during import validation. onMemoryGrow() uses this as the actual growth
+  /// limit instead of the import declaration's maximum, which is only an
+  /// upper bound on it. nullptr if no memory is imported.
+  Variable *importedMemMaxVar_ = nullptr;
+
+  /// Variable holding the imported memory's ArrayBuffer, as returned by the
+  /// same wasmLinkMemory call that measured it. createMemoryViews() builds
+  /// the module's typed-array views over this rather than re-reading
+  /// `.buffer`, which is a prototype accessor script can replace: two reads
+  /// could yield two different buffers, and only the first was validated.
+  /// nullptr if no memory is imported.
+  Variable *importedMemBufVar_ = nullptr;
+
+  /// Variable holding the WebAssembly.Memory object backing a locally
+  /// defined memory. The module's typed-array views are built over this
+  /// object's buffer, the memory export publishes it, and memory.grow
+  /// installs the grown buffer back onto it -- so all three refer to one
+  /// memory. nullptr when the module has no defined memory.
+  Variable *memObjVar_ = nullptr;
+
+  /// One Variable per imported table, holding that table's OWN maximum (or
+  /// -1 if unbounded), read from the table itself during import validation.
+  /// Indexed by imported table index. table.grow reads it, so that growing an
+  /// imported table respects the maximum its owner declared rather than the
+  /// importer's declaration, which is only an upper bound on it.
+  std::vector<Variable *> importedTableMaxVars_;
+
+  /// Typed array view indices into memViewVars_.
+  enum MemView : uint8_t {
+    HEAP8 = 0,
+    HEAPU8,
+    HEAP16,
+    HEAPU16,
+    HEAP32,
+    HEAPU32,
+    HEAPF32,
+    HEAPF64,
+    NUM_MEM_VIEWS,
+  };
+
+  /// Variables holding the 8 typed array views in the top-level scope.
+  /// Only populated if the module has a memory section.
+  Variable *memViewVars_[NUM_MEM_VIEWS] = {};
+
+  /// Per-table Variables in the top-level scope. Indexed by Wasm table index.
+  /// A table slot is spread over three parallel arrays, all of the same
+  /// length, and every write goes through wasmTableSetSlot /
+  /// wasmTableCopySlots so that the three agree slot by slot.
+  /// tableFuncVars_[i] holds a JS Array of internal closures (call_indirect's
+  ///   hot path reads this one, so it is NOT the Exported Function).
+  /// tableTypeVars_[i] holds a JS Array of interned type ids.
+  /// tableExportVars_[i] holds a JS Array of Exported Functions or null --
+  ///   the funcref value everything outside call_indirect sees.
+  std::vector<Variable *> tableFuncVars_;
+  std::vector<Variable *> tableTypeVars_;
+  std::vector<Variable *> tableExportVars_;
+
+  /// tableObjVars_[i] holds the WebAssembly.Table whose internal fields are
+  /// tableFuncVars_[i]/tableTypeVars_[i]/tableExportVars_[i]: the object the
+  /// module constructed for a locally defined funcref table, or the object
+  /// that satisfied a table import. Either way exporting it publishes the
+  /// module's real storage, so get/set/grow/length operate on it. Unset for
+  /// externref tables, which the Table constructor does not build.
+  std::vector<Variable *> tableObjVars_;
+
+  /// Per-global Variables in the top-level scope.
+  /// For non-i64 globals: one Variable per global.
+  /// For i64 globals: two consecutive Variables (lo32, hi32).
+  /// Use globalSlotIndex_ to map global index → first slot.
+  std::vector<Variable *> globalVars_;
+
+  /// Maps Wasm global index → starting index in globalVars_.
+  /// For non-i64 globals, globalVars_[globalSlotIndex_[i]] is the single slot.
+  /// For i64 globals, globalVars_[globalSlotIndex_[i]] is lo32 and
+  /// globalVars_[globalSlotIndex_[i]+1] is hi32.
+  std::vector<uint32_t> globalSlotIndex_;
+
+  /// Wasm indices of imported MUTABLE globals. Their value lives in the
+  /// host's WebAssembly.Global, held in importGlobalVals_, not in the frame
+  /// slots in globalVars_: global.get/global.set for these go through the
+  /// object's `.value` property so that the module and the host see the same
+  /// global. The frame slots still hold the link-time snapshot, which only
+  /// constant expressions (data/element offsets, element segment entries,
+  /// defined-global initializers) read, and Wasm validation restricts those
+  /// to immutable imported globals.
+  llvh::DenseSet<uint32_t> importedMutableGlobals_;
+
+  /// Maps raw type section indices to canonical indices. Structurally
+  /// identical types share the same canonical index, ensuring that
+  /// call_indirect uses structural type equivalence rather than nominal.
+  std::vector<uint32_t> canonicalTypeIndex_;
+
+  /// typeIdVars_[i] holds the process-wide interned id for module type i.
+  /// call_indirect must compare type identity ACROSS modules, which a
+  /// module-local index cannot do: two modules number their type sections
+  /// independently. These are interned once, at instantiation, from the
+  /// structural type string, so identical signatures agree regardless of which
+  /// module declared them and in what order.
+  std::vector<Variable *> typeIdVars_;
+
+  /// Whether internTypeIds() has run. The Variables in typeIdVars_ are created
+  /// unconditionally, so their non-nullness says nothing; only this says the
+  /// interning calls were actually emitted and the slots hold real ids rather
+  /// than undefined. Anything that loads a type id FROM typeIdVars_ must
+  /// assert on this.
+  ///
+  /// It is not a precondition for comparing type ids generally. The function
+  /// import check interns the signature it expects at the check site, because
+  /// import resolution runs before internTypeIds(); that is the same string
+  /// through the same builtin, so the two agree without sharing a slot.
+  bool internedTypeIds_ = false;
+
+  /// tagVars_[i] holds the object identifying tag i. Wasm tag identity is
+  /// NOMINAL, not structural: two tags with the same signature are distinct
+  /// and must not catch each other. Object identity models that exactly,
+  /// where a module-local tag index cannot -- another module numbers its tags
+  /// differently, so throw/catch across a boundary matched the wrong handler.
+  std::vector<Variable *> tagVars_;
+
+  /// \return the JSWebAssemblyTag::ValType codes for \p ft's parameters, as
+  /// literal operands for wasmMakeTag / wasmCheckTagType. Tag parameter codes
+  /// are globalValTypeCode's; JSWebAssemblyTag.h static_asserts the agreement.
+  ///
+  /// A type with no code -- v128, which globalValTypeCode maps to 0xFF -- is
+  /// emitted here rather than refused here: this runs during createFunctions()
+  /// and validateTagTypes() runs later, in finalizeModule(). The emitted call
+  /// is never reached, because a refusal discards the half-built IR module.
+  llvh::SmallVector<Value *, 4> tagTypeCodes(const WasmFuncType &ft);
+
+  /// Create the tag objects for this module's own tags. Imported tags are
+  /// stored into tagVars_ by import validation instead.
+  void createTagObjects(Instruction *tlScope);
+
+  /// Emit the interning calls that populate typeIdVars_. Must run before
+  /// anything that reads typeIdVars_. Not before every type-id comparison:
+  /// the function import check interns the signature it expects at the check
+  /// site, because import resolution runs first.
+  void internTypeIds(Instruction *tlScope);
+
+  /// Variable holding a JS Array of data segments in the top-level scope.
+  /// Each element is either a Uint8Array (segment bytes) or null (dropped).
+  /// Only populated if the module has data segments.
+  Variable *dataSegVar_ = nullptr;
+
+  /// Variable holding a JS Array of element segments in the top-level scope.
+  /// Each element is either a JS Array of interleaved [func, typeIdx, ...]
+  /// or null (dropped). Only populated if the module has element segments.
+  Variable *elemSegVar_ = nullptr;
+
+  /// Variable in the top-level scope holding HermesInternal.intrinsics, the
+  /// engine's holder of pristine constructors. Every constructor this module
+  /// allocates through is read from here rather than from globalThis, so a
+  /// script that replaces a global cannot redirect one of the module's
+  /// allocations. Stored once at the top of __wasm_instantiate__ and read via
+  /// loadIntrinsic()/loadWasmIntrinsic().
+  Variable *intrinsicsVar_ = nullptr;
+
+  /// Per-module return buffer variables. Only created if the module uses i64
+  /// or multi-value returns. The buffer is an ArrayBuffer shared by all
+  /// functions. retBufIVar_ is a Uint32Array view, retBufFVar_ is a
+  /// Float64Array view.
+  Variable *retBufIVar_ = nullptr;
+  Variable *retBufFVar_ = nullptr;
+
+  /// Size of the return buffer in bytes. Set during createFunctions().
+  uint32_t retBufSize_ = 0;
+
+  /// The __wasm_instantiate__ IR Function, created in createFunctions().
+  /// Contains the initialization body (import resolution, closures, memory,
+  /// tables, globals, trampolines, data/elem segments, start, exports).
+  Function *instantiateFunc_ = nullptr;
+
+  /// The `imports` parameter of instantiateFunc_. Import resolution reads the
+  /// import object from here rather than from a process-global, so two
+  /// instances of one module can be created with different imports, and no
+  /// script running during instantiation can observe or replace it.
+  JSDynamicParam *importsParam_ = nullptr;
+
+  /// The VariableScope for the top-level function.
+  VariableScope *topLevelVS_ = nullptr;
+
+  /// The entry BasicBlock of the top-level function.
+  /// Saved by createFunctions() for use by finalizeModule().
+  BasicBlock *tlEntry_ = nullptr;
+
+  /// The CreateScopeInst for the top-level function.
+  /// Saved by createFunctions() for use by finalizeModule().
+  BaseScopeInst *tlScope_ = nullptr;
+
+  // --- Per-function state (valid between beginFunction/endFunction) ---
+
+  /// The current Hermes IR function being built.
+  Function *currentFunc_ = nullptr;
+
+  /// The Wasm function index of the current function.
+  uint32_t currentFuncIndex_ = 0;
+
+  /// Abstract value stack: stack of Value* (Hermes IR SSA values).
+  /// For i64 values, two consecutive slots are used: [lo32, hi32].
+  std::vector<Value *> valueStack_;
+
+  /// Parallel to valueStack_: true if the slot is the hi32 part of an i64.
+  /// Used by drop and select to determine if a value occupies 2 slots.
+  std::vector<bool> valueStackIsI64Hi_;
+
+  /// AllocStackInst for each Wasm local slot. For non-i64 locals, there is
+  /// one slot per local. For i64 locals, there are two consecutive slots
+  /// (lo32, hi32). Use localSlotIndex_ to find the starting slot for a
+  /// given Wasm local index.
+  std::vector<AllocStackInst *> locals_;
+
+  /// Maps Wasm local index → starting index in locals_.
+  /// For non-i64 locals, locals_[localSlotIndex_[i]] is the single slot.
+  /// For i64 locals, locals_[localSlotIndex_[i]] is the lo32 slot and
+  /// locals_[localSlotIndex_[i]+1] is the hi32 slot.
+  std::vector<uint32_t> localSlotIndex_;
+
+  /// Wasm type of each Wasm local (params then declared locals).
+  std::vector<WasmValType> localTypes_;
+
+  /// Map from f32 LiteralNumber (promoted to f64) to original f32 bit pattern.
+  /// Needed because f32→f64 promotion may alter NaN payload bits, and Hermes
+  /// canonicalizes NaN when emitting bytecode. We record the original bits so
+  /// that i32.reinterpret_f32 can fold them at compile time.
+  llvh::DenseMap<LiteralNumber *, uint32_t> f32NanBitsMap_;
+
+  /// The parent (top-level) scope instruction, used to load pre-created
+  /// closures from the environment at call sites.
+  GetParentScopeInst *parentScopeInst_ = nullptr;
+
+  /// Per-function cached return buffer views (valid between
+  /// beginFunction/endFunction). For functions that receive retBufI/retBufF
+  /// as params, these point to LoadParamInst. For functions that only need
+  /// the buffer for i64 arithmetic, retBufI_ is loaded from the top-level
+  /// scope. nullptr if the module has no i64 at all.
+  Value *retBufI_ = nullptr;
+  Value *retBufF_ = nullptr;
+
+  /// The reference transport container THIS function RECEIVED, as a
+  /// LoadParamInst of its retbuf_R parameter; null when the signature has no
+  /// reference result travelling through the buffer. emitRetBufStores reads
+  /// it, to write this function's own results into it; `git grep refBuf_`
+  /// settles whether anything else has since.
+  ///
+  /// It is deliberately NOT what a nested call's results are read from: each
+  /// call site allocates its own container and reads back the very value it
+  /// passed. The numeric views once had the opposite shape and that was
+  /// defect 01a0820d-5190; they are now threaded the same way.
+  Value *refBuf_ = nullptr;
+
+  /// Whether we are in unreachable code (after an unconditional br, return,
+  /// or unreachable). In unreachable mode, instructions are no-ops until
+  /// the next end/else that restores reachability.
+  bool unreachable_ = false;
+
+  /// Control flow stack (for block/loop/if/try).
+  struct ControlEntry {
+    enum Kind { Block, Loop, If, Try };
+    Kind kind;
+    /// For Block/If/Try: continuation after end (also the br target).
+    /// For Loop: the loop header block (the br target).
+    BasicBlock *contBlock;
+    /// For Loop: the block after the loop's end (where fallthrough goes).
+    /// For Block/If/Try: nullptr (contBlock serves both purposes).
+    BasicBlock *endBlock = nullptr;
+    /// Only for If: the else block.
+    BasicBlock *elseBlock = nullptr;
+    /// Block signature param types (for block params proposal).
+    std::vector<WasmValType> paramTypes;
+    /// Block signature result types.
+    std::vector<WasmValType> resultTypes;
+    /// Value stack height at entry (below any block params).
+    size_t stackHeight;
+    /// Phi nodes for results at the continuation block.
+    /// For Block/If/Try: phis in contBlock for results from br/fallthrough.
+    /// For Loop: phis in endBlock for results from fallthrough.
+    std::vector<PhiInst *> resultPhis;
+    /// For Loop: phi nodes in the header block for loop parameters.
+    /// br/br_if targeting a loop passes values via these phis.
+    std::vector<PhiInst *> paramPhis;
+    /// Saved param values for If blocks with params, so they can be
+    /// re-pushed at the start of the else branch.
+    std::vector<Value *> savedParamValues;
+    /// Whether the code was unreachable when this entry was pushed.
+    bool outerUnreachable = false;
+    /// Whether any branch (br/br_if) has targeted this entry's contBlock.
+    bool branchTargeted = false;
+
+    // --- Try-specific fields ---
+
+    /// The catch dispatch block (target of TryStartInst).
+    BasicBlock *catchBlock = nullptr;
+    /// The CatchInst result (the caught exception value).
+    /// Set when the first catch/catch_all is encountered.
+    Value *caughtValue = nullptr;
+    /// The block where the next catch clause's tag check begins.
+    /// Updated each time a new catch/catch_all is handled.
+    BasicBlock *nextCatchBlock = nullptr;
+    /// Whether we have transitioned from the try body to catch handling.
+    bool inCatch = false;
+    /// Whether a catch_all clause was encountered.
+    bool hasCatchAll = false;
+  };
+  std::vector<ControlEntry> controlStack_;
+
+  // --- Helper methods ---
+
+  /// Pop the top value from the value stack.
+  Value *pop();
+  /// Push a value onto the value stack.
+  void push(Value *v);
+
+  /// Wrap a value in Math.fround to produce f32 precision.
+  Value *emitFround(Value *val);
+
+  /// Ensure \p val has type :number. If it already does, return it unchanged.
+  /// Otherwise insert a zero-cost UnionNarrowTrustedInst to narrow from :any
+  /// to :number. This is safe because Wasm values are statically typed.
+  Value *asNumber(Value *val);
+
+  /// Check if the top of the value stack is the hi32 part of an i64.
+  bool isTopI64() const;
+
+  /// Get the ControlEntry at the given branch depth.
+  ControlEntry &getControlEntry(uint32_t depth);
+
+  /// Compute the number of phi nodes needed for the given result types.
+  /// Each i64 result type contributes 2 phis (lo, hi); others contribute 1.
+  static size_t numPhisForResultTypes(
+      const std::vector<WasmValType> &resultTypes);
+
+  /// Create phi nodes in \p block for the given result types.
+  /// Returns the created phis (i64 types produce 2 phis each).
+  std::vector<PhiInst *> createResultPhis(
+      BasicBlock *block,
+      const std::vector<WasmValType> &resultTypes);
+
+  /// Add phi operands for branching to the given control entry from the
+  /// current block, popping the values they consume. A Block/If/Try entry
+  /// takes the branch's result values. A Loop entry takes the loop's
+  /// PARAMETER values instead, because a branch to a loop targets its
+  /// header; a loop's result phis live in its exit block and are filled by
+  /// onEnd's fall-through path, never from here.
+  void addBranchPhiOperands(ControlEntry &entry);
+
+  /// Push one placeholder per slot of \p resultTypes, marking the high slot
+  /// of each i64 pair. Every caller today is an onEnd path for a construct
+  /// entered in unreachable code, where push() is a no-op and this therefore
+  /// does nothing at all: the enclosing live construct restores the stack and
+  /// its own results later. It exists so the marking stays correct if a
+  /// reachable caller is ever added. The three copies it replaced marked
+  /// unconditionally, so on those same unreachable paths they wrote past the
+  /// end of the stack, or onto a slot belonging to an enclosing block.
+  void pushUndefinedResults(const std::vector<WasmValType> &resultTypes);
+
+  /// \return true if a branch crossing \p entry has to close a protected
+  /// region: it is a try, and we are still inside its body rather than in one
+  /// of its handlers, where onCatch or onCatchAll has already closed it.
+  static bool crossingLeavesTryBody(const ControlEntry &entry);
+
+  /// \return true if a branch to \p depth leaves the body of at least one
+  /// try, and so needs emitBranchTryEnds.
+  bool branchLeavesTryBody(uint32_t depth);
+
+  /// Emit one TryEndInst per protected region a branch to \p depth leaves,
+  /// innermost first, each in its own block, and leave the builder inserting
+  /// into the block the branch itself must be emitted from. That block is the
+  /// continuation's actual predecessor, so it is also the one a branch's phi
+  /// operands have to be recorded against.
+  void emitBranchTryEnds(uint32_t depth);
+
+  /// Peek at (don't pop) the result values on the value stack for the given
+  /// control entry and add them as phi incoming edges from the current block.
+  /// Used by br_if and br_table where values must remain on the stack.
+  void peekBranchPhiOperands(ControlEntry &entry);
+
+  /// Push the result phis from a control entry onto the value stack.
+  /// i64 results push as i64 pairs (lo phi, hi phi).
+  void pushResultPhis(const ControlEntry &entry);
+
+  /// Check if the current insertion block is terminated (ends with a
+  /// terminator instruction).
+  bool isCurrentBlockTerminated();
+
+  /// Emit the walk to the HermesInternal.intrinsics holder itself. Only for
+  /// code emitted OUTSIDE __wasm_instantiate__ -- the module factory, which
+  /// creates its own instance of topLevelVS_ and so cannot read the
+  /// intrinsicsVar_ slot that __wasm_instantiate__ fills in. Everything
+  /// inside instantiation goes through loadIntrinsic() instead, which reads
+  /// the cached Variable.
+  Value *loadIntrinsicsHolder();
+
+  /// Emit a load of the pristine constructor \p name off an already-loaded
+  /// \p holder.
+  Value *loadIntrinsicFrom(Value *holder, llvh::StringRef name);
+
+  /// Emit a load of the pristine constructor \p name from
+  /// HermesInternal.intrinsics. Use this instead of
+  /// createTryLoadGlobalPropertyInst for any constructor generated code
+  /// allocates through: a global is replaceable, this is not.
+  /// \param scope the scope to read intrinsicsVar_ from -- the top-level
+  ///   scope instruction during instantiation, parentScopeInst_ from inside
+  ///   a function body.
+  Value *loadIntrinsic(Instruction *scope, llvh::StringRef name);
+
+  /// Same as loadIntrinsic(), for a constructor under the WebAssembly
+  /// sub-holder (Memory, Table, ...). These live one level down because their
+  /// names would be ambiguous beside the ECMAScript ones.
+  Value *loadWasmIntrinsic(Instruction *scope, llvh::StringRef name);
+
+  /// Load a memory view variable from the top-level scope.
+  /// \return the LoadFrameInst for the view.
+  Value *loadMemView(MemView view);
+
+  /// Get or lazily create the data segments Variable in topLevelVS_.
+  /// Called from onMemoryInit/onDataDrop during function body compilation.
+  Variable *getOrCreateDataSegVar();
+
+  /// Get or lazily create the element segments Variable in topLevelVS_.
+  /// Called from onTableInit/onElemDrop during function body compilation.
+  Variable *getOrCreateElemSegVar();
+
+  /// Emit `new Constructor(args)` and return the constructed object.
+  Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
+
+  /// Emit the funcref admission test on \p value: `null` passes, and so does
+  /// a WebAssembly Exported Function, asked through the
+  /// wasmIsExportedFunction builtin so that generated code and the JS API
+  /// share one notion of the brand. Anything else raises a TypeError whose
+  /// message is \p diagnostic.
+  ///
+  /// Emits into the current insertion block and leaves the insertion block
+  /// set to the block reached when the test passes, so the caller goes on
+  /// emitting straight after the call. \return \p value unchanged: this is a
+  /// test, not a conversion, and the value that reaches the consumer is the
+  /// one that was tested.
+  ///
+  /// The builtin ALLOCATES, so this is a safepoint like any other call.
+  ///
+  /// This entry point is for the Functions built outside begin/endFunction --
+  /// the export wrapper and the import trampoline; emitBodyFuncRefCheck() is
+  /// the same test for code emitted into currentFunc_. They share one
+  /// implementation and emit the same IR; what differs is what supplies the
+  /// ThrowTypeErrorInst's catch target afterwards, which the definitions
+  /// spell out.
+  Value *emitFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// emitFuncRefCheck() for a function body: same test, same emission
+  /// contract, same return value, and see that declaration for all of it.
+  /// Separate only so that each entry point can assert which Function it is
+  /// emitting into.
+  Value *emitBodyFuncRefCheck(Value *value, const llvh::Twine &diagnostic);
+
+  /// The shared body of emitFuncRefCheck() and emitBodyFuncRefCheck(). Call
+  /// one of those instead: they carry the doc comment and the assertion.
+  Value *emitFuncRefCheckImpl(Value *value, const llvh::Twine &diagnostic);
+
+  /// Store `initial` and `maximum` on a WebAssembly.Memory or
+  /// WebAssembly.Table descriptor object from values that are only known at
+  /// run time. \p actualMax uses -1 for "unbounded", which both constructors
+  /// would reject as a `maximum`, so the property is stored under a branch
+  /// and is simply absent when there is no maximum.
+  /// Emits into the instantiate function and advances tlEntry_.
+  void emitRuntimeLimits(
+      Value *descriptor,
+      Value *actualMin,
+      Value *actualMax);
+
+  /// Create the typed array views for the linear memory in the top-level
+  /// function. Called from createFunctions() if the module has memory.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// For a DEFINED memory this brand-checks the constructor's result, so it
+  /// splits the instantiate body and advances tlEntry_.
+  void createMemoryViews(Instruction *tlScope);
+
+  /// Create and initialize tables in the top-level function, then apply the
+  /// module's active element segments to them. Each table is three parallel
+  /// arrays -- closures, interned type ids and Exported Functions -- built
+  /// either by the WebAssembly.Table constructor (funcref) or directly
+  /// (externref); see the body.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void createTables(Instruction *tlScope);
+
+  /// Lower one element-segment entry to the JS value a table slot holds:
+  /// null, the canonical Exported Function of a function index, or the
+  /// current value of a global. This is the single rule shared by the two
+  /// places that materialize a segment's entries -- the active-segment loop
+  /// in createTables() and the passive-segment array built by
+  /// finalizeModule() -- so the two cannot describe the same segment
+  /// differently.
+  /// \p tlScope is the scope the frame loads read from.
+  /// A function index with no canonical wrapper, and a global index past the
+  /// end of the module's global space, both lower to null rather than to
+  /// nothing at all. A validated module has neither; the point of answering
+  /// with a value anyway is that both callers write one slot per entry, and a
+  /// caller made to skip an entry would leave whatever that slot held before.
+  Value *emitElemItem(const WasmElemItem &item, Instruction *tlScope);
+
+  /// Build the canonical type index map. Structurally identical types
+  /// (same params and results) get the same canonical index.
+  void buildCanonicalTypeMap();
+
+  /// Initialize Wasm globals in the top-level function.
+  /// Evaluates init expressions and stores initial values.
+  /// Imported globals are read from the imports object.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// Evaluate a Wasm init expression (the small stack machine used for
+  /// extended constant expressions) into an IR Value.
+  /// \param expr the operation sequence; must be non-empty.
+  /// \param tlScope the scope to load globals from.
+  /// \return the resulting Value, or nullptr if the expression is malformed
+  ///   (unbalanced stack). Callers must handle nullptr: the AOT
+  ///   `hermesc --wasm` path does not run the Wasm validator, so a
+  ///   hand-crafted module can reach here with a broken expression.
+  Value *emitInitExpr(
+      const std::vector<InitExprOp> &expr,
+      Instruction *tlScope);
+
+  void initializeGlobals(Instruction *tlScope);
+
+  /// Coerce \p value, an arbitrary JS value read from a global import, to the
+  /// declared Wasm type \p type, per ToWebAssemblyValue. Without this an
+  /// object or a fractional number would land in a slot the rest of the
+  /// compiler treats as an i32/f32/f64.
+  ///
+  /// STILL REQUIRED after the link path became a brand check, for ONE reason
+  /// that has nothing to do with the deleted __wasm_type__ string: an
+  /// IMMUTABLE global import may be satisfied by a RAW JS value, which is only
+  /// checked with `typeof`, so 3.7 and 2^32+5 both arrive. That is Task 6's
+  /// J4 item and it is load-bearing today.
+  ///
+  /// The second reason this comment used to give -- a mutable import being
+  /// read at every global.get through the replaceable `.value` accessor -- is
+  /// GONE: that read is the wasmGlobalGet builtin now, and for a numeric
+  /// global the slot it returns is narrowed by setWasmGlobalValue, the funnel
+  /// every numeric writer of that slot goes through.
+  /// The call on the mutable global.get path is therefore a no-op; it is kept
+  /// only so that its retirement happens once, with J4, rather than in two
+  /// places. Do not read its presence there as evidence that the value is
+  /// untrusted.
+  /// \return the coerced value; \p value unchanged for I64 (converted from a
+  ///   BigInt by the caller) and for reference types.
+  Value *coerceImportedGlobalValue(Value *value, WasmValType type);
+
+  /// Load the table functions array from the top-level scope.
+  Value *loadTableFuncs(uint32_t tableIndex);
+
+  /// Emit a bounds check for table access, trapping if \p idx is out of
+  /// bounds for \p funcsArr. Leaves the builder positioned in the ok block.
+  void emitTableBoundsCheck(Value *idx, Value *funcsArr);
+
+  /// Load the table type-indices array from the top-level scope.
+  Value *loadTableTypes(uint32_t tableIndex);
+
+  /// Load the table Exported Function array from the top-level scope.
+  Value *loadTableExported(uint32_t tableIndex);
+
+  /// \return true if table \p tableIndex holds funcrefs. An externref table
+  /// holds arbitrary JS values instead, so its slots carry no Exported
+  /// Function and no interned type id, and the write funnel must store what it
+  /// is given rather than deriving a triple from it.
+  bool tableIsFuncRef(uint32_t tableIndex) const;
+
+  /// \return a literal 1 or 0 for tableIsFuncRef(\p tableIndex), to pass to
+  /// the table helpers.
+  Value *tableIsFuncRefLiteral(uint32_t tableIndex);
+
+  /// Emit a byte-by-byte load from HEAPU8 for unaligned access.
+  /// \p addr is the effective byte address.
+  /// \p numBytes is the number of bytes to load (1, 2, 4, or 8).
+  /// \return the assembled value as a single IR Value.
+  Value *emitUnalignedLoad(Value *addr, uint32_t numBytes);
+
+  /// Emit a byte-by-byte store to HEAPU8 for unaligned access.
+  /// \p addr is the effective byte address.
+  /// \p value is the value to store.
+  /// \p numBytes is the number of bytes to store (1, 2, 4, or 8).
+  void emitUnalignedStore(Value *addr, Value *value, uint32_t numBytes);
+
+  /// Get the natural alignment (log2) for a given load/store opcode.
+  /// Returns 0 for byte ops, 1 for 16-bit, 2 for 32-bit, 3 for 64-bit.
+  static uint8_t getNaturalAlignLog2(llvh::StringRef opcodeName);
+
+  /// Compute effective address: when test262_ is set, treats the base as
+  /// unsigned via (base >>> 0), then adds offset. Otherwise just base + offset.
+  /// \return the effective byte address.
+  Value *emitEffectiveAddr(Value *base, uint32_t offset);
+
+  /// Emit a bounds check that traps if addr + numBytes > HEAPU8.length.
+  /// No-op when test262_ is false.
+  void emitMemoryBoundsCheck(Value *addr, uint32_t numBytes);
+
+  /// Build every canonical Exported Function the module needs -- one per
+  /// non-null slot of exportedFuncVars_ -- stamp each with the closure it
+  /// wraps and the interned id of its signature, and store it into its
+  /// Variable.
+  ///
+  /// This runs BEFORE createTables(), because a table slot holds the Exported
+  /// Function: an element segment applied at instantiate time would otherwise
+  /// read a Variable that has not been stored yet.
+  ///
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// NOTE: createExportWrapper switches the insertion block, so this restores
+  /// insertion to tlEntry_ before returning.
+  void createExportedFunctions(BaseScopeInst *tlScope);
+
+  /// Create the body of the canonical Exported Function for a Wasm function.
+  /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
+  /// param, argument coercion, and return value marshaling.
+  /// Called once per function index, not once per export name.
+  ///
+  /// The wrapper it builds can THROW: a numeric parameter's ToNumber runs
+  /// arbitrary JS, and a funcref parameter is tested rather than coerced --
+  /// null and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError before the Wasm body is entered. This is where a JS argument
+  /// becomes a Wasm parameter value; the body's entry stores its parameters
+  /// raw (see beginFunction). test/wasm/e2e-ref-conversion-points.wat asserts
+  /// the refusal with a counter the body would have incremented.
+  /// \p funcIndex is the Wasm function index being wrapped.
+  /// \p wrapperName names the wrapper IR Function (the first export name of
+  ///   \p funcIndex if it has one, otherwise a synthesized name).
+  /// \p tlScope is the CreateScopeInst for the top-level scope, used to
+  ///   load the internal function's closure.
+  /// \return the created wrapper IR Function.
+  ///
+  /// NOTE: this leaves the insertion point inside the wrapper's own body. It
+  /// does not touch tlEntry_, so the caller must restore insertion to
+  /// tlEntry_ before emitting more of the instantiate body.
+  Function *createExportWrapper(
+      uint32_t funcIndex,
+      llvh::StringRef wrapperName,
+      Instruction *tlScope);
+
+  /// Create the getter (or, with \p isSetter, the setter) closure for a live
+  /// exported global. The closure reads or writes the global's frame slot
+  /// directly, so the module's own global.get/global.set stay plain frame
+  /// accesses and pay nothing for the export being live.
+  /// \param globalIndex an index into the module's global index space; it
+  ///   must name a global this module DEFINES, not an import.
+  /// \p isSetter selects the setter body instead of the getter body.
+  /// \p tlScope is the CreateScopeInst for the top-level scope. It is not
+  ///   used inside the closure -- the body reaches the module's Variables
+  ///   through its own GetParentScopeInst -- but it names the scope the
+  ///   caller creates the closure in.
+  /// \return the created Function; the caller emits the CreateFunctionInst.
+  ///
+  /// NOTE: like createExportWrapper, this leaves the insertion point inside
+  /// the closure's own body, so the caller must restore insertion to tlEntry_
+  /// before emitting more of the instantiate body.
+  Function *createGlobalAccessor(
+      uint32_t globalIndex,
+      bool isSetter,
+      Instruction *tlScope);
+
+  /// \return the name to give the canonical Exported Function wrapper of
+  ///   \p funcIndex: "wasm_export_<first export name>" when the index is
+  ///   exported, so the common case keeps the name it always had, and
+  ///   "wasm_funcref_<index>" for a wrapper that exists only because the
+  ///   function can reach script through a table or a funcref global.
+  std::string exportWrapperName(uint32_t funcIndex) const;
+
+  /// Create an import trampoline function for the given imported function.
+  /// The trampoline loads the imported JS function from the top-level scope,
+  /// marshals Wasm-typed arguments to JS, calls the JS function, and
+  /// converts the return value back to the expected Wasm type.
+  ///
+  /// The conversion back can THROW, beyond whatever the imported JS function
+  /// itself throws: a funcref result is tested rather than coerced -- null
+  /// and a WebAssembly Exported Function pass, anything else raises a
+  /// TypeError -- on the single-result arm and on the multi-value arm alike.
+  /// On the multi-value arm the test runs in the pass that LOADS the array
+  /// elements, which runs before the pass that stores them at their offsets,
+  /// so a refusal happens before any result of the call has landed.
+  /// test/wasm/e2e-ref-conversion-points.wat asserts both arms, at result 0
+  /// and at result 1.
+  /// \p funcIndex is the Wasm function index of the imported function.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void createImportTrampoline(
+      uint32_t funcIndex,
+      Instruction *tlScope);
+
+  /// Returns true if the given function type needs buffer params (returns
+  /// i64 or has multiple results).
+  static bool needsReturnBuffer(const WasmFuncType &funcType);
+
+  /// Returns true if \p funcType returns a funcref or externref THROUGH the
+  /// return buffer, i.e. as one of several results. Such a call carries a
+  /// third hidden argument, the reference transport container. A lone
+  /// reference result is returned directly and needs no container.
+  ///
+  /// Caller and callee decide this from the same WasmFuncType, and
+  /// call_indirect matches signatures by interned type id -- which encodes
+  /// params and results -- so two modules agree about it.
+  static bool needsRefBuffer(const WasmFuncType &funcType);
+
+  /// The number of slots the reference container of \p funcType needs: the
+  /// TOTAL size of computeRetBufLayout()'s layout divided by four, not the
+  /// number of reference results. Reference slots are indexed by byte offset
+  /// over four, the same index an i32 at that offset would use, so the layout
+  /// is sparse -- an f64 result consumes two slot indices and stores nothing
+  /// in either.
+  static uint32_t refBufSlotCount(const WasmFuncType &funcType);
+
+  /// The JSDynamicParam index of the FIRST Wasm parameter of an internal
+  /// function or import trampoline with signature \p funcType. Index 0 is
+  /// `this`; a needsReturnBuffer() signature then takes retbuf_I and retbuf_F
+  /// at 1 and 2, and a needsRefBuffer() one takes retbuf_R at 3.
+  static uint32_t firstWasmParamIndex(const WasmFuncType &funcType);
+
+  /// Compute byte layout for results in the return buffer.
+  /// \return {vector of byte offsets per result, total buffer size}.
+  static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
+      const std::vector<WasmValType> &results);
+
+  /// Emit inline i64 ordered comparison: hiOp on the high words,
+  /// loOp on the low words. hiSigned selects AsInt32 vs AsUint32
+  /// interpretation of the high words.
+  /// \return the i32 result (0 or 1).
+  Value *emitI64OrderedCmp(
+      Value *loA,
+      Value *hiA,
+      Value *loB,
+      Value *hiB,
+      ValueKind hiOp,
+      ValueKind loOp,
+      bool hiSigned);
+
+  /// Return \p val as-is if it already produces a signed int32 value
+  /// (e.g., AsInt32Inst, bitwise ops), otherwise wrap in AsInt32Inst.
+  Value *ensureInt32(Value *val);
+
+  /// Return \p val as-is if it already produces an unsigned uint32 value
+  /// (e.g., AsUint32Inst, >>>), otherwise wrap in AsUint32Inst.
+  Value *ensureUint32(Value *val);
+
+  /// Callee: pop results, store to buffer, return 0. Called from onReturn()
+  /// and endFunction() when the function uses a return buffer.
+  void emitRetBufStores(const WasmFuncType &funcType);
+
+  /// Allocate the reference container for one nested call with signature
+  /// \p funcType and append it to \p args, after the two numeric views that
+  /// the caller has already pushed. \return that container, which the caller
+  /// must hand to emitRetBufLoads for THAT call, or nullptr when the callee
+  /// has no reference result travelling through the buffer.
+  Value *emitNestedCallRefBuf(
+      const WasmFuncType &funcType,
+      llvh::SmallVectorImpl<Value *> &args);
+
+  /// Caller: read results from buffer, push onto value stack.
+  /// Called from onCall/onCallIndirect after a call to a function that
+  /// uses a return buffer.
+  ///
+  /// \p rbI, \p rbF and \p refBuf are the three containers THIS call site
+  /// passed to THAT call. Every one of them must be the value the call site
+  /// handed over, not one obtained any other way -- not from the module
+  /// frame, and not from this function's own incoming parameters. Those are
+  /// the same object only within one module: a cross-module call_indirect
+  /// enters the callee carrying the CALLER's views, and reading one while the
+  /// callee wrote the other returned zeros.
+  ///
+  /// \p refBuf must be null exactly when !needsRefBuffer(funcType); \p rbI
+  /// and \p rbF are always required, since this is only called when the
+  /// callee returns through the buffer.
+  void emitRetBufLoads(
+      const WasmFuncType &funcType,
+      Value *rbI,
+      Value *rbF,
+      Value *refBuf);
+
+  /// Read i64 from retBufI_[0] and retBufI_[1]. Used after i64 arithmetic
+  /// builtins that write their result to the return buffer.
+  std::pair<Value *, Value *> readI64FromRetBuf();
+};
+
+} // namespace wasm
+} // namespace hermes
+
+#endif // HERMES_WASMIRGEN_WASMIRGEN_H

@@ -1,0 +1,14 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// This is an ordinary JS unit, not a Wasm module. It is registered under a
+// Wasm unit name by native-unit-throws-shim.c and reached through
+// WebAssembly.Module.fromNativeUnit(), so its top-level throw takes the same
+// code path a Wasm unit's unit_main would if it threw: runNativeWasmUnit()
+// in lib/VM/JSLib/WebAssembly/WebAssembly.cpp.
+
+throw new Error("boom");

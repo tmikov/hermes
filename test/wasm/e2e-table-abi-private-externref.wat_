@@ -1,0 +1,16 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Consumer module for e2e-table-abi-private.wat that declares its table
+;; import as EXTERNREF. Nothing can satisfy it: WebAssembly.Table builds only
+;; funcref tables, and a forged literal is no longer a table at all. It exists
+;; to pin that the declared element type is checked against what the engine
+;; can build, rather than against a string the supplied object carries -- which
+;; is what let an externref declaration borrow a funcref table's storage and
+;; skip the funcref brand check on every write to it.
+
+(module
+  (import "e" "t" (table 2 externref))
+  (func (export "size") (result i32) (table.size 0)))

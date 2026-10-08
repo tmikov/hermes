@@ -1,0 +1,111 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-slot-invariant.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+
+function fresh() {
+  return new WebAssembly.Instance(mod);
+}
+
+// Report the trap MESSAGE, not just the fact of a trap, so that "returned
+// undefined instead of trapping" cannot be mistaken for a trap and a correct
+// type-mismatch trap cannot be mistaken for an "uninitialized element" trap
+// caused by the slot having been cleared instead of written.
+function callAsT0(inst, i) {
+  try {
+    return String(inst.exports.callAsT0(i));
+  } catch (e) {
+    return 'trap: ' + e.message;
+  }
+}
+
+var inst = fresh();
+
+// The element segment put $a (result i32) at [0] and $b (param i32 i32 i32)
+// at [1]. Only [0] matches $t0.
+print('callAsT0(0): ' + callAsT0(inst, 0));
+print('callAsT0(1): ' + callAsT0(inst, 1));
+
+// table.set must carry the type id along with the closure.
+inst.exports.copySlot(0, 1);
+print('copySlot(0, 1); callAsT0(1): ' + callAsT0(inst, 1));
+
+// So must table.fill.
+inst.exports.fillSlot(1, 0);
+print('fillSlot(1, 0); callAsT0(1): ' + callAsT0(inst, 1));
+
+// The security case, on a FRESH instance: the two mutations above have already
+// overwritten slot 1 with $a, and nothing can put $b back -- copySlot and
+// fillSlot only move what the table already holds. A new instance re-runs the
+// element segment, so slot 1 is $b again.
+var inst2 = fresh();
+inst2.exports.copySlot(1, 0);
+print('copySlot(1, 0); callAsT0(0): ' + callAsT0(inst2, 0));
+
+// A funcref crossing from JS into Wasm. `undefined` is not a funcref, and the
+// caller who omits the argument must get the same error as one who passes a
+// plain function or a number.
+var inst3 = fresh();
+function put(inst, args) {
+  try {
+    inst.exports.put.apply(null, args);
+    return 'accepted';
+  } catch (e) {
+    return e.name;
+  }
+}
+print('put(0) [missing arg]: ' + put(inst3, [0]));
+print('put(0, plainFn): ' + put(inst3, [0, function () { return 1; }]));
+print('put(0, 42): ' + put(inst3, [0, 42]));
+print('put(0, tbl.get(0)) then callAsT0(0): ' +
+      (put(inst3, [0, inst3.exports.tbl.get(0)]) === 'accepted'
+           ? callAsT0(inst3, 0)
+           : 'rejected'));
+
+// ref.null is a genuine null funcref, so the slot becomes uninitialized.
+inst3.exports.clear(0);
+print('clear(0); callAsT0(0): ' + callAsT0(inst3, 0));
+
+// --- Storage the engine does not control: no longer constructible ---------
+//
+// A frozen backing array refuses element writes and reports success while
+// doing so; a non-array, or an array carrying an accessor at an index, is
+// another shape of the same problem. A wasmCheckTableArrays builtin, the
+// writability check in the table-set funnel, and the length rollback in
+// wasmTableGrow all existed for that, and this file used to drive all three by
+// replacing globalThis.Array while an externref table was being built.
+//
+// That route is gone. A funcref table's arrays are internal fields of a
+// genuine WebAssembly.Table, and an externref table's now come from the
+// pristine Array under HermesInternal.intrinsics, so neither table kind can be
+// handed storage script chose. The checks are kept as defence in depth but
+// have no reachable caller to test them through -- recorded on dz
+// 01a0904b-398b rather than dropped silently.
+//
+// What remains testable is the ordinary behaviour of the same paths, which is
+// what the rows below cover.
+
+var extInst = fresh();
+var extTag = {tag: 'x'};
+extInst.exports.extSet(0, extTag);
+print('sane externref table: extSet ok, extGet: ' +
+      extInst.exports.extGet(0).tag);
+
+// table.grow extends all three arrays and then fills the new slots. Only the
+// successful path is reachable now; the rollback that a refused lengthening
+// would trigger is the part that lost its route.
+var growInst = fresh();
+var growBefore = growInst.exports.extSize();
+var growRet = growInst.exports.extGrow(2);
+print('sane grow: ' + growBefore + ' -> ' + growInst.exports.extSize() +
+      ', extGrow returned ' + growRet);
+
+print('done');

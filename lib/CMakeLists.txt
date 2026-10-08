@@ -80,6 +80,11 @@ add_subdirectory(InternalJavaScript)
 add_subdirectory(TypedLib)
 add_subdirectory(Sema)
 
+if(HERMES_ENABLE_WASM)
+  add_subdirectory(WasmFrontend)
+  add_subdirectory(WasmIRGen)
+endif()
+
 # Define combined libraries from all components. Components are defined as object
 # libraries. It is tricky.
 #
@@ -124,6 +129,13 @@ target_link_libraries(hermescompiler PUBLIC
   hermesTypedLib_obj
   zip_obj
   )
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermescompiler PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
+endif()
 
 set(HERMESVM_PUBLIC_INCLUDE_DIRS
   ${PROJECT_SOURCE_DIR}/public
@@ -303,6 +315,21 @@ if(HERMES_ENABLE_INTL)
   target_link_libraries(hermesvmlean_a PUBLIC ${INTL_OBJ_LIBS})
 endif()
 
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermesvm_a PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
+  # The lean VM contains WebAssembly.cpp (it is part of hermesVMRuntime_obj)
+  # but not the Wasm compiler, so it needs the stub definitions of the frontend
+  # entry points. Only when Wasm is enabled: otherwise WebAssembly.cpp is not
+  # compiled at all and nothing references those symbols.
+  target_link_libraries(hermesvmlean_a PUBLIC
+    hermesWasmFrontendLean_obj
+    )
+endif()
+
 # Construct the HermesVM model string
 set(HERMESVM_MODEL "")
 
@@ -318,5 +345,12 @@ endif()
 string(APPEND HERMESVM_MODEL "_s" ${HERMESVM_LOG_HEAP_SEGMENT_SIZE})
 # The pointer size is not strictly necessary, but include it for completeness.
 string(APPEND HERMESVM_MODEL "_p" ${CMAKE_SIZEOF_VOID_P})
+
+# SHUnit ABI version. Generated C allocates a UnitData that embeds SHUnit by
+# value, so any change to the SHUnit layout makes previously generated object
+# files the wrong size. Bump this whenever SHUnit's layout changes: a stale
+# object then fails to link against the new runtime instead of reading past
+# its own allocation.
+string(APPEND HERMESVM_MODEL "_u2")
 
 configure_file(config/libhermesvm-config.h.in config/libhermesvm-config.h)

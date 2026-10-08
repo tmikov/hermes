@@ -1,0 +1,63 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-copy-alias.wat.
+
+var args = hermescli.getScriptArgs();
+var donorMod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
+
+// Four real slots, each with a DIFFERENT signature -- with one shared
+// signature every slot carries the same interned type id and a smear across
+// the range changes nothing observable.
+var donor = new WebAssembly.Instance(donorMod).exports.tbl;
+
+// One table satisfying both imports: table 0 and table 1 are one storage.
+var inst = new WebAssembly.Instance(mod, {e: {a: donor, b: donor}});
+
+function call0Row() {
+  var out = [];
+  for (var i = 0; i < 4; ++i) {
+    try {
+      out.push(inst.exports.call0(i));
+    } catch (e) {
+      out.push('trap');
+    }
+  }
+  return out.join(' | ');
+}
+
+print('call0 before copy: ' + call0Row());
+inst.exports.copyAcross(1, 0, 3);
+print('call0 after copy: ' + call0Row());
+
+// Only table.get reads the third array, so a smear there is invisible to
+// call_indirect and shows up as the wrong function coming back out.
+var refs = [];
+for (var j = 0; j < 4; ++j) {
+  var f = inst.exports.getAt(j);
+  // Each donor function ignores its parameters and returns a distinct number,
+  // so calling the wrapper says which one landed in the slot.
+  refs.push(typeof f === 'function' ? f(0, 0, 0) : 'not a function');
+}
+print('getAt after copy: ' + refs.join(' | '));
+
+// --- Partial aliasing between two EXTERNREF tables: not constructible -----
+//
+// Two externref tables sharing ONE of their three arrays is the case a
+// same-role funcs-pair predicate cannot see, and it used to be built by
+// replacing globalThis.Array so that the two tables' EXPORTED arrays came back
+// as the same object.
+//
+// That route is gone: an externref table's arrays now come from the pristine
+// Array under HermesInternal.intrinsics, and a funcref table's are internal
+// fields of a genuine WebAssembly.Table, so no two tables can be made to share
+// one. The overlap handling in table.copy is kept for the same-table case
+// above, which is ordinary Wasm and is what the rows before this point cover.
+// The lost probe is recorded on dz 01a0904b-398b.
+
+print('done');

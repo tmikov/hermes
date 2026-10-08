@@ -38,9 +38,27 @@ _INST_LOCATION_PREFIX = "; "
 
 _LOCATION_SEP = ":"
 
-_AUTO_GENERATED_MARKER = (
-    "// Auto-generated content below. Please do not modify manually."
+_AUTO_GENERATED_MARKER_TEXT = (
+    "Auto-generated content below. Please do not modify manually."
 )
+
+# Line-comment syntax by test file extension. Tests are mostly JavaScript, but
+# WebAssembly text format uses ";;", and its golden IR dumps need regenerating
+# just as often.
+_COMMENT_PREFIX_BY_EXT = {
+    ".wat": ";;",
+}
+_DEFAULT_COMMENT_PREFIX = "//"
+
+
+def _comment_prefix_for(path):
+    """Return the line-comment syntax to use for expectations in path."""
+    _, ext = os.path.splitext(path)
+    return _COMMENT_PREFIX_BY_EXT.get(ext, _DEFAULT_COMMENT_PREFIX)
+
+
+def _auto_generated_marker(comment_prefix):
+    return f"{comment_prefix} {_AUTO_GENERATED_MARKER_TEXT}"
 
 
 class SourceLocation:
@@ -95,8 +113,9 @@ class CompilerOutput:
     the test expectations are generated.
     """
 
-    def __init__(self, js_file, check_prefix):
+    def __init__(self, js_file, check_prefix, comment_prefix):
         self.check_prefix = check_prefix
+        self.comment_prefix = comment_prefix
         self.js_file_location = os.path.join(os.path.dirname(js_file), "")
         self.emit_check_next = False
         self.lines = []
@@ -111,7 +130,7 @@ class CompilerOutput:
         hash_match = re.search(src_hash_regex, line)
         if hash_match is not None:
             source_hash_wildcard = (
-                f"// {self.check_prefix}-NEXT:" + hash_match.group(1) + " {{.*}}"
+                f"{self.comment_prefix} {self.check_prefix}-NEXT:" + hash_match.group(1) + " {{.*}}"
             )
             self.lines.append(source_hash_wildcard)
             return
@@ -119,15 +138,15 @@ class CompilerOutput:
         bc_match = re.search(bc_version_regex, line)
         if bc_match is not None:
             source_hash_wildcard = (
-                f"// {self.check_prefix}-NEXT:" + bc_match.group(1) + " {{.*}}"
+                f"{self.comment_prefix} {self.check_prefix}-NEXT:" + bc_match.group(1) + " {{.*}}"
             )
             self.lines.append(source_hash_wildcard)
             return
 
         if self.emit_check_next:
-            self.lines.append(f"// {self.check_prefix}-NEXT:")
+            self.lines.append(f"{self.comment_prefix} {self.check_prefix}-NEXT:")
         else:
-            self.lines.append(f"// {self.check_prefix}:")
+            self.lines.append(f"{self.comment_prefix} {self.check_prefix}:")
             self.emit_check_next = True
 
         if self.js_file_location:
@@ -161,6 +180,10 @@ def _parse_command_line():
     # Sometimes the golden output tests use the following options, so they are
     # added here so this script can be used as a drop in replacement for the
     # FileCheck utility.
+    # Line-comment syntax for the expectations. Defaults to the one implied by
+    # the test file's extension.
+    p.add_argument("--comment-prefix", "-comment-prefix", default=None)
+
     p.add_argument(
         "--match-full-lines",
         "-match-full-lines",
@@ -178,7 +201,10 @@ def main(args):
     # intermediate representation -- i.e., the [Function] list. It
     # is important to exhaust stdin first in case the compiler output
     # has been piped to this script.
-    compiler_output = CompilerOutput(args.js_file, args.check_prefix)
+    comment_prefix = args.comment_prefix or _comment_prefix_for(args.js_file)
+    marker = _auto_generated_marker(comment_prefix)
+
+    compiler_output = CompilerOutput(args.js_file, args.check_prefix, comment_prefix)
     for line in sys.stdin:
         compiler_output.add_line(line.rstrip())
 
@@ -189,7 +215,9 @@ def main(args):
     js_lines = []
     with open(args.js_file, "r") as jsf:
         for line in jsf:
-            if not re.match(f"\\s*//\\s*{args.check_prefix}", line):
+            if not re.match(
+                rf"\s*{re.escape(comment_prefix)}\s*{args.check_prefix}", line
+            ):
                 line = line.rstrip()
                 if line or (js_lines and js_lines[-1]):
                     js_lines.append(line)
@@ -204,10 +232,10 @@ def main(args):
         for line in js_lines:
             print(line, file=jsf)
             has_auto_generated_marker = (
-                has_auto_generated_marker or line == _AUTO_GENERATED_MARKER
+                has_auto_generated_marker or line == marker
             )
         if not has_auto_generated_marker:
-            print(f"\n{_AUTO_GENERATED_MARKER}", file=jsf)
+            print(f"\n{marker}", file=jsf)
         print(file=jsf)
         for line in compiler_output.lines:
             print(line, file=jsf)

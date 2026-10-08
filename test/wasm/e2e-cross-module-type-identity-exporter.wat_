@@ -1,0 +1,17 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-cross-module-type-identity.wat. Its type section declares
+;; ()->i32 first, so that signature is its type index 0.
+
+(module
+  (type $v_i32 (func (result i32)))
+  (type $ii_l (func (param i32 i32) (result i64)))
+  (table (export "tbl") 2 funcref)
+  (func $f100 (result i32) i32.const 100)
+  (func $g (param i32 i32) (result i64) local.get 0 i64.extend_i32_s)
+  (elem (i32.const 0) $f100 $g)
+  (func (export "call_at") (param i32) (result i32)
+    (call_indirect (type $v_i32) (local.get 0))))

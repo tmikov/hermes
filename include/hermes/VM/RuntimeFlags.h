@@ -123,6 +123,24 @@ struct VMOnlyRuntimeFlags {
       llvh::cl::cat(RuntimeCategory),
       llvh::cl::init(vm::RuntimeConfig::getDefaultMaxNumRegisters())};
 
+  llvh::cl::opt<bool> EnableUntrustedBytecodeFromJS{
+      "Xenable-untrusted-bytecode-from-js",
+      llvh::cl::desc(
+          "Allow JS APIs to load untrusted Hermes bytecode "
+          "(WebAssembly.Module.fromHermesBytecode, Worker bytecode)"),
+      llvh::cl::init(
+          vm::RuntimeConfig::getDefaultEnableUntrustedBytecodeFromJS()),
+      llvh::cl::cat(RuntimeCategory)};
+
+  llvh::cl::opt<bool> EnableWasmBytecodeContentSniffing{
+      "Xenable-wasm-bytecode-content-sniffing",
+      llvh::cl::desc(
+          "Allow WebAssembly.Module/compile/instantiate to content-sniff "
+          ".hbc bytecode instead of always treating input as .wasm"),
+      llvh::cl::init(
+          vm::RuntimeConfig::getDefaultEnableWasmBytecodeContentSniffing()),
+      llvh::cl::cat(RuntimeCategory)};
+
   llvh::cl::opt<bool> ES6Proxy{
       "Xes6-proxy",
       llvh::cl::desc("Enable support for ES6 Proxy"),

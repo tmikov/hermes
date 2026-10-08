@@ -1,0 +1,20 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-global-import-sign.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
+
+function wrapOf(g) {
+  return new WebAssembly.Instance(mod, {e: {g: g}}).exports.wrap();
+}
+
+print('-1n -> ' + wrapOf(-1n));
+print('-2n -> ' + wrapOf(-2n));
+print('5n -> ' + wrapOf(5n));
+print('done');

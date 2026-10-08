@@ -1,0 +1,34 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// 'throwmod' is native-unit-throws-throwing.js_, a plain JS unit registered
+// under a Wasm unit name by native-unit-throws-shim.c (see there for why).
+// Its top level throws, so this reaches runNativeWasmUnit()'s failure path
+// in lib/VM/JSLib/WebAssembly/WebAssembly.cpp -- the one path the rest of
+// the Wasm test suite cannot reach, because a well-formed Wasm module's top
+// level only builds a module info object and never throws.
+var caught = false;
+try {
+  WebAssembly.Module.fromNativeUnit('throwmod');
+} catch (e) {
+  caught = true;
+  print('caught: ' + caught);
+  print('is Error: ' + (e instanceof Error));
+  print('message: ' + e.message);
+}
+
+// The real assertion: runNativeWasmUnit() calls setThrownValue() to put the
+// exception back after _sh_catch cleared it. If that left the runtime
+// wedged instead of merely reporting the error, a later, unrelated
+// fromNativeUnit() on a good unit would fail too. 'goodmod' is the (module)
+// below, compiled and linked the ordinary way.
+var mod = WebAssembly.Module.fromNativeUnit('goodmod');
+var inst = new WebAssembly.Instance(mod, {});
+inst.exports.nop();
+print('still usable: true');
+
+print('done');

@@ -124,4 +124,27 @@ RUNTIME_HV_FIELD(intlNumberFormatPrototype, JSObject)
 
 RUNTIME_HV_FIELD(promiseRejectionTrackingHook_, HermesValue)
 
+#ifdef HERMES_ENABLE_WASM
+RUNTIME_HV_FIELD(wasmCompileErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmCompileErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmLinkErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmLinkErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmRuntimeErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmRuntimeErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmModuleConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmModulePrototype, JSObject)
+RUNTIME_HV_FIELD(wasmInstanceConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmInstancePrototype, JSObject)
+RUNTIME_HV_FIELD(wasmMemoryConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmMemoryPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmTableConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmTablePrototype, JSObject)
+RUNTIME_HV_FIELD(wasmGlobalConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmGlobalPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmTagConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmTagPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmExceptionConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmExceptionPrototype, JSObject)
+#endif
+
 #undef RUNTIME_HV_FIELD

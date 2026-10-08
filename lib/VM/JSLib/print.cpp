@@ -15,8 +15,10 @@
 namespace hermes {
 namespace vm {
 
-/// Convert all arguments to string and print them followed by new line.
-CallResult<HermesValue> print(void *, Runtime &runtime) {
+ExecutionStatus printArgsToStream(
+    Runtime &runtime,
+    llvh::raw_ostream &os,
+    unsigned firstArg) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   GCScope scope(runtime);
   auto marker = scope.createMarker();
@@ -27,23 +29,32 @@ CallResult<HermesValue> print(void *, Runtime &runtime) {
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
-  for (Handle<> arg : args.handles()) {
+  for (unsigned i = firstArg, e = args.getArgCount(); i < e; ++i) {
     scope.flushToMarker(marker);
-    auto res = toString_RJS(runtime, arg);
+    auto res = toString_RJS(runtime, args.getArgHandle(i));
     if (res == ExecutionStatus::EXCEPTION)
       return ExecutionStatus::EXCEPTION;
 
     if (!first)
-      llvh::outs() << " ";
+      os << " ";
     SmallU16String<32> tmp;
     lv.strHandle.castAndSetHermesValue<StringPrimitive>(res->getHermesValue());
-    llvh::outs() << StringPrimitive::createStringView(runtime, lv.strHandle)
-                        .getUTF16Ref(tmp);
+    os << StringPrimitive::createStringView(runtime, lv.strHandle)
+              .getUTF16Ref(tmp);
     first = false;
   }
 
-  llvh::outs() << "\n";
-  llvh::outs().flush();
+  os << "\n";
+  os.flush();
+  return ExecutionStatus::RETURNED;
+}
+
+/// Convert all arguments to string and print them followed by new line.
+CallResult<HermesValue> print(void *, Runtime &runtime) {
+  if (LLVM_UNLIKELY(
+          printArgsToStream(runtime, llvh::outs(), 0) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
   return HermesValue::encodeUndefinedValue();
 }
 

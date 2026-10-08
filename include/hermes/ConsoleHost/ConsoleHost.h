@@ -204,6 +204,13 @@ struct ExecuteOptions {
 
   /// Extra positional CLI arguments after the script filename.
   std::vector<std::string> scriptArgs;
+
+  /// True if the input is a WebAssembly module, that is, -wasm was given.
+  /// Such bytecode only builds and returns a module object
+  /// {instantiate, exportDescs, importDescs}, so after running it the driver
+  /// calls that object's instantiate() with an empty import object; that call
+  /// is what instantiates the module and runs its start function.
+  bool wasmModule{false};
 };
 
 /// Executes the HBC bytecode provided in HermesVM.

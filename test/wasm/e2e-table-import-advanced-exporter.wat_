@@ -1,0 +1,30 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Helper module for e2e-table-import-advanced.wat — not a standalone test.
+;; Exports a table with 3 slots and two functions pre-populated at [0] and [1].
+
+(module
+  (table (export "tbl") 3 10 funcref)
+
+  (func $f100 (result i32) i32.const 100)
+  (func $f200 (result i32) i32.const 200)
+
+  ;; Populate [0] = f100, [1] = f200. Slot [2] is empty.
+  (elem (i32.const 0) $f100 $f200)
+
+  (func (export "size") (result i32)
+    table.size 0)
+
+  ;; call_indirect on the exported table.
+  (func (export "call_at") (param i32) (result i32)
+    local.get 0
+    call_indirect (result i32))
+
+  (func (export "grow") (param i32) (result i32)
+    ref.null func
+    local.get 0
+    table.grow 0)
+)

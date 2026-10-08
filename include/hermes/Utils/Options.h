@@ -55,6 +55,12 @@ struct BytecodeGenerationOptions {
   /// generated unit.
   bool emitMain = true;
 
+  /// Whether this unit was compiled from a WebAssembly module, in which case
+  /// the SH backend emits a self-registration block so that
+  /// WebAssembly.Module.fromNativeUnit() can find it. --exported-unit also
+  /// serves ordinary JS units, which must not be registered.
+  bool wasmUnit = false;
+
   /// Whether the SH backend should emit small C code. If false, will inline
   /// more fast paths.
   bool smallC = false;

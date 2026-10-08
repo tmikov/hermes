@@ -773,6 +773,7 @@ HermesValue createHermesInternalObject(
   namespace P = Predefined;
   struct : public Locals {
     PinnedValue<JSObject> intern;
+    PinnedValue<JSObject> intrinsics;
     PinnedValue<> propRes;
   } lv;
   LocalsRAII lraii(runtime, &lv);
@@ -840,6 +841,63 @@ HermesValue createHermesInternalObject(
       putRes != ExecutionStatus::EXCEPTION && *putRes &&
       "Failed to set HermesInternal.concat.");
   (void)putRes;
+
+  // Pristine constructors, for engine-generated code that needs to allocate
+  // without going through a global the running script can replace. The Wasm
+  // backend is the first consumer: a module's linear-memory views and its
+  // multi-value return buffer are built from these.
+  //
+  // Only the constructors are pristine. An argument built by generated code
+  // and handed to one -- a descriptor object, say -- is still an ordinary
+  // object whose property stores walk Object.prototype, so a caller that
+  // needs that guarded still has to guard it.
+  //
+  // The holder is deliberately left EXTENSIBLE here. initGlobalObject adds
+  // the WebAssembly constructors, which do not exist yet -- this function is
+  // called from it well before createWebAssemblyObject -- and seals the
+  // holder as its last act. No JS can observe the gap: nothing during
+  // initGlobalObject runs script, and runInternalJavaScript() is called only
+  // after initGlobalObject returns.
+  lv.intrinsics = JSObject::create(runtime);
+  {
+    // Each define allocates handles that are dead once it returns, and there
+    // are more entries than HERMESVM_DEBUG_MAX_GCSCOPE_HANDLES allows to
+    // accumulate. lv.intrinsics and the runtime's constructor fields are
+    // pinned, so flushing between entries cannot invalidate anything here.
+    auto defineIntrinsic = [&](Predefined::Str symID,
+                               Handle<NativeConstructor> ctor) {
+      GCScopeMarkerRAII marker{gcScope};
+      auto res = JSObject::defineOwnProperty(
+          lv.intrinsics,
+          runtime,
+          Predefined::getSymbolID(symID),
+          constantDPF,
+          ctor);
+      assert(
+          res != ExecutionStatus::EXCEPTION && *res &&
+          "Failed to define a HermesInternal.intrinsics entry.");
+      (void)res;
+    };
+    defineIntrinsic(P::Array, runtime.arrayConstructor);
+    defineIntrinsic(P::ArrayBuffer, runtime.arrayBufferConstructor);
+    // Every typed array, rather than the subset today's consumers use: the
+    // names and the Runtime fields are both generated from this same .def,
+    // so the whole family costs no more than a subset would.
+#define TYPED_ARRAY(name, type) \
+  defineIntrinsic(P::name##Array, runtime.name##ArrayConstructor);
+#include "hermes/VM/TypedArrays.def"
+
+    auto putRes = JSObject::defineOwnProperty(
+        lv.intern,
+        runtime,
+        Predefined::getSymbolID(P::intrinsics),
+        constantDPF,
+        lv.intrinsics);
+    assert(
+        putRes != ExecutionStatus::EXCEPTION && *putRes &&
+        "Failed to set HermesInternal.intrinsics.");
+    (void)putRes;
+  }
 
   // HermesInternal functions that are known to be safe and are required to be
   // present by the VM internals even under a security-sensitive environment

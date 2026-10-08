@@ -206,6 +206,13 @@ class AddEmptyStringInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // A primitive operand runs no user code (no valueOf/toString on objects),
+    // but ToString still throws a TypeError for a Symbol, so it is only
+    // side-effect free when the operand cannot be one.
+    auto &tc = getModule()->getTypeContext();
+    auto t = getSingleOperand()->getType();
+    if (tc.isPrimitive(t) && !tc.canBeSymbol(t))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -237,6 +244,12 @@ class ToPropertyKeyInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // ToPropertyKey never throws for a primitive operand (a Symbol is already
+    // a valid property key, everything else goes through ToString, which only
+    // throws for a Symbol), so it is unconditionally side-effect free here.
+    if (getModule()->getTypeContext().isPrimitive(
+            getSingleOperand()->getType()))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -310,6 +323,13 @@ class AsNumberInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // A primitive operand runs no user code (no valueOf/toString on objects),
+    // but ToNumber still throws a TypeError for a Symbol or a BigInt, so
+    // the conversion is only side-effect free when the operand cannot be one.
+    auto &tc = getModule()->getTypeContext();
+    auto t = getSingleOperand()->getType();
+    if (tc.isPrimitive(t) && !tc.canBeSymbol(t) && !tc.canBeBigInt(t))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -347,6 +367,13 @@ class AsNumericInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // A primitive operand runs no user code (no valueOf/toString on objects),
+    // but ToNumeric still throws a TypeError for a Symbol, so it is only
+    // side-effect free when the operand cannot be one.
+    auto &tc = getModule()->getTypeContext();
+    auto t = getSingleOperand()->getType();
+    if (tc.isPrimitive(t) && !tc.canBeSymbol(t))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -380,6 +407,13 @@ class AsInt32Inst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // A primitive operand runs no user code (no valueOf/toString on objects),
+    // but ToInt32 (via ToNumber) still throws a TypeError for a Symbol or a
+    // BigInt, so it is only side-effect free when the operand cannot be one.
+    auto &tc = getModule()->getTypeContext();
+    auto t = getSingleOperand()->getType();
+    if (tc.isPrimitive(t) && !tc.canBeSymbol(t) && !tc.canBeBigInt(t))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -415,6 +449,13 @@ class AsUint32Inst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // A primitive operand runs no user code (no valueOf/toString on objects),
+    // but ToUint32 (via ToNumber) still throws a TypeError for a Symbol or a
+    // BigInt, so it is only side-effect free when the operand cannot be one.
+    auto &tc = getModule()->getTypeContext();
+    auto t = getSingleOperand()->getType();
+    if (tc.isPrimitive(t) && !tc.canBeSymbol(t) && !tc.canBeBigInt(t))
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
