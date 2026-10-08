@@ -854,6 +854,11 @@ if(HERMES_ENABLE_TEST_SUITE)
         napi_text_encoder_addon
         napi_async_work_addon
       )
+      # Defined only in a Wasm build with shermes (unittests/napi), which
+      # is added above this point.
+      if(TARGET napi_wasm_lookup_addon)
+        list(APPEND HERMES_TEST_DEPS napi_wasm_lookup_addon)
+      endif()
     endif()
   endif()
 

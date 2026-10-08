@@ -84,6 +84,73 @@ if(NOT WIN32)
       -undefined dynamic_lookup
     )
   endif()
+
+  # Wasm units linked into an addon rather than an executable, so that
+  # test/wasm/native-lookup.js can drive createModuleFromBytes's native tier
+  # from the hermes binary through hermes_set_wasm_cache. The units' C is
+  # generated at build time: it is a function of this very compiler, and a
+  # checked-in copy would go stale with every codegen change.
+  if(HERMES_ENABLE_WASM AND TARGET shermes AND TARGET wat2wasm)
+    set(NL_SRC ${PROJECT_SOURCE_DIR}/test/wasm/native-lookup)
+    set(NL_OUT ${CMAKE_CURRENT_BINARY_DIR}/native-lookup)
+    set(NL_THROW ${PROJECT_SOURCE_DIR}/test/wasm/native-unit-throws-throwing.js_)
+    add_custom_command(
+      OUTPUT ${NL_OUT}/lkmod.wasm
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${NL_OUT}
+      COMMAND $<TARGET_FILE:wat2wasm> ${NL_SRC}/lkmod.wat_ -o ${NL_OUT}/lkmod.wasm
+      DEPENDS wat2wasm ${NL_SRC}/lkmod.wat_
+      VERBATIM)
+    add_custom_command(
+      OUTPUT ${NL_OUT}/lkmod.c
+      COMMAND $<TARGET_FILE:shermes> -emit-c -exported-unit=lkmod
+              -o ${NL_OUT}/lkmod.c ${NL_OUT}/lkmod.wasm
+      DEPENDS shermes ${NL_OUT}/lkmod.wasm
+      VERBATIM)
+    add_custom_command(
+      OUTPUT ${NL_OUT}/lkmod262.c
+      COMMAND $<TARGET_FILE:shermes> -emit-c -test262 -exported-unit=lkmod262
+              -o ${NL_OUT}/lkmod262.c ${NL_OUT}/lkmod.wasm
+      DEPENDS shermes ${NL_OUT}/lkmod.wasm
+      VERBATIM)
+    add_custom_command(
+      OUTPUT ${NL_OUT}/throwmod.c
+      COMMAND $<TARGET_FILE:shermes> -emit-c -exported-unit=throwmod
+              -o ${NL_OUT}/throwmod.c ${NL_THROW}
+      DEPENDS shermes ${NL_THROW}
+      VERBATIM)
+    add_library(napi_wasm_lookup_addon SHARED
+      ${NL_SRC}/addon.cpp
+      ${NL_OUT}/lkmod.c
+      ${NL_OUT}/lkmod262.c
+      ${NL_OUT}/throwmod.c
+    )
+    # Headers only, like every other test addon: the VM and NAPI symbols
+    # resolve from the host binary at load time.
+    target_include_directories(napi_wasm_lookup_addon PRIVATE
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/include/hermes/napi
+      ${PROJECT_SOURCE_DIR}/API/napi
+      ${PROJECT_BINARY_DIR}/lib/config
+    )
+    # What shermes passes when it compiles generated C itself
+    # (tools/shermes/compile.cpp) -- for the generated units only; the glue
+    # is ordinary C++.
+    set_source_files_properties(
+      ${NL_OUT}/lkmod.c ${NL_OUT}/lkmod262.c ${NL_OUT}/throwmod.c
+      PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-fno-strict-overflow")
+    # C_STANDARD/C_EXTENSIONS reach only the .c sources: gnu11, which the
+    # SH headers need for their zero-length arrays.
+    set_target_properties(napi_wasm_lookup_addon PROPERTIES
+      PREFIX ""
+      SUFFIX ".node"
+      C_STANDARD 11
+      C_EXTENSIONS ON
+    )
+    if(APPLE)
+      target_link_options(napi_wasm_lookup_addon PRIVATE
+        -undefined dynamic_lookup)
+    endif()
+  endif()
 endif()
 
 set(napi_test_sources
