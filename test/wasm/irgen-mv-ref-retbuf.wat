@@ -73,7 +73,7 @@
 ;; supplied -- not into the Uint32Array, which would coerce the closure to NaN
 ;; and then 0, destroying it at the store.
 ;; CHECK: StorePropertyStrictInst %{{[0-9]+}}: number, %{{[0-9]+}}: object, 0: number
-;; CHECK-NEXT: %{{[0-9]+}} = CallBuiltinInst (:any) [HermesBuiltin.wasmRefBufSet]{{.*}}, %[[RECV]]: any, 1: number, %{{[0-9]+}}: any
+;; CHECK-NEXT: %{{[0-9]+}} = CallBuiltinInst (:any) [HermesBuiltin.wasmRefBufSet]{{.*}}, %[[RECV]]: any, 1: number, %{{[0-9]+}}: null|object
 
 ;; --- Load side: the caller allocates, passes, and reads back the same value ---
 
