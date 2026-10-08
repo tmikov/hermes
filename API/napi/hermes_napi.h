@@ -270,6 +270,71 @@ NAPI_EXTERN napi_status NAPI_CDECL hermes_run_bytecode(
     const hermes_bytecode_flags *flags,
     napi_value *result);
 
+//===========================================================================
+// WebAssembly bytecode cache
+//===========================================================================
+
+/// An embedder cache for compiled WebAssembly modules. The first field is the
+/// struct size for ABI-stable extensibility, as with hermes_bytecode_flags
+/// above.
+///
+/// Bytes returned by `lookup` are TRUSTED and are loaded as Hermes bytecode
+/// without validation or content sniffing, exactly like any other precompiled
+/// .hbc the embedder ships.
+///
+/// OWNERSHIP: `lookup` always sets *store_token, on hit and miss alike, and
+/// Hermes calls exactly one of `store` or `discard` for it. The value may be
+/// NULL -- an implementation that tracks the pending operation in `ctx` is
+/// conforming -- so Hermes tracks that a lookup happened rather than testing
+/// the pointer, and a NULL token still gets its completion call.
+struct hermes_wasm_cache_callbacks {
+  size_t struct_size;
+  void *ctx;
+
+  /// Return true on a hit, having set *hbc/*hbc_size and, optionally, the
+  /// finalizer Hermes calls when it is done with the buffer. Return false on
+  /// a miss. Set *store_token either way.
+  ///
+  /// `codegen_config` / `codegen_config_size` describe the compile-time
+  /// configuration that affects generated code -- the bytecode version, the
+  /// Wasm codegen version, and any flag that changes what is emitted. They
+  /// MUST be part of the cache key, or the cache will serve bytecode built
+  /// under different rules.
+  ///
+  /// It is an opaque byte string, not a number, so that a future Hermes can
+  /// widen what it describes without changing this signature -- and so that
+  /// the whole of it reaches the embedder's hash rather than being
+  /// pre-compressed into a word, where two configurations could collide onto
+  /// one entry. Do not parse it. It is valid only for this call.
+  bool (*lookup)(
+      void *ctx,
+      const uint8_t *wasm,
+      size_t wasm_size,
+      const uint8_t *codegen_config,
+      size_t codegen_config_size,
+      const uint8_t **hbc,
+      size_t *hbc_size,
+      void (**finalize_cb)(const uint8_t *, size_t, void *),
+      void **finalize_hint,
+      void **store_token);
+
+  /// Persist freshly compiled bytecode against the identity in `store_token`,
+  /// and release the token.
+  void (*store)(
+      void *ctx, void *store_token, const uint8_t *hbc, size_t hbc_size);
+
+  /// Release `store_token` without persisting anything.
+  void (*discard)(void *ctx, void *store_token);
+};
+
+/// Install \p callbacks on \p env's runtime. Passing NULL removes any
+/// installed cache. Returns napi_invalid_arg if `struct_size` is smaller
+/// than sizeof(hermes_wasm_cache_callbacks) or a required callback is NULL.
+/// A larger `struct_size` (a newer caller) is accepted: only the fields
+/// this header knows about are read.
+NAPI_EXTERN napi_status NAPI_CDECL hermes_set_wasm_cache(
+    napi_env env, const hermes_wasm_cache_callbacks *callbacks);
+
 #ifdef __cplusplus
 }
 #endif
