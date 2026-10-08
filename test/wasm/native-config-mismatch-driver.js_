@@ -1,0 +1,18 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for native-config-mismatch.wat.
+try {
+  WebAssembly.Module.fromNativeUnit('t262mod');
+  print('no throw');
+} catch (e) {
+  print('TypeError: ' + (e instanceof TypeError));
+  print('names the unit: ' + (e.message.indexOf("'t262mod'") >= 0));
+  print(
+      'names both configurations: ' +
+      (e.message.indexOf('t262=1') >= 0 && e.message.indexOf('t262=0') >= 0));
+}

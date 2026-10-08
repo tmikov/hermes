@@ -32,6 +32,7 @@
 #include "hermes/Support/Conversions.h"
 #include "hermes/Support/MemoryBuffer.h"
 #include "hermes/Support/UTF8.h"
+#include "hermes/WasmFrontend/WasmCodegenConfig.h"
 #include "hermes/WasmFrontend/WasmCodegenVersion.h"
 #include "hermes/WasmFrontend/WasmCompile.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
@@ -589,26 +590,9 @@ static ExecutionStatus extractDescriptorsFromModuleInfo(
   return ExecutionStatus::RETURNED;
 }
 
-/// The compile-time configuration that changes generated Wasm code, as a
-/// value the embedder folds into its cache key. Anything added here that
-/// affects codegen MUST be added to this value, or a cache will serve
-/// bytecode built under different rules.
-/// Everything about this build that affects the code the Wasm frontend
-/// generates, as an opaque, self-describing blob for the cache hooks to key
-/// on. An embedder must not have to know what belongs in here: keying on
-/// this alone has to be sufficient, which is why the bytecode version is
-/// included even though a given embedder may already track it.
-///
-/// Legible on purpose. It ends up inside a cache key, and "why did this
-/// miss?" is a question someone will ask of a hexdump.
+/// This runtime's Wasm codegen configuration; see wasmCodegenConfigString().
 static std::string wasmCodegenConfig(Runtime &runtime) {
-  std::string out("hermes-wasm;bc=");
-  out += std::to_string(hbc::BYTECODE_VERSION);
-  out += ";cg=";
-  out += std::to_string(WASM_CODEGEN_VERSION);
-  out += ";t262=";
-  out += runtime.test262 ? '1' : '0';
-  return out;
+  return wasmCodegenConfigString(runtime.test262);
 }
 
 /// How a byte buffer handed to a WebAssembly entry point is interpreted.
@@ -1368,6 +1352,23 @@ wasmModuleFromNativeUnit(void *context, Runtime &runtime) {
   if (!creator) {
     std::string msg = "WebAssembly.Module.fromNativeUnit(): no unit named '";
     msg += name;
+    msg += '\'';
+    return runtime.raiseTypeError(llvh::StringRef(msg));
+  }
+
+  // A unit runs only under the configuration it was generated for: a
+  // mismatched one never executes, by either entry point. There are no bytes
+  // here to fall back to, so a mismatch is an error naming both sides.
+  const SHWasmUnitReg *reg = _sh_wasm_find_unit_reg(creator);
+  const std::string runtimeConfig = wasmCodegenConfig(runtime);
+  const char *unitConfig = reg ? reg->codegen_config : nullptr;
+  if (!unitConfig || runtimeConfig != unitConfig) {
+    std::string msg = "WebAssembly.Module.fromNativeUnit(): unit '";
+    msg += name;
+    msg += "' was compiled for '";
+    msg += unitConfig ? unitConfig : "(no configuration)";
+    msg += "', but this runtime is '";
+    msg += runtimeConfig;
     msg += '\'';
     return runtime.raiseTypeError(llvh::StringRef(msg));
   }

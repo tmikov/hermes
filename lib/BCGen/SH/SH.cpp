@@ -30,6 +30,9 @@
 #include "hermes/Support/HashString.h"
 #include "hermes/Support/UTF8.h"
 #include "hermes/VMLayouts/StackFrameLayout.h"
+#ifdef HERMES_ENABLE_WASM
+#include "hermes/WasmFrontend/WasmCodegenConfig.h"
+#endif
 #include "llvh/ADT/MapVector.h"
 
 #include "llvh/ADT/BitVector.h"
@@ -3273,8 +3276,18 @@ SHPrivateNameCacheEntry *get_private_name_cache(SHUnit *unit) {
       assert(
           !options.emitMain &&
           "a Wasm unit is always an exported unit, never a main");
+      // The configuration this compiler generated the unit under, from its
+      // own constants and this module's settings, so a runtime built
+      // differently -- another bytecode or Wasm codegen version, or a
+      // different -test262 -- refuses the unit rather than running it.
+      std::string codegenConfig = wasmCodegenConfigString(
+          M->getContext().getCodeGenerationSettings().test262);
+      assert(
+          codegenConfig.find_first_of("\"\\") == std::string::npos &&
+          "the configuration is emitted inside a C string literal");
       OS << "\nstatic SHWasmUnitReg s_wasm_reg = {\"" << options.unitName
-         << "\", sh_export_" << options.unitName << ", NULL};\n"
+         << "\", sh_export_" << options.unitName << ", \"" << codegenConfig
+         << "\", NULL};\n"
          // __attribute__((constructor)) is a GCC/Clang extension; MSVC has
          // no equivalent and would need the ".CRT$XCU" section trick
          // instead. Not yet implemented -- see dz/issues/01a0d7fa.

@@ -22,11 +22,15 @@
 
 ;; REQUIRES: shermes, wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
+;; RUN: %shermes -exported-unit=goodmod -emit-c -o %t-good.c %t.wasm
+;; RUN: rm -rf %t.d && mkdir -p %t.d
+;; RUN: sed -n 's/.*sh_export_goodmod, \("[^"]*"\).*/#define GOODMOD_CODEGEN_CONFIG \1/p' \
+;; RUN:     %t-good.c > %t.d/goodmod-config.h
 ;; RUN: %shermes -exported-unit=goodmod -c -o %t-good.o %t.wasm
 ;; RUN: %shermes -exported-unit=throwmod -c -o %t-throw.o \
 ;; RUN:     %S/native-unit-throws-throwing.js_
 ;; RUN: %shermes -o %t.exe \
-;; RUN:     -Wc,%t-good.o,%t-throw.o,%S/native-unit-throws-shim.c \
+;; RUN:     -Wc,-I%t.d,%t-good.o,%t-throw.o,%S/native-unit-throws-shim.c \
 ;; RUN:     %S/native-unit-throws-driver.js_
 ;; RUN: %t.exe | %FileCheck --match-full-lines %s
 

@@ -12,6 +12,8 @@
 ;; REQUIRES: shermes, wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
 ;; RUN: %shermes -exported-unit=mymod -emit-c -o - %t.wasm | %FileCheck %s
+;; RUN: %shermes -test262 -exported-unit=mymod -emit-c -o - %t.wasm \
+;; RUN:     | %FileCheck --check-prefix=T262 %s
 
 (module
   (func (export "nop")))
@@ -19,4 +21,8 @@
 ;; CHECK: static SHWasmUnitReg s_wasm_reg
 ;; CHECK-SAME: "mymod"
 ;; CHECK-SAME: sh_export_mymod
+;; CHECK-SAME: "hermes-wasm;bc={{[0-9]+}};cg={{[0-9]+}};t262=0", NULL};
 ;; CHECK: _sh_wasm_register_unit(&s_wasm_reg)
+
+;; T262: static SHWasmUnitReg s_wasm_reg
+;; T262-SAME: "hermes-wasm;bc={{[0-9]+}};cg={{[0-9]+}};t262=1", NULL};

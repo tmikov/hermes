@@ -69,6 +69,13 @@ std::mutex &wasmUnitsMutex() {
   static std::mutex m;
   return m;
 }
+
+/// NULL equals only NULL; otherwise by contents.
+bool sameCodegenConfig(const char *a, const char *b) {
+  if (!a || !b)
+    return a == b;
+  return std::strcmp(a, b) == 0;
+}
 } // namespace
 
 extern "C" void _sh_wasm_register_unit(SHWasmUnitReg *reg) {
@@ -78,6 +85,19 @@ extern "C" void _sh_wasm_register_unit(SHWasmUnitReg *reg) {
       fprintf(
           stderr,
           "SH: duplicate Wasm unit registration for \"%s\"\n",
+          reg->name);
+      abort();
+    }
+    // One creator, one configuration: the native lookup finds a unit's
+    // registration by its creator, and two answers would make the check it
+    // performs depend on list order.
+    if (p->creator == reg->creator &&
+        !sameCodegenConfig(p->codegen_config, reg->codegen_config)) {
+      fprintf(
+          stderr,
+          "SH: conflicting Wasm unit registrations \"%s\" and \"%s\": one "
+          "creator, two codegen configurations\n",
+          p->name,
           reg->name);
       abort();
     }
@@ -93,6 +113,17 @@ extern "C" SHUnitCreator _sh_wasm_find_unit(const char *name) {
   for (SHWasmUnitReg *p = s_wasmUnits; p; p = p->next) {
     if (std::strcmp(p->name, name) == 0)
       return p->creator;
+  }
+  return nullptr;
+}
+
+extern "C" const SHWasmUnitReg *_sh_wasm_find_unit_reg(SHUnitCreator creator) {
+  // Same lock discipline as _sh_wasm_find_unit: released before the caller
+  // runs anything.
+  std::lock_guard<std::mutex> lock(wasmUnitsMutex());
+  for (SHWasmUnitReg *p = s_wasmUnits; p; p = p->next) {
+    if (p->creator == creator)
+      return p;
   }
   return nullptr;
 }

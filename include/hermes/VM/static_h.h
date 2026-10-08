@@ -75,6 +75,12 @@ typedef struct SHWasmUnitReg {
   const char *name;
   /// The unit creator, i.e. sh_export_<name>.
   SHUnitCreator creator;
+  /// The codegen configuration the unit was compiled under -- the string
+  /// hermes::wasmCodegenConfigString() produces, e.g.
+  /// "hermes-wasm;bc=100;cg=1;t262=0" -- or NULL for a registration that
+  /// states none. A runtime runs the unit only when this equals its own
+  /// configuration; NULL never does.
+  const char *codegen_config;
   /// Next entry. Set by _sh_wasm_register_unit; initialize to NULL.
   struct SHWasmUnitReg *next;
 } SHWasmUnitReg;
@@ -83,14 +89,25 @@ typedef struct SHWasmUnitReg {
 /// constructor: the list head is zero-initialized before any constructor
 /// runs. Aborts if another unit is already registered under the same name --
 /// two independently linked shared libraries can collide where a single
-/// static link cannot. The registry keeps \p reg, so the image it lives in
-/// must stay loaded; there is no unregistration.
+/// static link cannot -- and also if another registration has the same
+/// creator and a different configuration (NULL equals only NULL). A creator
+/// then has exactly one configuration, so "the registration for this creator"
+/// is unambiguous. Two generated objects can never collide this way, because
+/// each defines its own sh_export_<name>. The registry keeps \p reg, so the
+/// image it lives in must stay loaded; there is no unregistration.
 SHERMES_EXPORT void _sh_wasm_register_unit(SHWasmUnitReg *reg);
 
 /// \return the creator registered under \p name, or NULL.
 /// Lookup is not a static-initialization-time operation: a unit whose
 /// constructor has not yet run will not be found. See the design document.
 SHERMES_EXPORT SHUnitCreator _sh_wasm_find_unit(const char *name);
+
+/// \return the registration whose creator is \p creator, or NULL. The node is
+/// the registrant's own static storage and is never unregistered, so it
+/// stays valid after this returns. Not a static-initialization-time
+/// operation, for the reason _sh_wasm_find_unit gives.
+SHERMES_EXPORT const SHWasmUnitReg *_sh_wasm_find_unit_reg(
+    SHUnitCreator creator);
 
 /// SHUnit describes a compilation unit.
 ///
