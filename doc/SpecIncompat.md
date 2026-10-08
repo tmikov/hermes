@@ -45,6 +45,42 @@ Motivation: similar to assigning to `arguments`, this is a very rare case, with 
 
 This is "implementable", but with very low priority.
 
+## `String.prototype.localeCompare` Ignores the Locale
+
+`localeCompare` ignores its `locales` and `options` arguments. Its ordering is the DUCET root collation of Unicode Technical Standard #10, not the host locale's.
+
+```javascript
+// Swedish sorts "z" before "ä"; the root collation does not.
+print("ä".localeCompare("z", "sv")); // Prints -1 in Static Hermes
+```
+
+ECMA-262 permits this: without ECMA-402, `localeCompare` need only be a consistent comparison function. It is still worth knowing about, and it is a change from earlier versions, which forwarded to ICU and so did pick up the host locale on Linux and Windows.
+
+Two further properties of the ordering:
+
+- It is plain DUCET, not the CLDR root that ICU and the platform collators use. CLDR retailors the root in a few places, so some pairs sort differently on Android and Apple, which still use their platform collators.
+- Comparison stops at the tertiary level; there is no identical level. Canonically equivalent strings compare equal, as do strings differing only by a completely ignorable character such as U+0000.
+
+Motivation: locale-tailored collation means shipping CLDR tailoring data and a locale database. The root collation table is about 110 KB, needs no system library, and removes the last dependency on ICU for string comparison.
+
+## `Date.prototype.toLocaleString` and Friends Ignore the Locale
+
+In builds without Intl, and on platforms with no locale-aware date formatter of their own, `Date.prototype.toLocaleString`, `toLocaleDateString` and `toLocaleTimeString` ignore both their `locales` argument and the host locale. They emit a fixed English format instead.
+
+```javascript
+// A user under LC_ALL=tr_TR would expect Turkish month names and a 24-hour
+// clock; Static Hermes prints the same string regardless of locale. (The
+// wall-clock value below still depends on the host timezone, as normal --
+// only the locale is fixed. This example assumes TZ=EST+5.)
+print(new Date(0).toLocaleString()); // "Dec 31, 1969, 7:00:00 PM" under any locale
+```
+
+ECMA-262 permits this: without ECMA-402, these methods need only produce an implementation-defined string. It is still a change from earlier versions, which forwarded to ICU and so did pick up the host locale on Linux and Windows.
+
+Apple and Android are unaffected: they keep formatting through CoreFoundation and `java.text.DateFormat` respectively, both of which are locale-aware.
+
+Motivation: locale-aware date formatting means shipping CLDR data and a locale database, the same tradeoff as `localeCompare` above. The fixed formatter needs no system library and removes another dependency on ICU. Applications that need localized dates should use Intl, specifically `Intl.DateTimeFormat`, which remains the supported route to locale-sensitive output.
+
 ## Full Scoped Function Promotion Semantics in Loose Mode
 
 Static Hermes implements most of the scoped function promotion semantics in loose mode, but some corner cases are not spec compliant yet.
