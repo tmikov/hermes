@@ -271,6 +271,34 @@ TEST_F(NapiTestFixture, WasmCache_LargerStructIsAccepted) {
   EXPECT_EQ(1, cache.lookups);
 }
 
+/// The callbacks struct exactly as a caller compiled before lookup_native
+/// existed owns it: allocated to the old size and not one byte more, so a
+/// read of any field appended since is a heap overflow AddressSanitizer
+/// fails the test for. Installs, and serves a miss/store round trip and an
+/// accepted-hit round trip, with the new slots never read.
+TEST_F(NapiTestFixture, WasmCache_OldSizedStructInstallsAndRoundTrips) {
+  FakeCache cache;
+  hermes_wasm_cache_callbacks full = cache.callbacks();
+  const size_t oldSize = offsetof(hermes_wasm_cache_callbacks, lookup_native);
+  full.struct_size = oldSize;
+  void *oldAlloc = ::malloc(oldSize);
+  ASSERT_NE(nullptr, oldAlloc);
+  std::memcpy(oldAlloc, &full, oldSize);
+  auto *old = static_cast<const hermes_wasm_cache_callbacks *>(oldAlloc);
+
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, old));
+  EXPECT_TRUE(compileAdd(env_)); // miss, compile, store
+  cache.serve = true;
+  EXPECT_TRUE(compileAdd(env_)); // accepted hit, discard
+  EXPECT_EQ(2, cache.lookups);
+  EXPECT_EQ(1, cache.stores);
+  EXPECT_EQ(1, cache.discards);
+  EXPECT_EQ(0, cache.outstandingTokens);
+
+  ASSERT_EQ(napi_ok, hermes_set_wasm_cache(env_, nullptr));
+  ::free(oldAlloc);
+}
+
 #else
 
 // With no Wasm support there is nothing to install hooks into, and

@@ -274,6 +274,13 @@ NAPI_EXTERN napi_status NAPI_CDECL hermes_run_bytecode(
 // WebAssembly bytecode cache
 //===========================================================================
 
+/// An SH compilation unit, opaque to callers. Declared here so an embedder
+/// can hold a creator function pointer without including static_h.h, whose
+/// inline functions depend on the VM layout defines a caller has no way to
+/// match.
+typedef struct SHUnit SHUnit;
+typedef SHUnit *(*SHUnitCreator)(void);
+
 /// An embedder cache for compiled WebAssembly modules. The first field is the
 /// struct size for ABI-stable extensibility, as with hermes_bytecode_flags
 /// above.
@@ -325,22 +332,30 @@ struct hermes_wasm_cache_callbacks {
 
   /// Release `store_token` without persisting anything.
   void (*discard)(void *ctx, void *store_token);
+
+  /// Return the creator of a natively compiled unit for these bytes, or
+  /// NULL. Consulted before `lookup`. Returning a creator does not commit
+  /// Hermes to using it: the unit must be registered and built under this
+  /// runtime's codegen configuration, and a creator that is not is followed
+  /// by the ordinary `lookup`, exactly as if this had returned NULL.
+  /// Optional: NULL here means "no native tier". No store token is involved:
+  /// nothing is stored on this path, so "exactly one of `store` or
+  /// `discard`" is untouched.
+  SHUnitCreator (*lookup_native)(
+      void *ctx, const uint8_t *wasm, size_t wasm_size);
 };
 
 /// Install \p callbacks on \p env's runtime. Passing NULL removes any
 /// installed cache. Returns napi_invalid_arg if `struct_size` is smaller
-/// than sizeof(hermes_wasm_cache_callbacks) or a required callback is NULL.
-/// A larger `struct_size` (a newer caller) is accepted: only the fields
-/// this header knows about are read.
+/// than offsetof(hermes_wasm_cache_callbacks, lookup_native) -- the struct
+/// as it was before its optional fields were appended -- or a required
+/// callback (`lookup`, `store`, `discard`) is NULL. An optional field that
+/// `struct_size` does not cover is treated as NULL and never read, so a
+/// caller compiled against an older header keeps working; a larger
+/// `struct_size` (a newer caller) is accepted too, and only the fields this
+/// header knows about are read.
 NAPI_EXTERN napi_status NAPI_CDECL hermes_set_wasm_cache(
     napi_env env, const hermes_wasm_cache_callbacks *callbacks);
-
-/// An SH compilation unit, opaque to callers. Declared here so an embedder
-/// can hold a creator function pointer without including static_h.h, whose
-/// inline functions depend on the VM layout defines a caller has no way to
-/// match.
-typedef struct SHUnit SHUnit;
-typedef SHUnit *(*SHUnitCreator)(void);
 
 /// Register, initialize and run the compilation unit \p creator produces,
 /// returning its top-level completion value in \p result.

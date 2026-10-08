@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 
+struct SHUnit;
+
 namespace hermes {
 namespace vm {
 
@@ -61,6 +63,17 @@ struct WasmCacheHooks {
 
   /// Release \p storeToken without persisting anything.
   void (*discard)(void *ctx, void *storeToken) = nullptr;
+
+  /// A natively compiled unit's creator, as hermes_napi.h spells
+  /// SHUnitCreator.
+  using NativeUnitCreator = ::SHUnit *(*)();
+
+  /// Optional native tier, consulted before \c lookup: the creator of a
+  /// natively compiled unit for \p wasm, or null. A creator whose unit is not
+  /// registered under this runtime's codegen configuration is treated as
+  /// null. Never involves a store token.
+  NativeUnitCreator (
+      *lookupNative)(void *ctx, const uint8_t *wasm, size_t wasmSize) = nullptr;
 
   bool installed() const {
     return lookup != nullptr && store != nullptr && discard != nullptr;
