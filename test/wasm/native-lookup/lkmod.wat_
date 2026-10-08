@@ -4,7 +4,10 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Compiled into napi_wasm_lookup_addon twice, with and without -test262
-;; (unittests/napi/CMakeLists.txt). Same module as native-lookup.js's bytes.
+;; (unittests/napi/CMakeLists.txt). Deliberately NOT the module whose bytes
+;; native-lookup.js passes: same export, but it subtracts where those bytes
+;; add. lookup_native ignores the bytes, so add(2, 3) printing -1 proves this
+;; linked unit ran, and 5 proves the driver's bytes were compiled instead.
 (module
   (func (export "add") (param i32 i32) (result i32)
-    (i32.add (local.get 0) (local.get 1))))
+    (i32.sub (local.get 0) (local.get 1))))

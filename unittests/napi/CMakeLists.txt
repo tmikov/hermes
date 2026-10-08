@@ -90,7 +90,10 @@ if(NOT WIN32)
   # from the hermes binary through hermes_set_wasm_cache. The units' C is
   # generated at build time: it is a function of this very compiler, and a
   # checked-in copy would go stale with every codegen change.
-  if(HERMES_ENABLE_WASM AND TARGET shermes AND TARGET wat2wasm)
+  # Not when cross-compiling: shermes and wat2wasm are then target binaries
+  # that cannot run here.
+  if(HERMES_ENABLE_WASM AND TARGET shermes AND TARGET wat2wasm
+     AND NOT CMAKE_CROSSCOMPILING)
     set(NL_SRC ${PROJECT_SOURCE_DIR}/test/wasm/native-lookup)
     set(NL_OUT ${CMAKE_CURRENT_BINARY_DIR}/native-lookup)
     set(NL_THROW ${PROJECT_SOURCE_DIR}/test/wasm/native-unit-throws-throwing.js_)
@@ -102,19 +105,19 @@ if(NOT WIN32)
       VERBATIM)
     add_custom_command(
       OUTPUT ${NL_OUT}/lkmod.c
-      COMMAND $<TARGET_FILE:shermes> -emit-c -exported-unit=lkmod
+      COMMAND $<TARGET_FILE:shermes> -w -emit-c -exported-unit=lkmod
               -o ${NL_OUT}/lkmod.c ${NL_OUT}/lkmod.wasm
       DEPENDS shermes ${NL_OUT}/lkmod.wasm
       VERBATIM)
     add_custom_command(
       OUTPUT ${NL_OUT}/lkmod262.c
-      COMMAND $<TARGET_FILE:shermes> -emit-c -test262 -exported-unit=lkmod262
+      COMMAND $<TARGET_FILE:shermes> -w -emit-c -test262 -exported-unit=lkmod262
               -o ${NL_OUT}/lkmod262.c ${NL_OUT}/lkmod.wasm
       DEPENDS shermes ${NL_OUT}/lkmod.wasm
       VERBATIM)
     add_custom_command(
       OUTPUT ${NL_OUT}/throwmod.c
-      COMMAND $<TARGET_FILE:shermes> -emit-c -exported-unit=throwmod
+      COMMAND $<TARGET_FILE:shermes> -w -emit-c -exported-unit=throwmod
               -o ${NL_OUT}/throwmod.c ${NL_THROW}
       DEPENDS shermes ${NL_THROW}
       VERBATIM)
@@ -133,11 +136,13 @@ if(NOT WIN32)
       ${PROJECT_BINARY_DIR}/lib/config
     )
     # What shermes passes when it compiles generated C itself
-    # (tools/shermes/compile.cpp) -- for the generated units only; the glue
-    # is ordinary C++.
+    # (tools/shermes/compile.cpp), plus -w as lib/InternalJavaScript does:
+    # generated C is full of unused labels and variables, which would fail
+    # a HERMES_ENABLE_WERROR build. For the generated units only; the glue
+    # is ordinary C++ and stays fully warned.
     set_source_files_properties(
       ${NL_OUT}/lkmod.c ${NL_OUT}/lkmod262.c ${NL_OUT}/throwmod.c
-      PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-fno-strict-overflow")
+      PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-fno-strict-overflow;-w")
     # C_STANDARD/C_EXTENSIONS reach only the .c sources: gnu11, which the
     # SH headers need for their zero-length arrays.
     set_target_properties(napi_wasm_lookup_addon PROPERTIES
