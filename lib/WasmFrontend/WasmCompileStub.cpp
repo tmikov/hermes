@@ -39,7 +39,8 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     size_t size,
     std::string &errorMsg,
     bool test262,
-    std::string *serializedOut) {
+    std::string *serializedOut,
+    bool verifyIR) {
   errorMsg = "WebAssembly support not compiled";
   return nullptr;
 }

@@ -817,9 +817,11 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
 
     if (!bcProvider) {
       std::string serialized;
+      // A full compile at runtime, so it verifies its IR exactly when code
+      // compiled for eval would.
       auto compiledData = hermes::compileWasmToModuleData(
           data, size, errorMsg, runtime.test262,
-          cacheUsable ? &serialized : nullptr);
+          cacheUsable ? &serialized : nullptr, runtime.verifyEvalIR);
       if (!compiledData) {
         if (tokenOutstanding) {
           hooks.discard(hooks.ctx, storeToken);

@@ -8157,8 +8157,18 @@ void WasmIRGen::onTableGet(uint32_t tableIndex) {
   // argument to an import trampoline, JS -- sees the wrapper instead.
   auto *funcsArr = loadTableFuncs(tableIndex);
   emitTableBoundsCheck(idx, funcsArr);
-  auto *result =
+  Value *result =
       helpers_.emitTableGetSlot(loadTableExported(tableIndex), idx);
+  // A funcref slot reads as an Exported Function or null, and the value is
+  // headed for a funcref local typed Null|Object, which the builtin's Any
+  // fails to satisfy under the IR verifier. Proven, not assumed: a funcref
+  // table's exported array is the internal storage of a genuine
+  // WebAssembly.Table (wasmLinkTable brand-checks an imported one), and
+  // wasmTableSetSlot, which every write goes through, admits nothing else.
+  // An externref slot holds any JS value, so it stays Any.
+  if (tableIsFuncRef(tableIndex))
+    result = builder_.createUnionNarrowTrustedInst(
+        result, Type::createObjectOrNull());
   push(result);
 }
 
@@ -8366,8 +8376,16 @@ void WasmIRGen::onRefFunc(uint32_t funcIndex) {
   // The wrapper, not closureVars_[funcIndex]: the Exported Function is what a
   // funcref value is on the JS side of the boundary. Route 22 of
   // e2e-no-closure-escape.wat is this one, and it goes red for the closure.
-  push(builder_.createLoadFrameInst(
-      parentScopeInst_, exportedFuncVars_[funcIndex]));
+  //
+  // Narrowed to Object: a funcref local is typed Null|Object, and storing the
+  // Variable's Any into it fails the IR verifier. The narrowing is proven,
+  // not assumed: createFunctions() stores every canonical Exported Function
+  // before it emits anything that can run a function body, including the
+  // start function.
+  push(builder_.createUnionNarrowTrustedInst(
+      builder_.createLoadFrameInst(
+          parentScopeInst_, exportedFuncVars_[funcIndex]),
+      Type::createObject()));
 }
 
 void WasmIRGen::onElemDrop(uint32_t segmentIndex) {

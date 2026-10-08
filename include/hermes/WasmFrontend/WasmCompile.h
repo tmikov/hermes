@@ -75,13 +75,18 @@ bool validateWasmBinary(const uint8_t *buffer, size_t size);
 ///   the compiled module. This is what lets an embedder cache the result of
 ///   a compile, and what a build-time producer would use to bake bytecode
 ///   into an artifact. Serialization is skipped entirely when null.
+/// \param verifyIR Whether to run the IR verifier after IR generation,
+///   between every optimization and lowering pass, and on the lowered IR,
+///   as hermesc and shermes do under -verify-ir. A verification failure is
+///   reported as a compile failure.
 /// \returns a WasmModuleData on success, nullptr on failure.
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg,
     bool test262 = false,
-    std::string *serializedOut = nullptr);
+    std::string *serializedOut = nullptr,
+    bool verifyIR = false);
 
 } // namespace hermes
 

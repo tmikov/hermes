@@ -1,0 +1,18 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for native-i32-mul.wat.
+
+var e = new WebAssembly.Instance(
+  WebAssembly.Module.fromNativeUnit('mulmod'), {}).exports;
+print('mul(123456789,987654321): ' + e.mul(123456789, 987654321));
+print('mul(-7,6): ' + e.mul(-7, 6));
+print('mul(0x7fffffff,2): ' + e.mul(0x7fffffff, 2));
+print('fact(10): ' + e.fact(10));
+// 13! overflows i32 and wraps.
+print('fact(13): ' + e.fact(13));
+print('done');
