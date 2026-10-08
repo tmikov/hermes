@@ -10,6 +10,7 @@
 #include "hermes/BCGen/HBC/BCProviderFromSrc.h"
 #include "hermes/BCGen/HBC/HBC.h"
 #include "hermes/IR/IR.h"
+#include "hermes/IR/IRVerifier.h"
 #include "hermes/Optimizer/PassManager/Pipeline.h"
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
@@ -122,13 +123,18 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg,
-    bool test262) {
+    bool test262,
+    bool verifyIR) {
   // Full compilation: validate → parse → IR → optimize → bytecode.
   // compileWasmModule() does the validate + parse + IR part; it is the same
   // implementation `hermesc --wasm` uses, so both entry points agree on what
   // counts as a valid module.
   CodeGenerationSettings codeGenOpts;
   codeGenOpts.test262 = test262;
+  // Makes every pass manager run, optimization and lowering alike, verify the
+  // IR after each pass. A failure is reported through the context's
+  // SourceErrorManager, which is checked after each stage below.
+  codeGenOpts.verifyIRBetweenPasses = verifyIR;
   auto context = std::make_shared<Context>(std::move(codeGenOpts));
   auto M = std::make_shared<Module>(context);
 
@@ -137,16 +143,34 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     return nullptr;
   }
 
+  if (verifyIR) {
+    std::string diag;
+    llvh::raw_string_ostream os(diag);
+    if (!verifyModule(*M, &os)) {
+      errorMsg = "Wasm IRGen produced invalid IR: " + os.str();
+      return nullptr;
+    }
+  }
+
   // Run the optimization pipeline.
   runFullOptimizationPasses(*M);
+  if (context->getSourceErrorManager().getErrorCount()) {
+    errorMsg = "Wasm IR verification failed during optimization";
+    return nullptr;
+  }
 
   // Generate bytecode.
   BytecodeGenerationOptions genOptions{OutputFormatKind::Execute};
   genOptions.optimizationEnabled = true;
   genOptions.staticBuiltinsEnabled = context->getStaticBuiltinOptimization();
+  genOptions.verifyIR = verifyIR;
 
   auto BM = hbc::generateBytecodeModule(
       M.get(), M->getTopLevelFunction(), genOptions);
+  if (context->getSourceErrorManager().getErrorCount()) {
+    errorMsg = "Wasm IR verification failed during lowering";
+    return nullptr;
+  }
   if (!BM) {
     errorMsg = "bytecode generation failed";
     return nullptr;

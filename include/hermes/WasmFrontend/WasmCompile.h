@@ -71,12 +71,17 @@ bool validateWasmBinary(const uint8_t *buffer, size_t size);
 /// \param size Size in bytes.
 /// \param errorMsg [out] Error message on failure.
 /// \param test262 Whether to enable strict bounds checking for spec tests.
+/// \param verifyIR Whether to run the IR verifier after IR generation,
+///   between every optimization and lowering pass, and on the lowered IR,
+///   as hermesc and shermes do under -verify-ir. A verification failure is
+///   reported as a compile failure.
 /// \returns a WasmModuleData on success, nullptr on failure.
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg,
-    bool test262 = false);
+    bool test262 = false,
+    bool verifyIR = false);
 
 } // namespace hermes
 

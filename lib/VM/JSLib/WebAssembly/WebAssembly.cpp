@@ -745,9 +745,10 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
     }
     bcProvider = std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
   } else {
-    // .wasm path — compile to HBC first.
+    // .wasm path — compile to HBC first. This is a full compile at runtime, so
+    // it verifies its IR exactly when code compiled for eval would.
     auto compiledData = hermes::compileWasmToModuleData(
-        data, size, errorMsg, runtime.test262);
+        data, size, errorMsg, runtime.test262, runtime.verifyEvalIR);
     if (!compiledData) {
       return nullptr;
     }
