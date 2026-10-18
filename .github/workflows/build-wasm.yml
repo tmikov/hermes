@@ -1,0 +1,245 @@
+permissions:
+  contents: write
+
+name: Package Multi-Platform Hermes WASM SDK
+
+on:
+  push:
+    branches: [ shermes-wasm ]
+  pull_request:
+    branches: [ shermes-wasm ]
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    name: Build SDK on ${{ matrix.os-name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            os-name: linux-x86_64
+            wasi-asset: x86_64-linux
+          - os: macos-14
+            os-name: macos-arm64
+            wasi-asset: arm64-macos
+
+    env:
+      WASI_SDK_TAG: "wasi-sdk-25"
+      WASI_SDK_VERSION: "25.0"
+      WASI_SDK_PATH: ${{ github.workspace }}/wasi-sdk
+      SDK_DIR: shermes-wasm-sdk-${{ matrix.os-name }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        repository: tmikov/hermes
+        ref: shermes-wasm
+        submodules: recursive
+
+    - name: Install System Dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang git ninja-build python3 tzdata libreadline-dev zip python3-yaml python3-pygments
+
+    - name: Install System Dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install ninja
+        pip3 install pyyaml pygments --break-system-packages || pip3 install pyyaml pygments
+
+    # CMake 4.x removed support for policies this repo sets (CMP0026), so pin 3.x
+    - name: Setup CMake 3.31
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.31.6'
+
+    - name: Setup WASI SDK
+      run: |
+        mkdir -p "$WASI_SDK_PATH"
+        URL="https://github.com/WebAssembly/wasi-sdk/releases/download/${WASI_SDK_TAG}/wasi-sdk-${WASI_SDK_VERSION}-${{ matrix.wasi-asset }}.tar.gz"
+        echo "Downloading $URL"
+        curl -fL "$URL" | tar -xzf - --strip-components=1 -C "$WASI_SDK_PATH"
+        ls "$WASI_SDK_PATH"
+        ls "$WASI_SDK_PATH/share/cmake"
+
+    - name: Configure Host Tools
+      run: |
+        cmake --version
+        cmake -G Ninja -S . -B build-host \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DHERMES_ENABLE_INTL=OFF \
+          -DHERMES_UNICODE_LITE=ON \
+          -DPython3_EXECUTABLE="$(which python3)"
+
+    - name: Compile Host Tools
+      run: |
+        cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
+
+    - name: Verify shermes has no bundled ICU dependency
+      run: |
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          LIBS=$(ldd build-host/bin/shermes)
+        else
+          # libicucore is Apple's system ICU, present on every Mac
+          LIBS=$(otool -L build-host/bin/shermes | grep -v libicucore || true)
+        fi
+        echo "$LIBS"
+        if echo "$LIBS" | grep -qi icu; then
+          echo "ERROR: shermes still links a bundled ICU"
+          exit 1
+        fi
+
+    - name: Configure WebAssembly Libraries
+      run: |
+        cmake -G Ninja -S . -B build-wasm \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DCMAKE_TOOLCHAIN_FILE="$WASI_SDK_PATH/share/cmake/wasi-sdk.cmake" \
+          -DWASI_SDK_PREFIX="$WASI_SDK_PATH" \
+          -DIMPORT_HOST_COMPILERS=build-host/ImportHostCompilers.cmake \
+          -DHERMES_UNICODE_LITE=ON \
+          -DLLVM_ENABLE_THREADS=0 \
+          -DHERMES_ALLOW_BOOST_CONTEXT=0 \
+          -DHERMES_CHECK_NATIVE_STACK=OFF
+
+    - name: Compile WebAssembly Libraries
+      run: |
+        cmake --build build-wasm --target sh-demo --parallel 4
+
+    - name: Bundle SDK
+      run: |
+        mkdir -p "$SDK_DIR"/{bin,lib,include,obj,lib-host,include-host}
+
+        grab() {  # grab <build-dir> <filename> <dest-dir>
+          f=$(find "$1" -name "$2" -type f | head -n 1)
+          if [ -z "$f" ]; then
+            echo "ERROR: $2 not found under $1"
+            find "$1" \( -name "*.a" -o -name "*.so*" -o -name "*.dylib" \) | head -50
+            exit 1
+          fi
+          echo "Found $f"
+          cp "$f" "$3/"
+        }
+
+        # Copy every match (used for host libs, where the exact set isn't known)
+        grab_all() {  # grab_all <build-dir> <pattern> <dest-dir>
+          find "$1" -name "$2" \( -type f -o -type l \) -exec cp -P {} "$3/" \; -print
+        }
+
+        # ---- Shared host tool ----
+        grab build-host shermes "$SDK_DIR/bin"
+
+        # ---- WASM side ----
+        grab build-wasm libshermes_console_a.a "$SDK_DIR/lib"
+        grab build-wasm libhermesvmlean_a.a "$SDK_DIR/lib"
+        grab build-wasm libjsi.a "$SDK_DIR/lib"
+        grab build-wasm cxa.cpp.obj "$SDK_DIR/obj"
+        grab build-wasm libhermesvm-config.h "$SDK_DIR/include"
+        cp -r include/hermes "$SDK_DIR/include/"
+
+        # ---- Native side (host build) ----
+        for pat in 'libshermes_console*' 'libhermesvmlean*' 'libjsi*' 'libhermesvm*'; do
+          grab_all build-host "$pat" "$SDK_DIR/lib-host"
+        done
+        grab build-host libhermesvm-config.h "$SDK_DIR/include-host"
+
+        echo "---- lib-host contents ----"
+        ls -la "$SDK_DIR/lib-host"
+
+        # Wrapper that adds the native library, include, and rpath flags
+        cat > "$SDK_DIR/bin/shermes-native" <<'EOF'
+        #!/usr/bin/env bash
+        # Run shermes in native mode using the libraries bundled in this SDK.
+        SDK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        exec "$SDK/bin/shermes" \
+          -L"$SDK/lib-host" \
+          -Wc,-I"$SDK/include-host" \
+          -Wc,-I"$SDK/include" \
+          -Wl,-rpath,"$SDK/lib-host" \
+          "$@"
+        EOF
+        chmod +x "$SDK_DIR/bin/shermes-native"
+
+        cat > "$SDK_DIR/README.txt" <<'EOF'
+        Static Hermes SDK (native + WebAssembly)
+        ========================================
+
+        Layout:
+          bin/shermes          the compiler
+          bin/shermes-native   wrapper for native builds (adds -L/-I/rpath for this SDK)
+          lib/, obj/, include/ WebAssembly libraries and headers
+          lib-host/, include-host/  native libraries and headers
+
+        A) Compile to a native executable:
+           ./bin/shermes-native -typed nm_shermes.ts -o nm_shermes
+
+        B) Compile to standalone WASM (set WasiSdk to a local wasi-sdk install):
+
+        1. Transpile to C:
+           ./bin/shermes -v -Os -g -fauto-detect-static-builtins -typed -Xenable-tdz -emit-c nm_shermes.ts -o nm_shermes.c
+
+        2. Compile the C code:
+           $WasiSdk/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o
+
+        3. Link into a .wasm executable:
+           $WasiSdk/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp
+        EOF
+
+        tar -czf "$SDK_DIR.tar.gz" "$SDK_DIR/"
+
+    - name: Smoke test native mode
+      continue-on-error: true
+      run: |
+        mkdir -p /tmp/smoke && tar -xzf "$SDK_DIR.tar.gz" -C /tmp/smoke
+        cd /tmp/smoke
+        echo 'console.log("native ok");' > hello.js
+        "./$SDK_DIR/bin/shermes-native" hello.js -o hello
+        ./hello
+
+    - name: Smoke test WASM mode (compile and link only)
+      continue-on-error: true
+      run: |
+        cd /tmp/smoke/"$SDK_DIR"
+        echo 'console.log("wasm ok");' > hello.js
+        ./bin/shermes -Os -emit-c hello.js -o hello.c
+        "$WASI_SDK_PATH/bin/clang" hello.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o hello.o
+        "$WASI_SDK_PATH/bin/clang++" -O3 hello.o ./obj/cxa.cpp.obj -o hello.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp
+        ls -la hello.wasm
+
+    - name: Upload Package Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SDK_DIR }}
+        path: ${{ env.SDK_DIR }}.tar.gz
+        if-no-files-found: error
+
+    - name: Upload debug logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-logs-${{ matrix.os-name }}
+        path: |
+          build-host/CMakeFiles/CMakeConfigureLog.yaml
+          build-host/CMakeFiles/CMakeError.log
+          build-host/CMakeFiles/CMakeOutput.log
+        if-no-files-found: ignore
+
+    - name: Publish to rolling release
+      if: github.event_name != 'pull_request'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: sdk-latest
+        name: Static Hermes WASM SDK (latest build)
+        prerelease: true
+        files: ${{ env.SDK_DIR }}.tar.gz
+        fail_on_unmatched_files: true
