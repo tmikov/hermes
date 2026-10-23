@@ -293,7 +293,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
                                 private IHermesTestHelpers,
                                 private InstallHermesFatalErrorHandler,
                                 private jsi::Instrumentation,
-                                public ISetEventLoopControl
+                                public ISetEventLoopControl,
+                                public IHermesBuiltinBytecode
 #ifdef JSI_UNSTABLE
     ,
                                 public jsi::ISerialization,
@@ -1383,6 +1384,9 @@ class HermesRuntimeImpl final : public HermesRuntime,
       const std::shared_ptr<const jsi::Buffer> &buffer,
       const std::shared_ptr<const jsi::Buffer> &sourceMapBuf,
       const std::string &sourceURL) override;
+  jsi::Value runBuiltinBytecode(
+      const std::shared_ptr<const jsi::Buffer> &bytecode,
+      const std::string &sourceURL) override;
   SHUnitCreator getSHUnitCreator() const override;
   jsi::Value evaluateSHUnit(SHUnitCreator shUnitCreator) override;
   SHRuntime *getSHRuntime() noexcept override;
@@ -1728,7 +1732,9 @@ jsi::ICast *HermesRuntimeImpl::castInterface(const jsi::UUID &interfaceUUID) {
     return static_cast<IHermesTracingHelpers *>(this);
   }
 #endif
-  else if (interfaceUUID == ISetEventLoopControl::uuid) {
+  else if (interfaceUUID == IHermesBuiltinBytecode::uuid) {
+    return static_cast<IHermesBuiltinBytecode *>(this);
+  } else if (interfaceUUID == ISetEventLoopControl::uuid) {
     return static_cast<ISetEventLoopControl *>(this);
   }
   return nullptr;
@@ -2091,6 +2097,32 @@ jsi::Value HermesRuntimeImpl::evaluateJavaScriptWithSourceMap(
   auto res = runtime_.runBytecode(
       std::move(bcErr.first),
       runtimeFlags,
+      sourceURL,
+      vm::Runtime::makeNullHandle<vm::Environment>());
+  checkStatus(res.getStatus());
+  return valueFromHermesValue(*res);
+}
+
+jsi::Value HermesRuntimeImpl::runBuiltinBytecode(
+    const std::shared_ptr<const jsi::Buffer> &bytecode,
+    const std::string &sourceURL) {
+  ExecutionScopeRAII scopeRAII(mutatorScope);
+  auto bcErr = hbc::BCProviderFromBuffer::createBCProviderFromBuffer(
+      std::make_unique<BufferAdapter>(bytecode));
+  if (!bcErr.first) {
+    throw jsi::JSINativeException(
+        "Loading builtin bytecode failed: " + std::move(bcErr.second) +
+        ", sourceURL: " + sourceURL);
+  }
+  // The flags loadAndInstallExtensions uses.
+  vm::RuntimeModuleFlags flags;
+  flags.persistent = true;
+  flags.hidesEpilogue = true;
+  flags.funcsAreBuiltins = true;
+  vm::GCScope gcScope(runtime_);
+  auto res = runtime_.runBytecode(
+      std::move(bcErr.first),
+      flags,
       sourceURL,
       vm::Runtime::makeNullHandle<vm::Environment>());
   checkStatus(res.getStatus());

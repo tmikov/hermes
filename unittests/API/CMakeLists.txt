@@ -9,6 +9,7 @@ set(NO_EH_RTTI_SOURCES
 set(APITestsSources
   APITest.cpp
   APITestFactory.cpp
+  BuiltinBytecodeTest.cpp
   ${HERMES_JSI_DIR}/jsi/test/testlib.cpp
   AsyncDebuggerAPITest.cpp
   CDPAgentTest.cpp

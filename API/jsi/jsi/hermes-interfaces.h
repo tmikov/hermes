@@ -239,4 +239,29 @@ class IHermesSHUnit : public jsi::ICast {
  protected:
   ~IHermesSHUnit() = default;
 };
+
+/// Runs Hermes bytecode that ships with the engine build, such as the Intl
+/// plugin's JS, the way the built-in extensions run: the module is
+/// persistent, its epilogue is hidden, and Function.prototype.toString prints
+/// its functions as [native code].
+class IHermesBuiltinBytecode : public jsi::ICast {
+ public:
+  static constexpr jsi::UUID uuid{
+      0xf76a71a1,
+      0x013c,
+      0x4c83,
+      0x9ec7,
+      0x21ae4ba70c6b};
+
+  /// Run \p bytecode, which must be Hermes bytecode of this engine's bytecode
+  /// version, and return its completion value. The runtime keeps \p bytecode
+  /// alive for as long as it needs it. Throws jsi::JSINativeException if the
+  /// buffer is not loadable bytecode, and jsi::JSError if the code throws.
+  virtual jsi::Value runBuiltinBytecode(
+      const std::shared_ptr<const jsi::Buffer> &bytecode,
+      const std::string &sourceURL) = 0;
+
+ protected:
+  ~IHermesBuiltinBytecode() = default;
+};
 } // namespace facebook::hermes
