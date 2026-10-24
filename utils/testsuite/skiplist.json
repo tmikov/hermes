@@ -687,7 +687,6 @@
     "mjsunit/es6/default-parameters-debug.js",
     "test262/test/language/statements/generators/generator-created-after-decl-inst.js",
     "test262/test/language/expressions/generators/generator-created-after-decl-inst.js",
-    "mjsunit/accessors-no-prototype.js",
     "mjsunit/es6/class-computed-property-names-super.js",
     "mjsunit/es6/classes-maps.js",
     "mjsunit/es6/classes-subclass-builtins.js",
