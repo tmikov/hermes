@@ -154,8 +154,8 @@ fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
         Likely::Add => {
             expander().maximize(&mut loc.id);
             // ICU4X leaves a tag whose language is still "und" unchanged when
-            // its tables have no entry for the script or region ("und" and
-            // "und-150" both give en-Latn-150 in CLDR). UTS 35 Lookup then
+            // its tables have no entry for the script or region (CLDR gives
+            // bare "und" en-Latn-US and "und-150" en-Latn-150). UTS 35 Lookup then
             // ends at the "und" entry, en_Latn_US, whose fields fill whatever
             // is still missing.
             if loc.id.language.is_unknown() {
@@ -167,7 +167,7 @@ fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
         Likely::Remove => {
             expander().minimize(&mut loc.id);
         }
-    };
+    }
     canonicalize(&loc.to_string())
 }
 
@@ -422,6 +422,11 @@ mod tests {
             }
         }
         let cases = [
+            // The "und" entry fills both fields, only the script (region
+            // given), or only the region (script given, no data for it).
+            ("und", "en-Latn-US"),
+            ("und-150", "en-Latn-150"),
+            ("und-Qaaa", "en-Qaaa-US"),
             ("posix", "posix"),
             ("xtg", "xtg"),
             ("aa-x-private", "aa-Latn-ET-x-private"),
