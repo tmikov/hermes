@@ -737,10 +737,10 @@ builds the part objects.
   | Operation | Data |
   |---|---|
   | Add / Remove Likely Subtags | ICU4X `LocaleExpander::new_extended()`; minimizing favors the region, as UTS 35 does |
-  | Calendars | CLDR `calendarPreferenceData`, with CLDR calendar names mapped to BCP 47 types (`gregorian` is `gregory`); `calendar-preferences.txt` |
-  | Hour cycles | CLDR `timeData`, by region or by language and region; `preferred` first, then `allowed`, without repeats; `h`, `hb` and `hB` give `h12`, `H` gives `h23`, `K` gives `h11`, `k` gives `h24`; `hour-cycles.txt` |
+  | Calendars | CLDR `calendarPreferenceData`, with CLDR calendar names mapped to BCP 47 types (`gregorian` is `gregory`); a region with no line gets the `001` line; `calendar-preferences.txt` |
+  | Hour cycles | CLDR `timeData`, by region or by language and region; `preferred` first, then `allowed`, without repeats; `h`, `hb` and `hB` give `h12`, `H` gives `h23`, `K` gives `h11`, `k` gives `h24`; a region with no line gets the `001` line, a language-region key with no line gets nothing; `hour-cycles.txt` |
   | Time zones | CLDR `bcp47/timezone.xml`: a zone belongs to its `region` attribute, or else to the first two letters of its id; `utc`, `gmt`, `unk`, `utce*` and `utcw*` belong to no region; `time-zones-by-region.txt` |
-  | Week information | ICU4X `WeekInformation` |
+  | Week information | ICU4X `WeekInformation`, with its fallback to `001` |
   | Text direction | ICU4X `LocaleDirectionality::new_extended()` on the script |
   | Numbering systems | the numbering system of the found locale's decimal symbols data |
   | Collations | the collation types in `COLLATIONS` (`supported.rs`) that have a tailoring for the found locale or a locale on its fallback chain down to `und` |
@@ -751,12 +751,26 @@ builds the part objects.
   alias is not always the primary identifier (`inccu` lists `Asia/Calcutta`
   first).
 
-  Week data has no "not available" case. CLDR's `001` data applies to every
-  region it does not list, and ICU4X drops region entries equal to `001`,
-  so an exact load cannot tell "no data" from "same as `001`"
-  (`en-US-u-rg-gbzzzz` would get US data instead of GB's). WeekInfoOfLocale
-  therefore takes the region override if there is one, else the region, and
-  loads with fallback.
+  One rule decides whether week, hour-cycle or calendar-preference data
+  "are available" for a region: they always are. CLDR's `001` entry is the
+  default for every region its supplemental data does not list (UTS 35
+  Part 4, "Week Data", "Time Data" and "Calendar Preference Data"), so a
+  region with no entry of its own has the `001` data. A language-region key
+  of the hour-cycle data (`en-AQ`) is not a region: with no line of its own
+  it has no data, and HourCyclesOfLocale goes on to the region. The draft's
+  last-resort `"h23"` and `"gregory"` steps stay, reached only if `001`
+  itself had no data (or, for calendars, if none of the calendars found is
+  available).
+
+  - Calendars and hour cycles: `calendarPreferences` and `hourCycles` give
+    the `001` line for a region with no line of its own. So
+    `th-TH-u-rg-aqzzzz` gets `001`'s calendars, not Thailand's, and
+    `en-AQ` gets `001`'s hour cycles.
+  - Week data: ICU4X drops region entries equal to `001`, so an exact load
+    could not tell "no data" from "same as `001`" (`en-US-u-rg-gbzzzz`
+    would get US data instead of GB's). WeekInfoOfLocale therefore takes
+    the region override if there is one, else the region, and loads with
+    fallback.
 
   `Intl.Locale.[[LocaleExtensionKeys]]` is « "ca", "co", "fw", "hc", "kf",
   "kn", "nu" ». Phase 2's Collator supports `kf` and `kn`, so the draft's

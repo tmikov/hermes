@@ -43,18 +43,33 @@ fn hour_cycle_table() -> &'static Table {
     T.get_or_init(|| parse(include_str!("../data/hour-cycles.txt")))
 }
 
+/// The line of `table` for `key`, or, when `key` is a region code with no
+/// line of its own, the `001` line: CLDR's `001` entry is the default for
+/// every region it does not list (UTS 35 Part 4, "Calendar Preference Data"
+/// and "Time Data"), as for week data. A `<language>-<region>` key with no
+/// line gets `None`, so the caller can try the region next.
+fn region_line<'a>(table: &'a Table, key: &str) -> Option<&'a [String]> {
+    if let Some(line) = table.get(key) {
+        return Some(line);
+    }
+    key.parse::<Region>().ok()?;
+    table.get("001").map(Vec::as_slice)
+}
+
 /// The calendar types CLDR prefers in `region` (an uppercase region code or
-/// `001`), most preferred first, as BCP 47 types; `None` when CLDR has no
-/// line for it (`001` applies then; the caller falls back).
+/// `001`), most preferred first, as BCP 47 types. A region with no line of
+/// its own gets the `001` line; `None` only if `region` does not parse as a
+/// region.
 pub fn calendar_preferences(region: &str) -> Option<&'static [String]> {
-    calendar_table().get(region).map(Vec::as_slice)
+    region_line(calendar_table(), region)
 }
 
 /// The hour cycles (`h11`, `h12`, `h23`, `h24`) CLDR gives for `key`, a
-/// region or `<language>-<region>`, preferred first; `None` when CLDR has no
-/// line for it.
+/// region or `<language>-<region>`, preferred first. A region with no line
+/// of its own gets the `001` line; `None` for a `<language>-<region>` key
+/// with no line, or a key that is neither.
 pub fn hour_cycles(key: &str) -> Option<&'static [String]> {
-    hour_cycle_table().get(key).map(Vec::as_slice)
+    region_line(hour_cycle_table(), key)
 }
 
 fn time_zone_table() -> &'static Table {
@@ -169,7 +184,12 @@ mod tests {
         );
         assert_eq!(f("001"), Some(vec!["gregory"]));
         assert_eq!(f("TW"), Some(vec!["gregory", "roc", "chinese"]));
-        assert_eq!(f("US"), None);
+        // Regions with no line of their own get the 001 line.
+        for region in ["US", "AQ", "ZZ", "QO", "419", "GB"] {
+            assert_eq!(f(region), Some(vec!["gregory"]), "{region}");
+        }
+        assert_eq!(f("english"), None);
+        assert_eq!(f(""), None);
     }
 
     #[test]
@@ -181,7 +201,16 @@ mod tests {
         assert_eq!(f("DE"), Some(vec!["h23", "h12"]));
         assert_eq!(f("001"), Some(vec!["h23", "h12"]));
         assert_eq!(f("en-001"), Some(vec!["h12", "h23"]));
-        assert_eq!(f("AQ"), None);
+        // Regions with no line of their own get the 001 line, but a
+        // language-region key with no line gets None, so the caller tries
+        // the region next.
+        for region in ["AQ", "ZZ", "QO", "QM"] {
+            assert_eq!(f(region), Some(vec!["h23", "h12"]), "{region}");
+        }
+        assert_eq!(f("en-AQ"), None);
+        assert_eq!(f("en-US"), None);
+        assert_eq!(f("english"), None);
+        assert_eq!(f(""), None);
     }
 
     /// Check the keys and value lists every table must have.
@@ -222,6 +251,9 @@ mod tests {
         check_table("hour cycle", hour_cycle_table(), |v| {
             ["h11", "h12", "h23", "h24"].contains(&v)
         });
+        // Every region without a line of its own gets the 001 line.
+        assert!(calendar_table().contains_key("001"));
+        assert!(hour_cycle_table().contains_key("001"));
     }
 
     #[test]

@@ -12,8 +12,10 @@
 // October 24, 2026 ("Abstract Operations for Locale Objects") and the
 // CLDR 48.2 data of intl/core/data and ICU4X; the comments name the step
 // that gives it. RegionPreference turns a missing region into the likely
-// one, or "001", which has calendar, hour-cycle and week data, so the
-// last-resort fallbacks apply less often than one might think. No method
+// one, or "001". CLDR's "001" calendar, hour-cycle and week data are the
+// default for every region it does not list (UTS 35 Part 4), so those data
+// are available for every region and the last-resort fallbacks of
+// CalendarsOfLocale and HourCyclesOfLocale are not reached. No method
 // throws.
 
 /// JSON for v, or "undefined".
@@ -52,8 +54,8 @@ function run(tag) {
 // "und": Add Likely Subtags gives en-Latn-US, so RegionPreference's region
 // is "US" (step 2.b.iii). "und" is an available locale.
 run('und');
-// CalendarsOfLocale: neither "und-US" nor "US" has a calendarPreferenceData
-// line (step 6), so step 10 gives "gregory".
+// CalendarsOfLocale step 6.c: "US" has no calendarPreferenceData line of
+// its own, so it gets the "001" line.
 // CHECK: und getCalendars ["gregory"]
 // CollationsOfLocale step 3: "und" is found; the root's tailorings.
 // CHECK-NEXT: und getCollations ["emoji","eor"]
@@ -89,12 +91,13 @@ run('zxx');
 // "qaa-Qaaa-QM": private-use language, script and region; the region is
 // "QM" (RegionPreference step 1).
 run('qaa-Qaaa-QM');
-// CalendarsOfLocale: no "QM" line (step 6), so step 10.
+// CalendarsOfLocale step 6.c: "QM" gets the "001" line.
 // CHECK-NEXT: qaa-Qaaa-QM getCalendars ["gregory"]
 // CollationsOfLocale step 4: no prefix is available.
 // CHECK-NEXT: qaa-Qaaa-QM getCollations ["emoji","eor"]
-// HourCyclesOfLocale: no "qaa-QM" or "QM" line (step 6), so step 7.
-// CHECK-NEXT: qaa-Qaaa-QM getHourCycles ["h23"]
+// HourCyclesOfLocale: no "qaa-QM" line (step 6.b), and "QM" gets the "001"
+// line (step 6.c).
+// CHECK-NEXT: qaa-Qaaa-QM getHourCycles ["h23","h12"]
 // NumberingSystemsOfLocale step 4.
 // CHECK-NEXT: qaa-Qaaa-QM getNumberingSystems ["latn"]
 // TimeZonesOfLocale step 3: "QM" has no zones.
@@ -117,12 +120,13 @@ run('posix');
 // "en-ZZ": the unknown region is the tag's own, so RegionPreference keeps it
 // (step 1). "en" is the available prefix, and Add Likely Subtags gives Latn.
 run('en-ZZ');
-// CalendarsOfLocale: no "ZZ" line (step 6), so step 10.
+// CalendarsOfLocale step 6.c: "ZZ" gets the "001" line.
 // CHECK-NEXT: en-ZZ getCalendars ["gregory"]
 // CollationsOfLocale step 3: "en", whose tailorings are the root's.
 // CHECK-NEXT: en-ZZ getCollations ["emoji","eor"]
-// HourCyclesOfLocale: no "en-ZZ" or "ZZ" line (step 6), so step 7.
-// CHECK-NEXT: en-ZZ getHourCycles ["h23"]
+// HourCyclesOfLocale: no "en-ZZ" line (step 6.b), and "ZZ" gets the "001"
+// line (step 6.c).
+// CHECK-NEXT: en-ZZ getHourCycles ["h23","h12"]
 // NumberingSystemsOfLocale step 3: "en".
 // CHECK-NEXT: en-ZZ getNumberingSystems ["latn"]
 // TimeZonesOfLocale step 3: "ZZ" has no zones.
@@ -136,20 +140,21 @@ run('en-ZZ');
 run('en-QO');
 // CHECK-NEXT: en-QO getCalendars ["gregory"]
 // CHECK-NEXT: en-QO getCollations ["emoji","eor"]
-// CHECK-NEXT: en-QO getHourCycles ["h23"]
+// CHECK-NEXT: en-QO getHourCycles ["h23","h12"]
 // CHECK-NEXT: en-QO getNumberingSystems ["latn"]
 // CHECK-NEXT: en-QO getTimeZones []
 // CHECK-NEXT: en-QO getTextInfo direction=ltr
 // CHECK-NEXT: en-QO getWeekInfo {"firstDay":1,"weekend":[6,7]}
 
-// "en-AQ": neither "en-AQ" nor "AQ" has calendar or time data, but "AQ" has
-// time zones.
+// "en-AQ": neither "en-AQ" nor "AQ" has a calendar or time data line of its
+// own, but "AQ" has time zones.
 run('en-AQ');
-// CalendarsOfLocale step 10.
+// CalendarsOfLocale step 6.c: "AQ" gets the "001" line.
 // CHECK-NEXT: en-AQ getCalendars ["gregory"]
 // CHECK-NEXT: en-AQ getCollations ["emoji","eor"]
-// HourCyclesOfLocale step 7.
-// CHECK-NEXT: en-AQ getHourCycles ["h23"]
+// HourCyclesOfLocale: no "en-AQ" line (step 6.b), and "AQ" gets the "001"
+// line (step 6.c).
+// CHECK-NEXT: en-AQ getHourCycles ["h23","h12"]
 // CHECK-NEXT: en-AQ getNumberingSystems ["latn"]
 // TimeZonesOfLocale step 3: the "AQ" zones, sorted.
 // CHECK-NEXT: en-AQ getTimeZones ["Antarctica/Casey","Antarctica/Davis","Antarctica/DumontDUrville","Antarctica/Mawson","Antarctica/McMurdo","Antarctica/Palmer","Antarctica/Rothera","Antarctica/Syowa","Antarctica/Troll","Antarctica/Vostok"]
@@ -160,7 +165,7 @@ run('en-AQ');
 // "es-419": the region is "419" (RegionPreference step 1), and "es-419" is
 // an available locale.
 run('es-419');
-// CalendarsOfLocale: no "419" line (step 6), so step 10.
+// CalendarsOfLocale step 6.c: "419" gets the "001" line.
 // CHECK-NEXT: es-419 getCalendars ["gregory"]
 // CollationsOfLocale step 3: "es-419", whose fallback chain reaches "es"
 // and its "trad" tailoring.
@@ -179,7 +184,7 @@ run('es-419');
 // override (CanonicalUnicodeSubdivision step 3), and the region is the
 // likely "US" (RegionPreference step 2.b.iii).
 run('en-u-rg-xx');
-// CalendarsOfLocale step 10.
+// CalendarsOfLocale step 6.c: "US" gets the "001" line.
 // CHECK-NEXT: en-u-rg-xx getCalendars ["gregory"]
 // CollationsOfLocale step 3: "en", once the extension is removed.
 // CHECK-NEXT: en-u-rg-xx getCollations ["emoji","eor"]

@@ -505,6 +505,10 @@ function CalendarsOfLocale(loc) {
     //    i. Set calendarsInUse to a List of unique calendar types in common
     //       use for date and time formatting in region region, sorted by
     //       descending preference of use in region.
+    //    CLDR's "001" line is the default for every region it does not list
+    //    (UTS 35 Part 4, "Calendar Preference Data"), so data for every
+    //    region are available: the helper gives the "001" line for a region
+    //    with no line of its own.
     if (calendarsInUse.length === 0) {
       var preferences = native.calendarPreferences(region);
       if (preferences !== undefined) calendarsInUse = splitSpaces(preferences);
@@ -528,7 +532,9 @@ function CalendarsOfLocale(loc) {
       listPush(list, canonical);
     }
   }
-  // 10. If list is empty, set list to « "gregory" ».
+  // 10. If list is empty, set list to « "gregory" ». Step 6.c always finds
+  //     data, so this is reached only if none of those calendars is
+  //     available, or if "001" had none.
   if (list.length === 0) list = ['gregory'];
   // 11. Return CreateArrayFromList(list).
   return CreateArrayFromList(list);
@@ -615,12 +621,18 @@ function HourCyclesOfLocale(loc) {
     //       ("h11", "h12") or the 24-hour format ("h23", "h24"), sorted in
     //       descending preference of those in common use for date and time
     //       formatting in region region.
+    //    CLDR's "001" line is the default for every region it does not list
+    //    (UTS 35 Part 4, "Time Data"), so time data for every region are
+    //    available: the helper gives the "001" line for a region with no
+    //    line of its own. A language-region key gets only its own line, so
+    //    step 6.b falls through to here.
     if (hourCycles.length === 0) {
       data = native.hourCycles(region);
       if (data !== undefined) hourCycles = splitSpaces(data);
     }
   }
-  // 7. If hourCycles is empty, set hourCycles to « "h23" ».
+  // 7. If hourCycles is empty, set hourCycles to « "h23" ». Step 6.c always
+  //    finds data, so this is reached only if "001" had none.
   if (hourCycles.length === 0) hourCycles = ['h23'];
   // 8. Return CreateArrayFromList(hourCycles).
   return CreateArrayFromList(hourCycles);

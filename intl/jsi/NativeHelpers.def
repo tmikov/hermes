@@ -23,11 +23,13 @@ HERMES_INTL_HELPER(addLikelySubtags, Utf8, Utf8)
 // (tag) The Remove Likely Subtags result for a canonical tag, itself a
 // canonical tag. Throws if tag does not parse.
 HERMES_INTL_HELPER(removeLikelySubtags, Utf8, Utf8)
-// (region) The CLDR calendar types for a region ("US", "001"), preferred
-// first, space-separated, or undefined if CLDR has no line for it.
+// (region) The CLDR calendar types for a region ("TH", "001"), preferred
+// first, space-separated. A region with no line of its own ("US") gets the
+// "001" line; undefined only if region is not a region code.
 HERMES_INTL_HELPER(calendarPreferences, OptUtf8, Utf8)
 // (key) The CLDR hour cycles for a region or "language-REGION" key, preferred
-// first, space-separated, or undefined if CLDR has no line for it.
+// first, space-separated. A region with no line of its own ("AQ") gets the
+// "001" line; undefined for a "language-REGION" key with no line.
 HERMES_INTL_HELPER(hourCycles, OptUtf8, Utf8)
 // (region) The primary IANA ids of the region's time zones ("JP", "PS"),
 // sorted, space-separated; empty for a region with none.

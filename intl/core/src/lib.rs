@@ -194,8 +194,9 @@ pub unsafe extern "C" fn hi_time_zone_canonicalize(
 }
 
 /// The CLDR calendar preferences of a region: when it returns true, `out` is
-/// the calendar types, most preferred first, separated by single spaces.
-/// False if CLDR has no line for `region`.
+/// the calendar types, most preferred first, separated by single spaces. A
+/// region with no line of its own gets the `001` line; false only if
+/// `region` does not parse as a region.
 ///
 /// # Safety
 /// As hi_locale_canonicalize.
@@ -215,7 +216,9 @@ pub unsafe extern "C" fn hi_locale_calendar_preferences(
 
 /// The CLDR hour cycles of a region or `<language>-<region>` key: when it
 /// returns true, `out` is the hour cycles, preferred first, separated by
-/// single spaces. False if CLDR has no line for `key`.
+/// single spaces. A region with no line of its own gets the `001` line;
+/// false for a `<language>-<region>` key with no line, or a key that is
+/// neither.
 ///
 /// # Safety
 /// As hi_locale_canonicalize.
@@ -403,10 +406,12 @@ mod tests {
     fn ffi_looks_up_calendars_and_hour_cycles() {
         let c = hi_locale_calendar_preferences;
         assert_eq!(call(c, "TH").as_deref(), Some("buddhist gregory"));
-        assert_eq!(call(c, "US"), None);
+        assert_eq!(call(c, "US").as_deref(), Some("gregory"));
+        assert_eq!(call(c, "english"), None);
         let h = hi_locale_hour_cycles;
         assert_eq!(call(h, "en-001").as_deref(), Some("h12 h23"));
-        assert_eq!(call(h, "AQ"), None);
+        assert_eq!(call(h, "AQ").as_deref(), Some("h23 h12"));
+        assert_eq!(call(h, "en-AQ"), None);
         assert_eq!(call(h, ""), None);
     }
 

@@ -52,13 +52,15 @@ inline std::optional<std::string> removeLikelySubtags(std::string_view tag) {
 }
 
 /// The CLDR calendar types for \p region, preferred first, space-separated;
-/// nullopt if CLDR has no line for it.
+/// the "001" ones for a region with no line of its own, nullopt only if
+/// \p region is not a region code.
 inline std::optional<std::string> calendarPreferences(std::string_view region) {
   return callOptional(hi_locale_calendar_preferences, region);
 }
 
 /// The CLDR hour cycles for \p key (a region or language-region), preferred
-/// first, space-separated; nullopt if CLDR has no line for it.
+/// first, space-separated; the "001" ones for a region with no line of its
+/// own, nullopt for a language-region key with no line.
 inline std::optional<std::string> hourCycles(std::string_view key) {
   return callOptional(hi_locale_hour_cycles, key);
 }

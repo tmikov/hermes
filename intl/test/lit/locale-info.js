@@ -21,7 +21,8 @@ function run(name, tag) {
 }
 
 // CalendarsOfLocale: the region's calendarPreferenceData line, filtered
-// through the available calendars ("islamic" and "islamic-rgsa" are not).
+// through the available calendars ("islamic" and "islamic-rgsa" are not). A
+// region with no line of its own ("US") gets the "001" line.
 run('getCalendars', 'en-US');
 // CHECK: getCalendars en-US ["gregory"]
 run('getCalendars', 'th');
@@ -33,6 +34,10 @@ run('getCalendars', 'fa-IR');
 // The region override comes before the region.
 run('getCalendars', 'en-US-u-rg-thzzzz');
 // CHECK-NEXT: getCalendars en-US-u-rg-thzzzz ["buddhist","gregory"]
+// "AQ" has no line of its own but gets the "001" one, so the region
+// override wins over "TH", as it does for week data.
+run('getCalendars', 'th-TH-u-rg-aqzzzz');
+// CHECK-NEXT: getCalendars th-TH-u-rg-aqzzzz ["gregory"]
 run('getCalendars', 'ja-u-ca-japanese');
 // CHECK-NEXT: getCalendars ja-u-ca-japanese ["japanese"]
 
@@ -50,6 +55,9 @@ run('getHourCycles', 'en-u-hc-h24');
 // CHECK-NEXT: getHourCycles en-u-hc-h24 ["h24"]
 run('getHourCycles', 'en-US-u-rg-jpzzzz');
 // CHECK-NEXT: getHourCycles en-US-u-rg-jpzzzz ["h23","h11","h12"]
+// No "en-AQ" line, but "AQ" gets the "001" one before "en-US" is tried.
+run('getHourCycles', 'en-US-u-rg-aqzzzz');
+// CHECK-NEXT: getHourCycles en-US-u-rg-aqzzzz ["h23","h12"]
 
 // WeekInfoOfLocale.
 run('getWeekInfo', 'en-US');
@@ -60,6 +68,8 @@ run('getWeekInfo', 'he-IL');
 // CHECK-NEXT: getWeekInfo he-IL {"firstDay":7,"weekend":[5,6]}
 run('getWeekInfo', 'en-US-u-rg-gbzzzz');
 // CHECK-NEXT: getWeekInfo en-US-u-rg-gbzzzz {"firstDay":1,"weekend":[6,7]}
+run('getWeekInfo', 'en-US-u-rg-aqzzzz');
+// CHECK-NEXT: getWeekInfo en-US-u-rg-aqzzzz {"firstDay":1,"weekend":[6,7]}
 run('getWeekInfo', 'en-US-u-fw-mon');
 // CHECK-NEXT: getWeekInfo en-US-u-fw-mon {"firstDay":1,"weekend":[6,7]}
 // The option "0" is "sun". en-GB's own first day is Monday.
