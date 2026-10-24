@@ -468,23 +468,6 @@ function MakeLocaleRecord(tag, options, localeExtensionKeys) {
   return result;
 }
 
-/// ECMA-262 CreateDataPropertyOrThrow(o, key, v) on an ordinary extensible
-/// object with no property key, which cannot throw: a writable, enumerable,
-/// configurable data property, defined without consulting setters on the
-/// prototype chain.
-function createDataProperty(o, key, v) {
-  // 1. Perform ! DefinePropertyOrThrow(o, key, PropertyDescriptor {
-  //    [[Value]]: v, [[Writable]]: true, [[Enumerable]]: true,
-  //    [[Configurable]]: true }).
-  ObjectDefineProperty(o, key, {
-    __proto__: null,
-    value: v,
-    writable: true,
-    enumerable: true,
-    configurable: true,
-  });
-}
-
 // CalendarsOfLocale ( loc )
 function CalendarsOfLocale(loc) {
   // 1. If loc.[[Calendar]] is not undefined, then
@@ -914,7 +897,7 @@ function installLocale(intl) {
       // 4. Let dir be TextDirectionOfLocale(loc).
       var dir = TextDirectionOfLocale(loc);
       // 5. Perform ! CreateDataPropertyOrThrow(info, "direction", dir).
-      createDataProperty(info, 'direction', dir);
+      CreateDataPropertyOrThrow(info, 'direction', dir);
       // 6. Return info.
       return info;
     },
@@ -939,10 +922,10 @@ function installLocale(intl) {
       var weekInfo = WeekInfoOfLocale(loc);
       // 5. Perform ! CreateDataPropertyOrThrow(info, "firstDay",
       //    weekInfo.[[FirstDay]]).
-      createDataProperty(info, 'firstDay', weekInfo.firstDay);
+      CreateDataPropertyOrThrow(info, 'firstDay', weekInfo.firstDay);
       // 6. Perform ! CreateDataPropertyOrThrow(info, "weekend",
       //    CreateArrayFromList(weekInfo.[[Weekend]])).
-      createDataProperty(
+      CreateDataPropertyOrThrow(
         info,
         'weekend',
         CreateArrayFromList(weekInfo.weekend),

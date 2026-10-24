@@ -15,6 +15,7 @@
 // Everything this test uses after the tampering is captured first.
 var define = Object.defineProperty;
 var ObjectPrototype = Object.prototype;
+var getPrototypeOf = Object.getPrototypeOf;
 var OriginalRangeError = RangeError;
 var OriginalTypeError = TypeError;
 var stringify = JSON.stringify;
@@ -30,6 +31,7 @@ var localeMaximize = LocalePrototype.maximize;
 var localeMinimize = LocalePrototype.minimize;
 var localeGetCalendars = LocalePrototype.getCalendars;
 var localeGetWeekInfo = LocalePrototype.getWeekInfo;
+var localeGetTextInfo = LocalePrototype.getTextInfo;
 /// The original getter of Intl.Locale.prototype[name].
 function getter(name) {
   return Object.getOwnPropertyDescriptor(LocalePrototype, name).get;
@@ -83,13 +85,14 @@ LocalePrototype.toString = boom;
 LocalePrototype.maximize = boom;
 LocalePrototype.getCalendars = boom;
 LocalePrototype.getWeekInfo = boom;
+LocalePrototype.getTextInfo = boom;
 // The names of the fields of the constructor's internal records, of
-// RegionPreference's, and of the objects getWeekInfo returns. "region" is
-// left out: the constructor reads it from its options object, which
-// inherits from Object.prototype, as the spec requires.
+// RegionPreference's, and of the objects getWeekInfo and getTextInfo
+// return. "region" is left out: the constructor reads it from its options
+// object, which inherits from Object.prototype, as the spec requires.
 var recordFields = [
   'locale', 'calendar', 'ca', 'key', 'base', 'extension', 'regionOverride',
-  'firstDay', 'weekend',
+  'firstDay', 'weekend', 'direction',
 ];
 for (var k = 0; k < recordFields.length; k++)
   define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
@@ -170,9 +173,12 @@ print(thrown(() => apply(localeToString, {}, []), OriginalTypeError));
 
 // The information methods, through the references captured before the
 // tampering: RegionPreference, the native lists, AvailableCalendars and
-// the result object use none of the replaced intrinsics.
+// the result objects use none of the replaced intrinsics.
 print(stringify(apply(localeGetCalendars, new OriginalLocale('th'), [])));
 // CHECK-NEXT: ["buddhist","gregory"]
 var week = apply(localeGetWeekInfo, new OriginalLocale('en-US'), []);
 print(stringify(week.weekend), week.firstDay);
 // CHECK-NEXT: [6,7] 7
+var text = apply(localeGetTextInfo, new OriginalLocale('ar'), []);
+print(text.direction, getPrototypeOf(text) === ObjectPrototype);
+// CHECK-NEXT: rtl true

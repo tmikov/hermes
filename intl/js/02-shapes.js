@@ -10,17 +10,31 @@
 // of October 22, 2026; ECMA-262 section numbers are from the
 // https://tc39.es/ecma262/ draft of the same date.
 
-/// Append v to list without consulting Array.prototype: a[i] = v would run
-/// a setter for i on Array.prototype.
-function listPush(list, v) {
-  // 1. Perform ! CreateDataPropertyOrThrow(list, list.length, v).
-  ObjectDefineProperty(list, list.length, {
+// ECMA-262 7.3.6 CreateDataPropertyOrThrow ( obj, propertyKey, value ). The
+// property is defined, not assigned, so setters on the prototype chain are
+// not consulted.
+function CreateDataPropertyOrThrow(obj, propertyKey, value) {
+  // 1. Let success be ? CreateDataProperty(obj, propertyKey, value), which
+  //    is ? obj.[[DefineOwnProperty]](propertyKey, PropertyDescriptor {
+  //    [[Value]]: value, [[Writable]]: true, [[Enumerable]]: true,
+  //    [[Configurable]]: true }) (7.3.5).
+  // 2. If success is false, throw a TypeError exception.
+  //    The captured Object.defineProperty performs both steps.
+  ObjectDefineProperty(obj, propertyKey, {
     __proto__: null,
-    value: v,
+    value: value,
     writable: true,
     enumerable: true,
     configurable: true,
   });
+  // 3. Return unused.
+}
+
+/// Append v to list without consulting Array.prototype: a[i] = v would run
+/// a setter for i on Array.prototype.
+function listPush(list, v) {
+  // 1. Perform ! CreateDataPropertyOrThrow(list, list.length, v).
+  CreateDataPropertyOrThrow(list, list.length, v);
 }
 
 /// Whether list contains v. Lists hold strings and integers, so === is the
