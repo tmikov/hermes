@@ -14,20 +14,77 @@ use icu::locale::{LanguageIdentifier, Locale, LocaleCanonicalizer, LocaleExpande
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
+/// Whether `subtag` is a unicode_language_subtag that ICU4X does not accept:
+/// ICU4X languages are 2-3 letters, UTS 35 also allows 5-8 ("posix").
+fn is_long_language(subtag: &str) -> bool {
+    (5..=8).contains(&subtag.len()) && subtag.bytes().all(|b| b.is_ascii_alphabetic())
+}
+
+/// The byte range in `tag` of the subtag after its -t- singleton (the
+/// language of its tlang, or its first tfield key), if it has a -t-
+/// extension. A one-character subtag after the language is always a
+/// singleton until -x-, after which every subtag is private use.
+fn transform_first_subtag(tag: &str) -> Option<std::ops::Range<usize>> {
+    let mut start = 0;
+    let mut after_t = false;
+    for (i, subtag) in tag.split('-').enumerate() {
+        let range = start..start + subtag.len();
+        start = range.end + 1;
+        if after_t {
+            return Some(range);
+        }
+        if i > 0 && subtag.eq_ignore_ascii_case("x") {
+            return None;
+        }
+        after_t = i > 0 && subtag.eq_ignore_ascii_case("t");
+    }
+    None
+}
+
+/// `tag` with the language of its -t- tlang replaced by "und" if that
+/// language has 5-8 letters (`tlang` begins with a unicode_language_subtag),
+/// and the replaced language, lowercased.
+fn hide_long_tlang(tag: &str) -> (String, Option<String>) {
+    match transform_first_subtag(tag) {
+        Some(r) if is_long_language(&tag[r.clone()]) => (
+            format!("{}und{}", &tag[..r.start], &tag[r.end..]),
+            Some(tag[r].to_ascii_lowercase()),
+        ),
+        _ => (tag.to_owned(), None),
+    }
+}
+
+/// Undo hide_long_tlang on `out`, a canonical tag made from the hidden tag,
+/// whose tlang language is still the "und" placeholder: no alias has a 5-8
+/// letter language, and none turns "und" into another language. None if
+/// the placeholder is gone, which would be a bug.
+fn restore_long_tlang(out: String, tlang: Option<String>) -> Option<String> {
+    let Some(language) = tlang else {
+        return Some(out);
+    };
+    let r = transform_first_subtag(&out)?;
+    if &out[r.clone()] != "und" {
+        return None;
+    }
+    Some(format!("{}{}{}", &out[..r.start], language, &out[r.end..]))
+}
+
 /// IsWellFormedLanguageTag + CanonicalizeUnicodeLocaleId. `None` = RangeError.
 pub fn canonicalize(tag: &str) -> Option<String> {
     // ICU4X also accepts `_` separators; BCP 47 does not.
     if tag.is_empty() || tag.contains('_') {
         return None;
     }
-    // ICU4X languages are 2-3 letters; unicode_language_subtag also allows 5-8 ("posix").
-    // Canonicalize the rest under "und" and put the language back (no aliases exist for them).
+    // ICU4X does not accept a 5-8 letter language ("posix"), as the language
+    // or as the language of a -t- tlang. Canonicalize the tag with "und" in
+    // its place and put the language back (no aliases exist for them).
+    let (tag, tlang) = hide_long_tlang(tag);
     let first = tag.split('-').next().unwrap_or("");
-    let long = (5..=8).contains(&first.len()) && first.bytes().all(|b| b.is_ascii_alphabetic());
+    let long = is_long_language(first);
     let parsed = if long {
         format!("und{}", &tag[first.len()..])
     } else {
-        tag.to_owned()
+        tag.clone()
     };
     let mut loc: Locale = parsed.parse().ok()?;
     static C: OnceLock<LocaleCanonicalizer> = OnceLock::new();
@@ -35,11 +92,12 @@ pub fn canonicalize(tag: &str) -> Option<String> {
         .canonicalize(&mut loc);
     canonicalize_keyword_values(&mut loc);
     let out = loc.to_string();
-    Some(if long {
+    let out = if long {
         format!("{}{}", first.to_ascii_lowercase(), &out[3..])
     } else {
         out
-    })
+    };
+    restore_long_tlang(out, tlang)
 }
 
 /// The -u- value half of UTS 35 canonicalization, which ICU4X leaves out: "yes" means "true",
@@ -149,7 +207,10 @@ fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
     if first.len() >= 5 {
         return Some(canonical);
     }
-    let mut loc: Locale = canonical.parse().ok()?;
+    // ICU4X does not parse a 5-8 letter tlang language either; only the
+    // language identifier changes here, so hide it and put it back.
+    let (hidden, tlang) = hide_long_tlang(&canonical);
+    let mut loc: Locale = hidden.parse().ok()?;
     // UTS 35 Remove Likely Subtags starts with Add Likely Subtags (its step
     // 1), so both directions maximize first. ICU4X's minimize maximizes
     // again, which leaves a maximal tag unchanged.
@@ -157,7 +218,7 @@ fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
     if let Likely::Remove = dir {
         expander().minimize(&mut loc.id);
     }
-    canonicalize(&loc.to_string())
+    restore_long_tlang(canonicalize(&loc.to_string())?, tlang)
 }
 
 /// UTS 35 Add Likely Subtags on a language identifier.
@@ -289,7 +350,8 @@ pub fn likely_script(tag: &str) -> Option<Script> {
 /// longest available prefix of it, or None. Because the extensions are gone
 /// there is no dangling singleton to drop while truncating.
 pub fn lookup(tag: &str) -> Option<String> {
-    let loc: Locale = tag.parse().ok()?;
+    // Only the language identifier is used, so a long tlang may be hidden.
+    let loc: Locale = hide_long_tlang(tag).0.parse().ok()?;
     let mut prefix = loc.id.to_string();
     loop {
         if is_available(&prefix) {
@@ -452,6 +514,15 @@ mod tests {
             ("de-u-kf", "de-Latn-DE-u-kf"),
             ("sl-rozaj-biske-1994", "sl-Latn-SI-1994-biske-rozaj"),
             ("en-t-ja-x-a", "en-Latn-US-t-ja-x-a"),
+            // A 5-8 letter tlang language is kept, and the rest of the tlang
+            // is canonicalized as for any tlang.
+            ("en-t-posix", "en-Latn-US-t-posix"),
+            ("fr-t-abcdefgh-latn", "fr-Latn-FR-t-abcdefgh-latn"),
+            (
+                "de-t-Posix-AT-m0-names",
+                "de-Latn-DE-t-posix-at-m0-prprname",
+            ),
+            ("posix-t-abcdef", "posix-t-abcdef"),
         ];
         for (tag, want) in cases {
             assert_eq!(add_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
@@ -483,6 +554,9 @@ mod tests {
             // "und" entry fills what ICU4X's tables leave missing.
             ("und-Qaaa", "en-Qaaa"),
             ("und-150-u-ca-buddhist", "en-150-u-ca-buddhist"),
+            ("en-Latn-US-t-posix", "en-t-posix"),
+            ("fr-t-abcdefgh-latn", "fr-t-abcdefgh-latn"),
+            ("de-Latn-DE-t-posix-AT", "de-t-posix-at"),
         ];
         for (tag, want) in cases {
             assert_eq!(remove_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
@@ -527,6 +601,24 @@ mod tests {
             Some("de-u-co-phonebk-ka-shifted")
         );
         assert_eq!(canonicalize("posix").as_deref(), Some("posix"));
+        // A tlang starts with a unicode_language_subtag, which may have 5-8
+        // letters; the rest of the tlang is canonicalized as ICU4X does
+        // for any tlang (lowercased, variants sorted).
+        for (tag, want) in [
+            ("en-t-posix", "en-t-posix"),
+            ("fr-t-abcdefgh-latn", "fr-t-abcdefgh-latn"),
+            ("EN-T-POSIX-US", "en-t-posix-us"),
+            (
+                "en-t-abcde-Latn-heploc-hepburn",
+                "en-t-abcde-latn-hepburn-heploc",
+            ),
+            ("en-t-abcde-us-m0-names", "en-t-abcde-us-m0-prprname"),
+            ("posix-t-abcdef-fonipa", "posix-t-abcdef-fonipa"),
+            ("en-u-ca-gregory-t-posix", "en-t-posix-u-ca-gregory"),
+            ("en-x-t-abcdef", "en-x-t-abcdef"),
+        ] {
+            assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
+        }
     }
 
     #[test]
@@ -541,6 +633,8 @@ mod tests {
             "a",
             "en--US",
             "toolonglanguage",
+            "en-t-abcd",
+            "en-t-abcdefghi",
         ] {
             assert_eq!(canonicalize(bad), None, "{bad:?}");
         }
@@ -586,6 +680,7 @@ mod tests {
         assert_eq!(lookup("zh-Hant-US").as_deref(), Some("zh-Hant"));
         assert_eq!(lookup("de-CH-1996").as_deref(), Some("de-CH"));
         assert_eq!(lookup("tlh-US"), None);
+        assert_eq!(lookup("en-US-t-posix").as_deref(), Some("en-US"));
     }
 
     #[test]

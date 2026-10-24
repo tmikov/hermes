@@ -64,3 +64,19 @@ for (var j = 0; j < roundTrips.length; j++) {
 // CHECK-NEXT: sl-rozaj-biske-1994 sl-Latn-SI-1994-biske-rozaj sl-1994-biske-rozaj
 // CHECK-NEXT: en-t-ja-x-a en-Latn-US-t-ja-x-a en-t-ja-x-a
 // CHECK-NEXT: posix-u-ca-buddhist posix-u-ca-buddhist posix-u-ca-buddhist
+
+// A -t- tlang starts with a unicode_language_subtag, which may have 5-8
+// letters, like the language of the tag itself.
+var longTlangs = ['en-t-posix', 'fr-t-abcdefgh-latn', 'de-t-Posix-AT'];
+for (var k = 0; k < longTlangs.length; k++) {
+  var tl = new Intl.Locale(longTlangs[k]);
+  print(
+    Intl.getCanonicalLocales(longTlangs[k])[0],
+    tl.toString(),
+    tl.maximize().toString(),
+    tl.minimize().toString(),
+  );
+}
+// CHECK-NEXT: en-t-posix en-t-posix en-Latn-US-t-posix en-t-posix
+// CHECK-NEXT: fr-t-abcdefgh-latn fr-t-abcdefgh-latn fr-Latn-FR-t-abcdefgh-latn fr-t-abcdefgh-latn
+// CHECK-NEXT: de-t-posix-at de-t-posix-at de-Latn-DE-t-posix-at de-t-posix-at
