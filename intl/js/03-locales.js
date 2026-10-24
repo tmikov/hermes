@@ -10,19 +10,6 @@
 // canonical (they come from CanonicalizeLocaleList), so Unicode extensions
 // are lowercase and their keywords sorted.
 
-/// Whether o has an [[InitializedLocale]] slot. Phase 1 (Intl.Locale)
-/// replaces this; until then no object has one.
-function isLocaleObject(o) {
-  // 1. Return false: Intl.Locale does not exist yet.
-  return false;
-}
-
-/// o.[[Locale]] for an Intl.Locale object; defined by Phase 1.
-function localeObjectTag(o) {
-  // 1. Unreachable until Phase 1: isLocaleObject is always false.
-  throw new _TypeError('Intl.Locale is not implemented');
-}
-
 /// Whether the [[AvailableLocales]] list (ECMA-402 9.1) contains tag, a
 /// canonical tag without a Unicode extension. The native list includes the
 /// fallbacks 9.1 requires.

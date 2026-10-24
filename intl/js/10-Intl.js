@@ -114,11 +114,13 @@ function installIntl() {
       return CreateArrayFromList(list);
     },
   });
-  // 2. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
+  // 2. ECMA-402 8.2: the constructor properties of Intl.
+  installLocale(IntlObject);
+  // 3. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
   //    "Intl", { [[Writable]]: false, [[Enumerable]]: false,
   //    [[Configurable]]: true }.
   setToStringTag(IntlObject, 'Intl');
-  // 3. ECMA-402 8: Intl is the initial value of the "Intl" property of the
+  // 4. ECMA-402 8: Intl is the initial value of the "Intl" property of the
   //    global object. ECMA-262 18 gives such data properties the attributes
   //    { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }.
   ObjectDefineProperty(global, 'Intl', {

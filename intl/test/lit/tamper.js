@@ -19,6 +19,15 @@ var OriginalRangeError = RangeError;
 var OriginalTypeError = TypeError;
 var stringify = JSON.stringify;
 var aSymbol = Symbol('x');
+// The test's own calls of a replaced Locale method would reach the
+// replacement, so it calls the original methods through Reflect.apply,
+// captured here, like everything else.
+var apply = Reflect.apply;
+var OriginalLocale = Intl.Locale;
+var LocalePrototype = Intl.Locale.prototype;
+var localeToString = LocalePrototype.toString;
+var localeMaximize = LocalePrototype.maximize;
+var localeMinimize = LocalePrototype.minimize;
 var boom = function () {
   throw new Error('tampered intrinsic was used');
 };
@@ -37,6 +46,7 @@ Array.prototype[Symbol.iterator] = boom;
 Array.prototype.push = boom;
 Array.prototype.indexOf = boom;
 Array.prototype.slice = boom;
+Array.prototype.sort = boom;
 String.prototype[Symbol.split] = boom;
 // A string separator does not consult @@split (ECMA-262 22.1.3.23 step 3),
 // so split itself is replaced too.
@@ -58,12 +68,20 @@ Math.trunc = boom;
 Number.isFinite = boom;
 define(Array.prototype, '0', {__proto__: null, set: boom, get: boom, configurable: true});
 define(Array.prototype, '1', {__proto__: null, set: boom, get: boom, configurable: true});
+LocalePrototype.toString = boom;
+LocalePrototype.maximize = boom;
+// The names of the fields of the constructor's internal records.
+var recordFields = ['locale', 'calendar', 'ca', 'key', 'base', 'extension'];
+for (var k = 0; k < recordFields.length; k++)
+  define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
 // The globals 01-intrinsics.js captures from, except String, whose
 // functions are replaced above.
 var globals = ['Object', 'RangeError', 'TypeError', 'Reflect', 'Math', 'Number', 'Symbol', 'Array'];
 for (var i = 0; i < globals.length; i++) globalThis[globals[i]] = boom;
+Intl.Locale = boom;
 // Last, because it breaks ordinary descriptor objects: accessors for the
-// descriptor fields on Object.prototype.
+// descriptor fields on Object.prototype. "value" is also a field of the
+// records of Unicode extension keywords.
 var fields = ['value', 'writable', 'enumerable', 'configurable', 'get', 'set'];
 for (var j = 0; j < fields.length; j++)
   define(ObjectPrototype, fields[j], {__proto__: null, get: boom, configurable: true});
@@ -91,4 +109,23 @@ print(thrown(() => Intl.getCanonicalLocales(['']), OriginalRangeError));
 print(thrown(() => Intl.getCanonicalLocales([null]), OriginalTypeError));
 // CHECK-NEXT: ok
 print(thrown(() => Intl.getCanonicalLocales(null), OriginalTypeError));
+// CHECK-NEXT: ok
+
+// Intl.Locale, constructed through the reference captured before the
+// tampering: the constructor, toString, maximize and minimize use neither
+// the replaced global nor the replaced methods.
+var locale = new OriginalLocale('en-latn-us', {region: 'GB', calendar: 'gregory'});
+print(apply(localeToString, locale, []));
+// CHECK-NEXT: en-Latn-GB-u-ca-gregory
+print(apply(localeToString, apply(localeMaximize, locale, []), []));
+// CHECK-NEXT: en-Latn-GB-u-ca-gregory
+print(apply(localeToString, apply(localeMinimize, locale, []), []));
+// CHECK-NEXT: en-GB-u-ca-gregory
+// CanonicalizeLocaleList reads the tag from the slot, not through the
+// replaced toString.
+print(stringify(Intl.getCanonicalLocales([locale])));
+// CHECK-NEXT: ["en-Latn-GB-u-ca-gregory"]
+print(thrown(() => new OriginalLocale('en', {region: '1234'}), OriginalRangeError));
+// CHECK-NEXT: ok
+print(thrown(() => apply(localeToString, {}, []), OriginalTypeError));
 // CHECK-NEXT: ok

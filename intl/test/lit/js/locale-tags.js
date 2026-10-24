@@ -16,6 +16,13 @@
 // Stubs for what the plugin's C++ passes to setup. The canonicalizer
 // lowercases the language, uppercases regions and title-cases scripts.
 var hostDefaults = {locales: ['en-US'], timeZone: 'UTC'};
+// 20-Locale.js is not included, so no object is an Intl.Locale.
+function isLocaleObject(o) {
+  return false;
+}
+function localeObjectTag(o) {
+  throw new Error('not a Locale');
+}
 var native = {
   canonicalizeLocale: function (tag) {
     var parts = tag.split('-');
