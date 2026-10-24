@@ -360,10 +360,13 @@ For each new runtime:
       `proc_pidpath` on macOS. For a library, `dladdr` returns the path
       given to `dlopen`, which may be relative to a directory the host has
       since left. So on Linux and Android the library's file is the one
-      `/proc/self/maps` shows mapped at the address of a loader function
-      (with the kernel's `\012` escapes undone, and a ` (deleted)` suffix
-      dropped: the directory is still the one to search), and `dladdr`'s
-      path is the fallback when that lookup fails. On Apple platforms
+      `/proc/self/maps` shows mapped at the address of a loader function.
+      The kernel escapes only a newline there (as `\012`) and appends
+      ` (deleted)` to a removed file, so the text is ambiguous: of its two
+      readings (with `\012` as a newline, and as written) the one whose
+      `stat` device and inode are the mapping's is taken. When neither
+      matches (a removed file, a mapping without an inode, an unreadable
+      `/proc`), `dladdr`'s path is the fallback. On Apple platforms
       `dladdr`'s path is used: dyld records an absolute path for a library
       loaded from disk (it asks the kernel for the path of the file it
       opened, with `F_GETPATH`). The directory is taken after `realpath`.

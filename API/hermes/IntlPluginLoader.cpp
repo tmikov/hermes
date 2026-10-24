@@ -31,6 +31,9 @@
 #define HERMES_INTL_DYNAMIC_LOADING 1
 #include <dlfcn.h>
 #include <sys/stat.h>
+#if defined(__linux__)
+#include <sys/sysmacros.h>
+#endif
 #include <unistd.h>
 #include <cerrno>
 #if defined(__linux__)
@@ -289,24 +292,14 @@ void promoteHermesImage() {
 }
 
 #if defined(__linux__)
-/// Whether \p path names an existing file.
-bool fileExists(const std::string &path) {
-  struct stat st;
-  return ::stat(path.c_str(), &st) == 0;
-}
-
-/// \p path, a pathname as /proc/self/maps shows it, with the kernel's
-/// escapes undone: it writes a newline in a name as "\012", a backslash and
-/// three octal digits.
+/// \p path, a pathname as /proc/self/maps shows it, with the kernel's one
+/// escape undone: it writes a newline in a name as "\012". Nothing else is
+/// escaped, a backslash included, so any other "\ooo" is literal.
 std::string unescapeMapsPath(const std::string &path) {
-  auto octal = [&](size_t i) { return path[i] >= '0' && path[i] <= '7'; };
   std::string out;
   for (size_t i = 0; i < path.size(); ++i) {
-    if (path[i] == '\\' && i + 3 < path.size() && octal(i + 1) &&
-        octal(i + 2) && octal(i + 3)) {
-      out += static_cast<char>(
-          (path[i + 1] - '0') * 64 + (path[i + 2] - '0') * 8 +
-          (path[i + 3] - '0'));
+    if (path.compare(i, 4, "\\012") == 0) {
+      out += '\n';
       i += 3;
     } else {
       out += path[i];
@@ -316,30 +309,40 @@ std::string unescapeMapsPath(const std::string &path) {
 }
 
 /// The absolute path of the file mapped at \p addr, from /proc/self/maps;
-/// empty if it cannot be read or has no such file. Unlike dladdr's
-/// dli_fname, which is the path the library was loaded by and may be
-/// relative to a directory the process has since left, the kernel's path
+/// empty if it cannot be read or the file cannot be identified. Unlike
+/// dladdr's dli_fname, which is the path the library was loaded by and may
+/// be relative to a directory the process has since left, the kernel's path
 /// is absolute.
+///
+/// The pathname is ambiguous: a "\012" in it is a newline or those four
+/// characters, and a removed file gets " (deleted)" appended. So a candidate
+/// reading is accepted only if stat finds the mapping's own file there, by
+/// device and inode; otherwise the result is empty and the caller falls
+/// back to dladdr.
 std::string mappedFilePath(const void *addr) {
   FILE *maps = std::fopen("/proc/self/maps", "re");
   if (!maps)
     return "";
   auto a = reinterpret_cast<uintptr_t>(addr);
   std::string path;
+  unsigned devMajor = 0, devMinor = 0;
+  unsigned long long inode = 0;
   char *line = nullptr;
   size_t capacity = 0;
   ssize_t length;
   while ((length = ::getline(&line, &capacity, maps)) > 0) {
-    // start-end perms offset dev inode [pathname]
-    unsigned long long start, end, inode;
+    // start-end perms offset major:minor inode [pathname]
+    unsigned long long start, end;
     int pathStart = 0;
     if (std::sscanf(
             line,
-            "%llx-%llx %*s %*s %*s %llu %n",
+            "%llx-%llx %*s %*s %x:%x %llu %n",
             &start,
             &end,
+            &devMajor,
+            &devMinor,
             &inode,
-            &pathStart) < 3 ||
+            &pathStart) < 5 ||
         a < start || a >= end)
       continue;
     if (inode != 0 && pathStart > 0 && line[pathStart] == '/') {
@@ -353,21 +356,12 @@ std::string mappedFilePath(const void *addr) {
   std::fclose(maps);
   if (path.empty())
     return "";
-  // A backslash is not escaped, so "\012" may also be four characters of
-  // the name: take the reading that exists.
-  std::string unescaped = unescapeMapsPath(path);
-  if (fileExists(unescaped))
-    return unescaped;
-  if (fileExists(path))
-    return path;
-  // The kernel appends " (deleted)" to the name of a file that was removed
-  // after it was mapped. The directory it was in is still the one to search.
-  constexpr const char kDeleted[] = " (deleted)";
-  constexpr size_t kDeletedLength = sizeof(kDeleted) - 1;
-  if (unescaped.size() > kDeletedLength &&
-      unescaped.compare(
-          unescaped.size() - kDeletedLength, kDeletedLength, kDeleted) == 0)
-    return unescaped.substr(0, unescaped.size() - kDeletedLength);
+  for (const std::string &candidate : {unescapeMapsPath(path), path}) {
+    struct stat st;
+    if (::stat(candidate.c_str(), &st) == 0 && major(st.st_dev) == devMajor &&
+        minor(st.st_dev) == devMinor && st.st_ino == inode)
+      return candidate;
+  }
   return "";
 }
 #endif
@@ -378,10 +372,10 @@ std::string mappedFilePath(const void *addr) {
 /// For a library, dladdr reports the path given to dlopen, which a host may
 /// have given relative to a directory it has since left. On Linux and
 /// Android the library's file is found in /proc/self/maps by the address of
-/// this function instead, and dladdr's path is the fallback. On Apple
-/// platforms dyld records an absolute path for a library loaded from disk
-/// (it asks the kernel for the path of the file it opened), so dladdr's
-/// path is used.
+/// this function instead, identified by its device and inode, and dladdr's
+/// path is the fallback. On Apple platforms dyld records an absolute path
+/// for a library loaded from disk (it asks the kernel for the path of the
+/// file it opened), so dladdr's path is used.
 std::string hermesDirectory() {
   Dl_info info;
   std::string path;
