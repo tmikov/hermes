@@ -233,6 +233,107 @@ pub unsafe extern "C" fn hi_locale_hour_cycles(
     )
 }
 
+/// The primary IANA ids of a region's time zones: when it returns true,
+/// `out` is the ids, sorted, separated by single spaces (empty for a region
+/// with none). False only if `region` is not UTF-8.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_time_zones_of_region(
+    region: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(region, len).map(|r| info::time_zones_of_region(r).join(" ")),
+    )
+}
+
+/// The week data of a region: when it returns true, `out` is the ISO number
+/// of the first day of the week (Monday 1 to Sunday 7), then the weekend days
+/// ascending, separated by single spaces. False if `region` is not a region
+/// code.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_week_info(
+    region: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(region, len)
+            .and_then(info::week_info)
+            .map(|(first, weekend)| {
+                let mut s = first.to_string();
+                for day in weekend {
+                    s.push(' ');
+                    s.push_str(&day.to_string());
+                }
+                s
+            }),
+    )
+}
+
+/// The writing direction of a script: when it returns true, `out` is `ltr`
+/// or `rtl`. False if the script is unknown or `script` is not a script
+/// code.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_script_direction(
+    script: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(script, len)
+            .and_then(info::script_direction)
+            .map(str::to_owned),
+    )
+}
+
+/// The numbering system of a locale's decimal data. False if `locale` does
+/// not parse or has no data.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_default_numbering_system(
+    locale: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(locale, len).and_then(info::default_numbering_system),
+    )
+}
+
+/// The collation types a locale has tailorings for: when it returns true,
+/// `out` is the types, sorted, separated by single spaces. False only if
+/// `locale` is not UTF-8.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_collations(
+    locale: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(locale, len).map(|l| info::collations_of_locale(l).join(" ")),
+    )
+}
+
 /// Which list hi_supported_values returns.
 #[repr(C)]
 pub enum HiValueKind {
@@ -309,6 +410,26 @@ mod tests {
     }
 
     #[test]
+    fn ffi_looks_up_locale_information() {
+        let tz = hi_locale_time_zones_of_region;
+        assert_eq!(call(tz, "PS").as_deref(), Some("Asia/Gaza Asia/Hebron"));
+        assert_eq!(call(tz, "419").as_deref(), Some(""));
+        let w = hi_locale_week_info;
+        assert_eq!(call(w, "US").as_deref(), Some("7 6 7"));
+        assert_eq!(call(w, "IN").as_deref(), Some("7 7"));
+        assert_eq!(call(w, "english"), None);
+        let d = hi_locale_script_direction;
+        assert_eq!(call(d, "Arab").as_deref(), Some("rtl"));
+        assert_eq!(call(d, "Latn").as_deref(), Some("ltr"));
+        assert_eq!(call(d, "Zyyy"), None);
+        let n = hi_locale_default_numbering_system;
+        assert_eq!(call(n, "fa").as_deref(), Some("arabext"));
+        assert_eq!(call(n, "not a tag"), None);
+        let c = hi_locale_collations;
+        assert_eq!(call(c, "de").as_deref(), Some("emoji eor phonebk"));
+    }
+
+    #[test]
     fn ffi_rejects_invalid_utf8() {
         let bad = [0xffu8, 0xfe];
         let mut out = HiString::EMPTY;
@@ -316,5 +437,16 @@ mod tests {
         assert!(out.data.is_null());
         assert!(!unsafe { hi_locale_hour_cycles(bad.as_ptr(), bad.len(), &mut out) });
         assert!(out.data.is_null());
+        let fs: [unsafe extern "C" fn(*const u8, usize, *mut HiString) -> bool; 5] = [
+            hi_locale_time_zones_of_region,
+            hi_locale_week_info,
+            hi_locale_script_direction,
+            hi_locale_default_numbering_system,
+            hi_locale_collations,
+        ];
+        for f in fs {
+            assert!(!unsafe { f(bad.as_ptr(), bad.len(), &mut out) });
+            assert!(out.data.is_null());
+        }
     }
 }

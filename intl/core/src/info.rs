@@ -7,7 +7,11 @@
 //! methods (ECMA-402, "Intl.Locale.prototype.getCalendars" and friends).
 //! Each table is a generated file in core/data, parsed once on first use.
 
-use crate::supported::data_lines;
+use crate::host::time_zone_canonicalize;
+use crate::supported::{data_lines, tailoring_loads, COLLATIONS};
+use icu::calendar::week::{WeekInformation, WeekPreferences};
+use icu::locale::subtags::{Region, Script};
+use icu::locale::{Direction, Locale, LocaleDirectionality};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
@@ -51,6 +55,93 @@ pub fn calendar_preferences(region: &str) -> Option<&'static [String]> {
 /// line for it.
 pub fn hour_cycles(key: &str) -> Option<&'static [String]> {
     hour_cycle_table().get(key).map(Vec::as_slice)
+}
+
+fn time_zone_table() -> &'static Table {
+    static T: OnceLock<Table> = OnceLock::new();
+    T.get_or_init(|| parse(include_str!("../data/time-zones-by-region.txt")))
+}
+
+/// The primary IANA ids of the time zones of `region` (an uppercase region
+/// code), sorted, without repeats; empty for a region with no zones. CLDR's
+/// ids are mapped to primary ids like `Intl.supportedValuesOf("timeZone")`.
+pub fn time_zones_of_region(region: &str) -> Vec<String> {
+    let Some(ids) = time_zone_table().get(region) else {
+        return Vec::new();
+    };
+    let mut zones: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            time_zone_canonicalize(id)
+                .unwrap_or_else(|| panic!("data file: unknown time zone {id}"))
+        })
+        .collect();
+    zones.sort();
+    zones.dedup();
+    zones
+}
+
+/// The week data of `region` (an uppercase region code or `001`) as ISO
+/// weekday numbers (Monday 1 to Sunday 7): the first day of the week, and the
+/// weekend days ascending. ICU4X falls back to `001` for a region it has no
+/// entry for, so a region always has data; None only if `region` is not a
+/// region code.
+pub fn week_info(region: &str) -> Option<(u8, Vec<u8>)> {
+    let region: Region = region.parse().ok()?;
+    let mut locale = Locale::UNKNOWN;
+    locale.id.region = Some(region);
+    let info = WeekInformation::try_new(WeekPreferences::from(&locale)).ok()?;
+    let mut weekend: Vec<u8> = info.weekend().map(|d| d as u8).collect();
+    weekend.sort_unstable();
+    Some((info.first_weekday as u8, weekend))
+}
+
+/// The writing direction of `script` (a four-letter script code): `"ltr"`,
+/// `"rtl"`, or None when ICU4X does not know it.
+pub fn script_direction(script: &str) -> Option<&'static str> {
+    static D: OnceLock<LocaleDirectionality> = OnceLock::new();
+    let script: Script = script.parse().ok()?;
+    let mut locale = Locale::UNKNOWN;
+    locale.id.script = Some(script);
+    match D
+        .get_or_init(LocaleDirectionality::new_extended)
+        .get(&locale.id)?
+    {
+        Direction::LeftToRight => Some("ltr"),
+        Direction::RightToLeft => Some("rtl"),
+        _ => None,
+    }
+}
+
+/// The numbering system of `locale`'s decimal symbols data (found with
+/// ICU4X's locale fallback); None if `locale` does not parse.
+pub fn default_numbering_system(locale: &str) -> Option<String> {
+    use icu::decimal::provider::{Baked, DecimalSymbolsV1};
+    use icu_provider::prelude::*;
+    let locale: Locale = locale.parse().ok()?;
+    let data_locale = DataLocale::from(&locale);
+    let response = DataProvider::<DecimalSymbolsV1>::load(
+        &Baked,
+        DataRequest {
+            id: DataIdentifierBorrowed::for_locale(&data_locale),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    Some(response.payload.get().numsys().to_owned())
+}
+
+/// The collation types (among those `Intl.supportedValuesOf("collation")`
+/// lists) that have a tailoring for `locale` or a locale on its fallback
+/// chain, sorted. Empty if `locale` does not parse.
+pub fn collations_of_locale(locale: &str) -> Vec<&'static str> {
+    let mut types: Vec<&'static str> = COLLATIONS
+        .iter()
+        .copied()
+        .filter(|co| tailoring_loads(co, locale))
+        .collect();
+    types.sort_unstable();
+    types
 }
 
 #[cfg(test)]
@@ -131,5 +222,97 @@ mod tests {
         check_table("hour cycle", hour_cycle_table(), |v| {
             ["h11", "h12", "h23", "h24"].contains(&v)
         });
+    }
+
+    #[test]
+    fn time_zones_of_regions() {
+        let f = |r| time_zones_of_region(r);
+        assert_eq!(f("JP"), ["Asia/Tokyo"]);
+        // The primary id, not CLDR's first alias Asia/Calcutta.
+        assert_eq!(f("IN"), ["Asia/Kolkata"]);
+        assert_eq!(f("PS"), ["Asia/Gaza", "Asia/Hebron"]);
+        let us = f("US");
+        for z in [
+            "America/New_York",
+            "America/Los_Angeles",
+            "America/Indiana/Vevay",
+            "Pacific/Honolulu",
+        ] {
+            assert!(us.iter().any(|x| x == z), "{z}");
+        }
+        assert!(!us.iter().any(|z| z.starts_with("Etc/")));
+        assert!(f("419").is_empty());
+        assert!(f("ZZ").is_empty());
+    }
+
+    #[test]
+    fn time_zones_are_supported_primary_ids() {
+        let supported = values(Kind::TimeZone);
+        let table = time_zone_table();
+        assert!(table.len() > 200);
+        for region in table.keys() {
+            let zones = time_zones_of_region(region);
+            assert!(!zones.is_empty(), "{region}");
+            assert!(zones.windows(2).all(|w| w[0] < w[1]), "{region}");
+            for z in zones {
+                assert!(supported.contains(&z), "{region}: {z}");
+            }
+        }
+    }
+
+    #[test]
+    fn week_info_follows_cldr() {
+        let f = |r| week_info(r);
+        assert_eq!(f("US"), Some((7, vec![6, 7])));
+        assert_eq!(f("GB"), Some((1, vec![6, 7])));
+        assert_eq!(f("IL"), Some((7, vec![5, 6])));
+        assert_eq!(f("AF"), Some((6, vec![4, 5])));
+        assert_eq!(f("IN"), Some((7, vec![7])));
+        assert_eq!(f("001"), Some((1, vec![6, 7])));
+        assert_eq!(f("AQ"), Some((1, vec![6, 7])));
+        assert_eq!(f("english"), None);
+        assert_eq!(f(""), None);
+    }
+
+    #[test]
+    fn script_directions() {
+        for s in ["Arab", "Hebr", "Thaa"] {
+            assert_eq!(script_direction(s), Some("rtl"), "{s}");
+        }
+        for s in ["Latn", "Cyrl", "Hani"] {
+            assert_eq!(script_direction(s), Some("ltr"), "{s}");
+        }
+        for s in ["Zyyy", "Qaaa", "en", ""] {
+            assert_eq!(script_direction(s), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn default_numbering_systems() {
+        let f = |l| default_numbering_system(l);
+        assert_eq!(f("en").as_deref(), Some("latn"));
+        assert_eq!(f("ar-EG").as_deref(), Some("arab"));
+        assert_eq!(f("fa").as_deref(), Some("arabext"));
+        assert_eq!(f("hi-IN").as_deref(), Some("latn"));
+        assert_eq!(f("und").as_deref(), Some("latn"));
+        assert_eq!(f("not a tag"), None);
+    }
+
+    #[test]
+    fn collations_of_locales() {
+        let f = |l| collations_of_locale(l);
+        assert_eq!(f("en"), ["emoji", "eor"]);
+        assert_eq!(f("de"), ["emoji", "eor", "phonebk"]);
+        assert_eq!(f("es"), ["emoji", "eor", "trad"]);
+        let zh = f("zh");
+        for c in ["pinyin", "stroke", "zhuyin"] {
+            assert!(zh.contains(&c), "{c}");
+        }
+        for l in ["en", "de", "es", "zh", "ar", "und", "ja", "ko"] {
+            let list = f(l);
+            assert!(!list.contains(&"standard") && !list.contains(&"search"));
+            assert!(list.windows(2).all(|w| w[0] < w[1]), "{l}");
+        }
+        assert!(f("not a tag").is_empty());
     }
 }

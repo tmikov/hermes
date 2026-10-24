@@ -257,9 +257,10 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 ## Updating the CLDR lists
 
 `core/data/currencies.txt`, `core/data/numbering-systems.txt`,
-`core/data/calendar-preferences.txt` and `core/data/hour-cycles.txt` come from
-CLDR. When ICU4X is upgraded, regenerate them from the CLDR release that
-ICU4X version uses, and commit the result:
+`core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt` and
+`core/data/time-zones-by-region.txt` come from CLDR. When ICU4X is upgraded,
+regenerate them from the CLDR release that ICU4X version uses, and commit the
+result:
 
 ```
 python3 intl/core/data/update-cldr-lists.py release-48-2

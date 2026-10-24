@@ -65,7 +65,7 @@ const CALENDAR_ALIASES: &[(&str, &str)] = &[
 /// "searchjl" (ICU4X leaves the search collations out), "phonetic" (CLDR has
 /// it only for "ln", which is not among the compiled locales), or "big5han",
 /// "direct", "gb2312" and "reformed".
-const COLLATIONS: &[&str] = &[
+pub(crate) const COLLATIONS: &[&str] = &[
     "compat", "dict", "emoji", "eor", "phonebk", "pinyin", "stroke", "trad", "unihan", "zhuyin",
 ];
 
@@ -97,6 +97,32 @@ pub fn values(kind: Kind) -> Vec<String> {
     list
 }
 
+/// Whether ICU4X has a collation tailoring of type `co` for `locale`. The
+/// baked provider falls back through the locale's parents (so "emoji" loads
+/// for every locale, from "und"), never across collation types. False if
+/// `locale` does not parse.
+pub(crate) fn tailoring_loads(co: &str, locale: &str) -> bool {
+    use icu::collator::provider::{Baked, CollationTailoringV1};
+    use icu_provider::prelude::*;
+    let Ok(loc) = locale.parse::<icu::locale::Locale>() else {
+        return false;
+    };
+    let Ok(attributes) = DataMarkerAttributes::try_from_str(co) else {
+        return false;
+    };
+    let data_locale = DataLocale::from(&loc);
+    let mut metadata = DataRequestMetadata::default();
+    metadata.silent = true;
+    DataProvider::<CollationTailoringV1>::load(
+        &Baked,
+        DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(attributes, &data_locale),
+            metadata,
+        },
+    )
+    .is_ok()
+}
+
 /// The non-comment lines of a data file.
 pub(crate) fn data_lines(text: &str) -> Vec<String> {
     text.lines()
@@ -109,7 +135,6 @@ pub(crate) fn data_lines(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu_provider::prelude::*;
 
     #[test]
     fn calendars_are_icu4x_calendars() {
@@ -144,29 +169,6 @@ mod tests {
         // Every listed value is a canonical calendar or one of the aliases.
         assert_eq!(list.len(), CALENDARS.len() + CALENDAR_ALIASES.len());
         assert!(list.windows(2).all(|w| w[0] < w[1]));
-    }
-
-    /// Load the collation tailoring for (`co`, `locale`) without fallback
-    /// warnings. The baked provider falls back through the locale's parents
-    /// (so "emoji" loads for every locale, from "und"), never across
-    /// collation types.
-    fn tailoring_loads(co: &str, locale: &str) -> bool {
-        use icu::collator::provider::{Baked, CollationTailoringV1};
-        let loc: icu::locale::Locale = locale.parse().unwrap();
-        let data_locale = DataLocale::from(&loc);
-        let mut metadata = DataRequestMetadata::default();
-        metadata.silent = true;
-        DataProvider::<CollationTailoringV1>::load(
-            &Baked,
-            DataRequest {
-                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
-                    DataMarkerAttributes::try_from_str(co).unwrap(),
-                    &data_locale,
-                ),
-                metadata,
-            },
-        )
-        .is_ok()
     }
 
     #[test]

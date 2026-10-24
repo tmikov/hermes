@@ -5,7 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 """Regenerate the CLDR-derived data files from CLDR: currencies.txt,
-numbering-systems.txt, calendar-preferences.txt and hour-cycles.txt.
+numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt and
+time-zones-by-region.txt.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
 the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
@@ -98,6 +99,29 @@ def hour_cycles(supplemental):
     return table
 
 
+def time_zones_by_region(timezone):
+    """Decision 2 of the Phase 1 plan: a non-deprecated zone belongs to its
+    `region` attribute, or else to the first two letters of its name,
+    uppercased. utc, gmt, unk, utce* and utcw* belong to no region. Each zone
+    is given by the first alias of its type (the host maps it to the primary
+    identifier)."""
+    table = {}
+    for t in timezone.findall(".//key[@name='tz']/type"):
+        name = t.get("name")
+        if t.get("deprecated") == "true":
+            continue
+        if name in ("utc", "gmt", "unk") or name.startswith(("utce", "utcw")):
+            continue
+        aliases = (t.get("alias") or "").split()
+        if not aliases:
+            sys.exit(f"time zone {name} has no alias")
+        region = t.get("region") or name[:2].upper()
+        if len(region) != 2 or not (region.isascii() and region.isalpha()):
+            sys.exit(f"time zone {name}: bad region {region!r}")
+        table.setdefault(region.upper(), []).append(aliases[0])
+    return {region: sorted(ids) for region, ids in table.items()}
+
+
 def main():
     tag = sys.argv[1]
     # currency.xml also holds key cf (currency format), whose types
@@ -139,6 +163,13 @@ def main():
         "Hour cycles by region or language-region, preferred first "
         "(supplementalData.xml timeData).",
         hour_cycles(supplemental),
+    )
+    write_table(
+        "time-zones-by-region.txt",
+        tag,
+        "IANA time zones by region (bcp47/timezone.xml); the first alias of "
+        "each zone, not always its primary identifier.",
+        time_zones_by_region(fetch(tag, "bcp47/timezone.xml")),
     )
 
 

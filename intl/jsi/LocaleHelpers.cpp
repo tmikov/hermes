@@ -44,6 +44,33 @@ std::optional<std::string> hourCycles(jsi::Runtime &, const std::string &key) {
   return core::hourCycles(key);
 }
 
+std::string timeZonesOfRegion(jsi::Runtime &, const std::string &region) {
+  return core::timeZonesOfRegion(region);
+}
+
+std::string weekInfo(jsi::Runtime &, const std::string &region) {
+  if (auto result = core::weekInfo(region))
+    return *result;
+  throw std::logic_error("Intl internal error: weekInfo: " + region);
+}
+
+std::optional<std::string> scriptDirection(
+    jsi::Runtime &,
+    const std::string &script) {
+  return core::scriptDirection(script);
+}
+
+std::string defaultNumberingSystem(jsi::Runtime &, const std::string &locale) {
+  if (auto result = core::defaultNumberingSystem(locale))
+    return *result;
+  throw std::logic_error(
+      "Intl internal error: defaultNumberingSystem: " + locale);
+}
+
+std::string collationsOfLocale(jsi::Runtime &, const std::string &locale) {
+  return core::collationsOfLocale(locale);
+}
+
 bool isAvailableLocale(jsi::Runtime &, const std::string &tag) {
   return core::isAvailableLocale(tag);
 }
