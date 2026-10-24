@@ -859,6 +859,13 @@ if(HERMES_ENABLE_TEST_SUITE)
     intl_fixture_dir=${CMAKE_CURRENT_BINARY_DIR}/unittests/IntlLoader
     )
 
+  # For the Intl loader tests that load libhermesvm by hand.
+  if(TARGET hermesvm)
+    list(APPEND HERMES_LIT_TEST_PARAMS_BASE
+      hermesvm_lib=$<TARGET_FILE:hermesvm>)
+    list(APPEND HERMES_TEST_DEPS hermesvm)
+  endif()
+
   if(HERMES_ENABLE_NAPI)
     list(APPEND HERMES_LIT_TEST_PARAMS_BASE
       napi_runner=${HERMES_TOOLS_OUTPUT_DIR}/napi-runner

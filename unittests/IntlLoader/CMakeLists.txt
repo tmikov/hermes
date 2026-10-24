@@ -58,6 +58,16 @@ if(NOT WIN32)
   add_hermes_executable(intl_shared_host fixtures/SharedHost.cpp)
   target_link_libraries(intl_shared_host PRIVATE hermesvm)
 
+  # A host that loads libhermesvm with dlopen by a relative path and then
+  # changes directory. It links no VM code: it reaches the factory with
+  # dlsym, and links JSI and hermesPublic for the code RuntimeConfig and the
+  # JSI calls it makes need.
+  add_hermes_executable(intl_relative_host fixtures/RelativeHost.cpp)
+  target_include_directories(intl_relative_host PRIVATE
+    ${PROJECT_SOURCE_DIR}/API ${HERMES_JSI_DIR} ${PROJECT_SOURCE_DIR}/public)
+  target_link_libraries(intl_relative_host PRIVATE hermesPublic jsi
+    ${CMAKE_DL_LIBS})
+
   set_property(GLOBAL APPEND PROPERTY HERMES_INTL_FIXTURE_TARGETS
-    fake_intl_dep intl_chdir_host intl_shared_host)
+    fake_intl_dep intl_chdir_host intl_shared_host intl_relative_host)
 endif()

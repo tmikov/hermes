@@ -13,6 +13,7 @@
 #include "hermes/hermes.h"
 
 #include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -287,8 +288,100 @@ void promoteHermesImage() {
     ::dlerror();
 }
 
+#if defined(__linux__)
+/// Whether \p path names an existing file.
+bool fileExists(const std::string &path) {
+  struct stat st;
+  return ::stat(path.c_str(), &st) == 0;
+}
+
+/// \p path, a pathname as /proc/self/maps shows it, with the kernel's
+/// escapes undone: it writes a newline in a name as "\012", a backslash and
+/// three octal digits.
+std::string unescapeMapsPath(const std::string &path) {
+  auto octal = [&](size_t i) { return path[i] >= '0' && path[i] <= '7'; };
+  std::string out;
+  for (size_t i = 0; i < path.size(); ++i) {
+    if (path[i] == '\\' && i + 3 < path.size() && octal(i + 1) &&
+        octal(i + 2) && octal(i + 3)) {
+      out += static_cast<char>(
+          (path[i + 1] - '0') * 64 + (path[i + 2] - '0') * 8 +
+          (path[i + 3] - '0'));
+      i += 3;
+    } else {
+      out += path[i];
+    }
+  }
+  return out;
+}
+
+/// The absolute path of the file mapped at \p addr, from /proc/self/maps;
+/// empty if it cannot be read or has no such file. Unlike dladdr's
+/// dli_fname, which is the path the library was loaded by and may be
+/// relative to a directory the process has since left, the kernel's path
+/// is absolute.
+std::string mappedFilePath(const void *addr) {
+  FILE *maps = std::fopen("/proc/self/maps", "re");
+  if (!maps)
+    return "";
+  auto a = reinterpret_cast<uintptr_t>(addr);
+  std::string path;
+  char *line = nullptr;
+  size_t capacity = 0;
+  ssize_t length;
+  while ((length = ::getline(&line, &capacity, maps)) > 0) {
+    // start-end perms offset dev inode [pathname]
+    unsigned long long start, end, inode;
+    int pathStart = 0;
+    if (std::sscanf(
+            line,
+            "%llx-%llx %*s %*s %*s %llu %n",
+            &start,
+            &end,
+            &inode,
+            &pathStart) < 3 ||
+        a < start || a >= end)
+      continue;
+    if (inode != 0 && pathStart > 0 && line[pathStart] == '/') {
+      path.assign(line + pathStart, length - pathStart);
+      if (!path.empty() && path.back() == '\n')
+        path.pop_back();
+    }
+    break;
+  }
+  std::free(line);
+  std::fclose(maps);
+  if (path.empty())
+    return "";
+  // A backslash is not escaped, so "\012" may also be four characters of
+  // the name: take the reading that exists.
+  std::string unescaped = unescapeMapsPath(path);
+  if (fileExists(unescaped))
+    return unescaped;
+  if (fileExists(path))
+    return path;
+  // The kernel appends " (deleted)" to the name of a file that was removed
+  // after it was mapped. The directory it was in is still the one to search.
+  constexpr const char kDeleted[] = " (deleted)";
+  constexpr size_t kDeletedLength = sizeof(kDeleted) - 1;
+  if (unescaped.size() > kDeletedLength &&
+      unescaped.compare(
+          unescaped.size() - kDeletedLength, kDeletedLength, kDeleted) == 0)
+    return unescaped.substr(0, unescaped.size() - kDeletedLength);
+  return "";
+}
+#endif
+
 /// The directory holding the code of the Hermes library or executable this
 /// function is part of; empty if unknown.
+///
+/// For a library, dladdr reports the path given to dlopen, which a host may
+/// have given relative to a directory it has since left. On Linux and
+/// Android the library's file is found in /proc/self/maps by the address of
+/// this function instead, and dladdr's path is the fallback. On Apple
+/// platforms dyld records an absolute path for a library loaded from disk
+/// (it asks the kernel for the path of the file it opened), so dladdr's
+/// path is used.
 std::string hermesDirectory() {
   Dl_info info;
   std::string path;
@@ -296,10 +389,15 @@ std::string hermesDirectory() {
     return "";
   // For the main executable dladdr reports argv[0], which may be relative
   // to a directory the process has since left; ask the OS instead.
-  if (isMainExecutable(info.dli_fbase))
+  if (isMainExecutable(info.dli_fbase)) {
     path = mainExecutablePath();
-  else if (info.dli_fname)
-    path = info.dli_fname;
+  } else {
+#if defined(__linux__)
+    path = mappedFilePath(reinterpret_cast<const void *>(&hermesDirectory));
+#endif
+    if (path.empty() && info.dli_fname)
+      path = info.dli_fname;
+  }
   if (path.empty())
     return "";
   char resolved[PATH_MAX];

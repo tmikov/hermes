@@ -351,14 +351,24 @@ For each new runtime:
       to use a statically linked plugin, since `dlsym` cannot find code the
       static linker never pulled in;
    2. the standard library name (`libhermesintl.so`, `libhermesintl.dylib`)
-      in the directory containing the Hermes code, found with `dladdr`; and,
-      when that directory is named `bin`, in `../lib`, which is the build
-      and install layout (`bin/hermes`,
-      `lib/libhermesintl.so`). When the Hermes code is in the main
-      executable, `dladdr` may return a bare `argv[0]`, so the executable's
+      in the directory containing the Hermes code; and, when that directory
+      is named `bin`, in `../lib`, which is the build and install layout
+      (`bin/hermes`, `lib/libhermesintl.so`). `dladdr` tells whether the
+      Hermes code is in the main executable or in a library. For the main
+      executable `dladdr` may return a bare `argv[0]`, so the executable's
       path comes from the OS instead: `/proc/self/exe` on Linux,
-      `proc_pidpath` on macOS. The directory is taken after `realpath`. A
-      candidate is loaded unless `stat` says it does not exist;
+      `proc_pidpath` on macOS. For a library, `dladdr` returns the path
+      given to `dlopen`, which may be relative to a directory the host has
+      since left. So on Linux and Android the library's file is the one
+      `/proc/self/maps` shows mapped at the address of a loader function
+      (with the kernel's `\012` escapes undone, and a ` (deleted)` suffix
+      dropped: the directory is still the one to search), and `dladdr`'s
+      path is the fallback when that lookup fails. On Apple platforms
+      `dladdr`'s path is used: dyld records an absolute path for a library
+      loaded from disk (it asks the kernel for the path of the file it
+      opened, with `F_GETPATH`). The directory is taken after `realpath`.
+      Failing to find it is never fatal: resolution goes on to the next
+      step. A candidate is loaded unless `stat` says it does not exist;
    3. except on Apple platforms, the default library search path. A
       library tried there counts as absent only when the loader's error
       message says the library itself was not found. A missing dependency, a
