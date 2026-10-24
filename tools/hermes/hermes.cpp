@@ -107,38 +107,35 @@ static int executeHBCBytecodeFromCL(
     }
   }
 
+  vm::RuntimeConfig::Builder runtimeConfigBuilder;
+  runtimeConfigBuilder.withGCConfig(gcConfigBuilder.build())
+      .withMaxNumRegisters(flags.MaxNumRegisters)
+      .withEnableJIT(
+          flags.DumpJITCode ||
+          flags.JIT != cli::VMOnlyRuntimeFlags::JITMode::Off)
+      .withForceJIT(flags.JIT == cli::VMOnlyRuntimeFlags::JITMode::Force)
+      .withJITThreshold(flags.JITThreshold)
+      .withJITMemoryLimit(flags.JITMemoryLimit)
+      .withEnableEval(cl::compilerRuntimeFlags.EnableEval)
+      .withEnableAsyncGenerators(cl::compilerRuntimeFlags.EnableAsyncGenerators)
+      .withVerifyEvalIR(cl::compilerRuntimeFlags.VerifyIR)
+      .withOptimizedEval(cl::compilerRuntimeFlags.OptimizedEval)
+      .withAsyncBreakCheckInEval(cl::compilerRuntimeFlags.EmitAsyncBreakCheck)
+      .withVMExperimentFlags(flags.VMExperimentFlags)
+      .withES6Proxy(flags.ES6Proxy)
+      .withIntl(flags.Intl)
+      .withMicrotaskQueue(flags.MicrotaskQueue)
+      .withEnableSampleProfiling(
+          flags.SampleProfiling != ExecuteOptions::SampleProfilingMode::None)
+      .withRandomizeMemoryLayout(flags.RandomizeMemoryLayout)
+      .withTrackIO(flags.TrackBytecodeIO)
+      .withEnableHermesInternal(flags.EnableHermesInternal)
+      .withEnableHermesInternalTestMethods(
+          flags.EnableHermesInternalTestMethods)
+      .withTest262(cl::compilerRuntimeFlags.Test262)
+      .withES6BlockScoping(cl::compilerRuntimeFlags.ES6BlockScoping);
   options.runtimeConfig =
-      vm::RuntimeConfig::Builder()
-          .withGCConfig(gcConfigBuilder.build())
-          .withMaxNumRegisters(flags.MaxNumRegisters)
-          .withEnableJIT(
-              flags.DumpJITCode ||
-              flags.JIT != cli::VMOnlyRuntimeFlags::JITMode::Off)
-          .withForceJIT(flags.JIT == cli::VMOnlyRuntimeFlags::JITMode::Force)
-          .withJITThreshold(flags.JITThreshold)
-          .withJITMemoryLimit(flags.JITMemoryLimit)
-          .withEnableEval(cl::compilerRuntimeFlags.EnableEval)
-          .withEnableAsyncGenerators(
-              cl::compilerRuntimeFlags.EnableAsyncGenerators)
-          .withVerifyEvalIR(cl::compilerRuntimeFlags.VerifyIR)
-          .withOptimizedEval(cl::compilerRuntimeFlags.OptimizedEval)
-          .withAsyncBreakCheckInEval(
-              cl::compilerRuntimeFlags.EmitAsyncBreakCheck)
-          .withVMExperimentFlags(flags.VMExperimentFlags)
-          .withES6Proxy(flags.ES6Proxy)
-          .withIntl(flags.Intl)
-          .withMicrotaskQueue(flags.MicrotaskQueue)
-          .withEnableSampleProfiling(
-              flags.SampleProfiling !=
-              ExecuteOptions::SampleProfilingMode::None)
-          .withRandomizeMemoryLayout(flags.RandomizeMemoryLayout)
-          .withTrackIO(flags.TrackBytecodeIO)
-          .withEnableHermesInternal(flags.EnableHermesInternal)
-          .withEnableHermesInternalTestMethods(
-              flags.EnableHermesInternalTestMethods)
-          .withTest262(cl::compilerRuntimeFlags.Test262)
-          .withES6BlockScoping(cl::compilerRuntimeFlags.ES6BlockScoping)
-          .build();
+      cli::withIntlPluginFlags(runtimeConfigBuilder, flags).build();
 
   options.basicBlockProfiling = cl::BasicBlockProfiling;
   options.profilingOutFile = cl::ProfilingOutFile;
@@ -213,17 +210,17 @@ static int executeHBCBytecodeFromCL(
 }
 
 static vm::RuntimeConfig getReplRuntimeConfig() {
-  return vm::RuntimeConfig::Builder()
-      .withGCConfig(
-          vm::GCConfig::Builder()
-              .withInitHeapSize(flags.InitHeapSize.bytes)
-              .withMaxHeapSize(flags.MaxHeapSize.bytes)
-              .withSanitizeConfig(
-                  vm::GCSanitizeConfig::Builder()
-                      .withSanitizeRate(flags.GCSanitizeRate)
-                      .withRandomSeed(flags.GCSanitizeRandomSeed)
-                      .build())
-              .build())
+  vm::RuntimeConfig::Builder builder;
+  builder
+      .withGCConfig(vm::GCConfig::Builder()
+                        .withInitHeapSize(flags.InitHeapSize.bytes)
+                        .withMaxHeapSize(flags.MaxHeapSize.bytes)
+                        .withSanitizeConfig(
+                            vm::GCSanitizeConfig::Builder()
+                                .withSanitizeRate(flags.GCSanitizeRate)
+                                .withRandomSeed(flags.GCSanitizeRandomSeed)
+                                .build())
+                        .build())
       .withVMExperimentFlags(flags.VMExperimentFlags)
       .withES6Proxy(flags.ES6Proxy)
       .withEnableAsyncGenerators(cl::compilerRuntimeFlags.EnableAsyncGenerators)
@@ -232,8 +229,8 @@ static vm::RuntimeConfig getReplRuntimeConfig() {
       .withEnableHermesInternal(flags.EnableHermesInternal)
       .withEnableHermesInternalTestMethods(
           flags.EnableHermesInternalTestMethods)
-      .withES6BlockScoping(cl::compilerRuntimeFlags.ES6BlockScoping)
-      .build();
+      .withES6BlockScoping(cl::compilerRuntimeFlags.ES6BlockScoping);
+  return cli::withIntlPluginFlags(builder, flags).build();
 }
 
 int main(int argc, char **argv) {

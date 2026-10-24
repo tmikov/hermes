@@ -8,6 +8,7 @@
 #ifdef JSI_UNSTABLE
 #include "Worker.h"
 #include "Intrinsics.h"
+#include "hermes/IntlPluginLoader.h"
 #include "hermes/Public/RuntimeConfig.h"
 #include "hermes/hermes.h"
 #include "llvh/Support/Compiler.h"
@@ -560,7 +561,9 @@ std::string copyBufferBytes(
 /// Shared by all constructor input types.
 void startWorker(jsi::Runtime &rt, jsi::Object self, std::string script) {
   auto *api = jsi::castInterface<IHermesRootAPI>(makeHermesRootAPI());
-  auto workerRuntime = api->makeHermesRuntime(::hermes::vm::RuntimeConfig());
+  // The worker gets the parent's Intl: the same plugin and the defaults the
+  // parent's plugin resolved, so it never detects them again.
+  auto workerRuntime = api->makeHermesRuntime(makeWorkerRuntimeConfig(rt));
   auto workerState = std::make_shared<WorkerState>(rt, self);
   workerState->workerRuntime = workerRuntime.get();
 

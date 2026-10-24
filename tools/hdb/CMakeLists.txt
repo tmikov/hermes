@@ -6,6 +6,7 @@
 set(HERMES_ENABLE_EH ON)
 set(HERMES_ENABLE_RTTI ON)
 add_hermes_tool(hdb hdb.cpp LINK_LIBS hermesvm_a)
+hermes_export_dynamic_symbols(hdb)
 
 install(TARGETS hdb
   RUNTIME DESTINATION bin

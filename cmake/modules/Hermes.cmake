@@ -174,6 +174,22 @@ function(add_hermes_tool name)
   endif()
 endfunction(add_hermes_tool)
 
+# Export the dynamic symbols of executable \p name, so libraries it loads at
+# runtime (the Intl plugin, Node-API addons) can bind to the JSI code
+# compiled into it. Every executable that links the VM statically and creates
+# runtimes through makeHermesRuntime or makeThreadSafeHermesRuntime needs
+# this: default resolution finds the plugin in <build>/lib, and without these
+# exports it fails to load, which is fatal. Other tools do not get it, so
+# that the linker can still drop their unused code. Emscripten has no such
+# libraries.
+function(hermes_export_dynamic_symbols name)
+  if(APPLE)
+    target_link_options(${name} PRIVATE -Wl,-export_dynamic)
+  elseif(UNIX AND NOT EMSCRIPTEN)
+    target_link_options(${name} PRIVATE -rdynamic)
+  endif()
+endfunction(hermes_export_dynamic_symbols)
+
 # find_package()is not able to find packages specified with <name>_DIR if
 # CMAKE_SYSROOT or CMAKE_FIND_ROOT_PATH is set, because find_file() is being
 # restricted in where it looks.

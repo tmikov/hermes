@@ -38,6 +38,7 @@ add_subdirectory(PlatformUnicode)
 # API tests rely on the interpreter.
 add_subdirectory(API)
 add_subdirectory(ADT)
+add_subdirectory(IntlLoader)
 add_subdirectory(Optimizer)
 if(HERMES_ENABLE_NAPI)
   add_subdirectory(napi)

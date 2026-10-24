@@ -133,18 +133,18 @@ int main(int argc, char **argv) {
     }
   }
 
+  vm::RuntimeConfig::Builder runtimeConfigBuilder;
+  runtimeConfigBuilder.withGCConfig(gcConfigBuilder.build())
+      .withMaxNumRegisters(flags.MaxNumRegisters)
+      .withES6Proxy(flags.ES6Proxy)
+      .withIntl(flags.Intl)
+      .withMicrotaskQueue(flags.MicrotaskQueue)
+      .withTrackIO(flags.TrackBytecodeIO)
+      .withEnableHermesInternal(flags.EnableHermesInternal)
+      .withEnableHermesInternalTestMethods(
+          flags.EnableHermesInternalTestMethods);
   options.runtimeConfig =
-      vm::RuntimeConfig::Builder()
-          .withGCConfig(gcConfigBuilder.build())
-          .withMaxNumRegisters(flags.MaxNumRegisters)
-          .withES6Proxy(flags.ES6Proxy)
-          .withIntl(flags.Intl)
-          .withMicrotaskQueue(flags.MicrotaskQueue)
-          .withTrackIO(flags.TrackBytecodeIO)
-          .withEnableHermesInternal(flags.EnableHermesInternal)
-          .withEnableHermesInternalTestMethods(
-              flags.EnableHermesInternalTestMethods)
-          .build();
+      cli::withIntlPluginFlags(runtimeConfigBuilder, flags).build();
 
   options.stopAfterInit = flags.StopAfterInit;
 

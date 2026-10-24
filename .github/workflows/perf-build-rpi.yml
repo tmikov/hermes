@@ -37,8 +37,9 @@ jobs:
         run: |
           export CC=clang-19
           export CXX=clang++-19
+          # Host tools only; no Intl plugin (it needs Rust).
           cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release -DHERMES_BUILD_INTL=OFF
           cmake --build build --target synth hermesc
 
       - name: Upload binaries

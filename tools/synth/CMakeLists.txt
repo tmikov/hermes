@@ -8,6 +8,7 @@ set(HERMES_ENABLE_EH ON)
 add_hermes_tool(synth
   synth.cpp
 )
+hermes_export_dynamic_symbols(synth)
 
 target_link_libraries(synth
   hermesConsoleHost_obj

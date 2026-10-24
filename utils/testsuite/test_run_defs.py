@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from abc import ABC, abstractmethod
@@ -13,7 +14,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .es_ast import diff
-from .hermes import compile_and_run, CompileRunArgs, ExtraCompileVMArgs, generate_ast
+from .hermes import (
+    compile_and_run,
+    compile_and_run_single,
+    CompileRunArgs,
+    ExtraCompileVMArgs,
+    generate_ast,
+)
+from .intl_plugin import HARD_FAIL, JS_FAIL, PASS, vm_args as intl_vm_args
 from .preprocess import generate_source, StrictMode
 from .skiplist import SkipCategory, SkippedPathsOrFeatures
 from .typing_defs import PathT
@@ -50,6 +58,8 @@ class TestRunArgs(object):
     """Extra compiler and VM arguments"""
     timeout: int
     """Timeout (in seconds) for compiling/running each test."""
+    intl_plugin: Optional[str] = None
+    """Plugin mode: the Intl plugin library to load in every run."""
 
 
 class Suite(ABC):
@@ -161,7 +171,7 @@ class Test262Suite(Suite):
             content = reader.read().decode("utf-8")
         full_test_name = self.get_full_test_name(args.test_file)
         test_case = generate_source(content, self.directory, full_test_name)
-        if "testIntl.js" in test_case.includes:
+        if "testIntl.js" in test_case.includes and not args.intl_plugin:
             msg = f"SKIP: No support for multiple Intl constructors in {full_test_name}"
             return TestCaseResult(full_test_name, TestResultCode.TEST_SKIPPED, msg)
 
@@ -175,6 +185,9 @@ class Test262Suite(Suite):
             )
         # Check if we need to skip this test due to unsupported features.
         for f in test_case.features:
+            # Plugin mode runs every Intl feature.
+            if args.intl_plugin and f.lower().startswith("intl"):
+                continue
             # If it's not running shermes test and this feature is specifically
             # supported by the built hermes binary, we don't need to test if it
             # is in the skiplist. We may still skip it due to the rest features
@@ -203,18 +216,25 @@ class Test262Suite(Suite):
         )
         os.makedirs(tmp_dir, exist_ok=True)
         flags_str = ("." + "_".join(sorted(flags))) if len(flags) > 0 else ""
+        # (mode, path) for each strictness variant to run.
         js_sources = []
         if StrictMode.STRICT in test_case.strict_mode:
             js_sources.append(
-                self.generate_js_source(
-                    tmp_dir, base_name_no_ext, flags_str, test_case.source, True
+                (
+                    "strict",
+                    self.generate_js_source(
+                        tmp_dir, base_name_no_ext, flags_str, test_case.source, True
+                    ),
                 )
             )
 
         if StrictMode.NO_STRICT in test_case.strict_mode:
             js_sources.append(
-                self.generate_js_source(
-                    tmp_dir, base_name_no_ext, flags_str, test_case.source, False
+                (
+                    "non-strict",
+                    self.generate_js_source(
+                        tmp_dir, base_name_no_ext, flags_str, test_case.source, False
+                    ),
                 )
             )
 
@@ -234,9 +254,46 @@ class Test262Suite(Suite):
             args.opt,
             args.timeout,
             is_async,
-            args.extra_compile_vm_args,
+            deepcopy(args.extra_compile_vm_args),
         )
-        return await compile_and_run(js_sources, compile_run_args)
+        compile_run_args.extra_compile_vm_args.vm_args += intl_vm_args(
+            args.intl_plugin
+        )
+        if not args.intl_plugin:
+            return await compile_and_run([p for _, p in js_sources], compile_run_args)
+        # Plugin mode: run each strictness mode on its own and judge it alone.
+        modes = {}
+        output = ""
+        duration = 0.0
+        for mode, path in js_sources:
+            # Each variant gets exactly its own strictness: the shared
+            # strict_mode is usually ALL, which would compile both
+            # variants with -strict.
+            mode_args = dataclasses.replace(
+                compile_run_args,
+                strict_mode=(
+                    StrictMode.STRICT if mode == "strict" else StrictMode.NO_STRICT
+                ),
+                intl_classify=True,
+            )
+            r = await compile_and_run_single(path, mode_args)
+            duration += r.duration
+            if r.code == TestResultCode.TEST_PASSED:
+                modes[mode] = PASS
+            elif r.js_failure:
+                modes[mode] = JS_FAIL
+            else:
+                modes[mode] = HARD_FAIL
+            output += f"[{mode}] {r.msg}\n{r.output}\n"
+        ok = all(o == PASS for o in modes.values())
+        return TestCaseResult(
+            full_test_name,
+            TestResultCode.TEST_PASSED if ok else TestResultCode.EXECUTE_FAILED,
+            "PASS" if ok else "FAIL in plugin mode",
+            output,
+            duration,
+            modes=modes,
+        )
 
 
 class CvesSuite(Test262Suite):
@@ -284,6 +341,8 @@ class MjsunitSuite(Suite):
             args.test_file, SkipCategory.HANDLESAN_SKIP_LIST
         )
         extra_compile_vm_args = deepcopy(args.extra_compile_vm_args)
+        # mjsunit has no plugin mode, so it always runs without the plugin.
+        extra_compile_vm_args.vm_args += intl_vm_args(None)
         compile_run_args = CompileRunArgs(
             full_test_name,
             test_case.strict_mode,

@@ -7,6 +7,8 @@
 
 #include <hermes/hermes.h>
 
+#include <hermes/IntlPluginLoader.h>
+
 #include "llvh/Support/Compiler.h"
 
 #include "hermes/ADT/ManagedChunkedList.h"
@@ -1572,6 +1574,7 @@ std::unique_ptr<HermesRuntime> HermesRootAPI::makeHermesRuntime(
 #if HERMES_ENABLE_CORE_EXTENSIONS
   loadAndInstallExtensions(*ret);
 #endif
+  installIntlPlugin(*ret, runtimeConfig);
 
   return ret;
 }
@@ -3942,6 +3945,7 @@ std::unique_ptr<jsi::ThreadSafeRuntime> makeThreadSafeHermesRuntime(
 #if HERMES_ENABLE_CORE_EXTENSIONS
   loadAndInstallExtensions(hermesRt);
 #endif
+  installIntlPlugin(hermesRt, runtimeConfig);
 
   return ret;
 }

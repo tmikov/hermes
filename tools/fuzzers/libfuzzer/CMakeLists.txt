@@ -19,4 +19,5 @@ if(HERMES_ENABLE_LIBFUZZER)
       PRIVATE
         hermesapi
     )
+    hermes_export_dynamic_symbols(fuzzer-jsi-entry)
 endif()

@@ -31,7 +31,9 @@ jobs:
       - name: Build HermesC for Linux
         shell: bash
         run: |
+          # Host hermesc only; no Intl plugin (it needs Rust).
           cmake -S . -B build -DHERMES_STATIC_LINK=ON -DCMAKE_BUILD_TYPE=Release -DHERMES_ENABLE_TEST_SUITE=OFF \
+            -DHERMES_BUILD_INTL=OFF \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=True -DCMAKE_CXX_FLAGS=-s -DCMAKE_C_FLAGS=-s \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--whole-archive -lpthread -Wl,--no-whole-archive"
           cmake --build build --target hermesc -j 4

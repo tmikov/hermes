@@ -12,6 +12,14 @@ from asyncio import create_subprocess_exec, subprocess, TimeoutError, wait_for
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .intl_plugin import (
+    args_for_binary,
+    binary_help,
+    classify,
+    compile_is_hard_failure,
+    JS_FAIL,
+    PASS,
+)
 from .preprocess import StrictMode
 from .progress import TestCaseResult, TestResultCode
 from .typing_defs import OptExpectedFailure, PathT
@@ -64,6 +72,8 @@ class CompileRunArgs(object):
     """Whether the test is an async test262 test and needs AsyncTestFailure checked."""
     extra_compile_vm_args: Optional[ExtraCompileVMArgs] = None
     """Extra compile/run arguments given by specific testsuites."""
+    intl_classify: bool = False
+    """Plugin mode: judge the run with intl_plugin.classify."""
 
 
 async def run(
@@ -102,6 +112,9 @@ async def run(
             cmd_args += compile_run_args.extra_compile_vm_args.compile_args
     if compile_run_args.disable_handle_san:
         cmd_args += ["-gc-sanitize-handles=0"]
+    if compile_run_args.bytecode_compat_check and not lazy:
+        # b_hermes is supplied from outside and may predate the Intl plugin.
+        cmd_args = args_for_binary(cmd_args, binary_help(hermes_exe))
     # Also pass all current environment variables before running the test. This is
     # useful when setting environment variables for shermes or ASAN options, etc.
     env = os.environ | {"LC_ALL": "en_US.UTF-8"}
@@ -138,6 +151,28 @@ async def run(
         output += f"stderr:\n {stderr.decode('utf-8')}"
 
     stdout_str = stdout.decode("utf-8") if stdout else ""
+
+    if compile_run_args.intl_classify:
+        stderr_str = stderr.decode("utf-8") if stderr else ""
+        outcome = classify(
+            proc.returncode,
+            stdout_str,
+            stderr_str,
+            expected_failure_phase == "runtime",
+            compile_run_args.is_async,
+        )
+        return TestCaseResult(
+            compile_run_args.test_name,
+            (
+                TestResultCode.TEST_PASSED
+                if outcome == PASS
+                else TestResultCode.EXECUTE_FAILED
+            ),
+            f"{outcome}: {base_file_name}",
+            output,
+            duration,
+            js_failure=outcome == JS_FAIL,
+        )
 
     # Check async test result regardless of exit code. The $DONE harness
     # prints "Test262:AsyncTestComplete" on success and
@@ -222,9 +257,12 @@ async def compile_with_args(
     expect_compile_failure: bool,
     args: List[str],
     timeout: int,
+    intl_classify: bool = False,
 ) -> TestCaseResult:
     """
     Run hermesc with given arguments. Returns the TestCaseResult.
+    In plugin mode (intl_classify), a crash or a sanitizer report is a
+    failure even when the compile was expected to fail.
     """
 
     proc = await create_subprocess_exec(
@@ -251,6 +289,14 @@ async def compile_with_args(
         output += f"stdout:\n {stdout.decode('utf-8')}"
     if stderr:
         output += f"stderr:\n {stderr.decode('utf-8')}"
+
+    if intl_classify:
+        stderr_str = stderr.decode("utf-8") if stderr else ""
+        if compile_is_hard_failure(proc.returncode, stderr_str):
+            msg = f"FAIL: compiler crashed or reported a sanitizer error: {args}"
+            return TestCaseResult(
+                test_name, TestResultCode.COMPILE_FAILED, msg, output, duration
+            )
 
     # Check if the compilation succeeded.
     if proc.returncode:
@@ -349,6 +395,7 @@ async def compile_and_run_single(
         expect_compile_failure,
         cmd_args,
         compile_run_args.timeout,
+        intl_classify=compile_run_args.intl_classify,
     )
     if compile_result.code.is_failure:
         return compile_result
