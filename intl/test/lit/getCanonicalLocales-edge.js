@@ -53,3 +53,7 @@ print(thrown(() => Intl.getCanonicalLocales(['en_US'])));
 // CHECK-NEXT: RangeError
 print(thrown(() => Intl.getCanonicalLocales([''])));
 // CHECK-NEXT: RangeError
+// A tlang is canonicalized as a languageId (UTS 35 Annex C): language,
+// region and variant aliases all apply.
+print(JSON.stringify(Intl.getCanonicalLocales(['en-t-ja-DD', 'en-t-iw', 'en-t-sv-aaland'])));
+// CHECK-NEXT: ["en-t-ja-de","en-t-he","en-t-sv-ax"]

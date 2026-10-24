@@ -9,7 +9,7 @@
 //! IsStructurallyValidLanguageTag and CanonicalizeUnicodeLocaleId) and the
 //! available-locale set.
 
-use icu::locale::subtags::{language, region, script, Script};
+use icu::locale::subtags::{language, region, script, Language, Script};
 use icu::locale::{LanguageIdentifier, Locale, LocaleCanonicalizer, LocaleExpander};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -79,6 +79,7 @@ pub fn canonicalize(tag: &str) -> Option<String> {
     // or as the language of a -t- tlang. Canonicalize the tag with "und" in
     // its place and put the language back (no aliases exist for them).
     let (tag, tlang) = hide_long_tlang(tag);
+    let tlang_hidden = tlang.is_some();
     let first = tag.split('-').next().unwrap_or("");
     let long = is_long_language(first);
     let parsed = if long {
@@ -88,8 +89,26 @@ pub fn canonicalize(tag: &str) -> Option<String> {
     };
     let mut loc: Locale = parsed.parse().ok()?;
     static C: OnceLock<LocaleCanonicalizer> = OnceLock::new();
-    C.get_or_init(LocaleCanonicalizer::new_extended)
-        .canonicalize(&mut loc);
+    let canonicalizer = C.get_or_init(LocaleCanonicalizer::new_extended);
+    canonicalizer.canonicalize(&mut loc);
+    // UTS 35 Annex C, "Processing LocaleIds": "Replace any tlang languageId
+    // value by its canonicalization." ICU4X applies only the language
+    // aliases to a tlang (en-t-iw is en-t-he), so canonicalize the tlang
+    // again as a languageId of its own, which applies the script, region
+    // and variant aliases too (en-t-ja-dd is en-t-ja-de).
+    if let Some(tlang) = loc.extensions.transform.lang.take() {
+        let mut id = Locale::from(tlang);
+        canonicalizer.canonicalize(&mut id);
+        // A hidden 5-8 letter language is a real language, not "und": an
+        // alias whose type has no language must not give it one (Annex C,
+        // "Replacement", fills an empty field only). The aliases checked
+        // (und-arevela, und-saaho) leave "und" alone; this keeps the
+        // placeholder restore_long_tlang needs in any case.
+        if tlang_hidden {
+            id.id.language = Language::UNKNOWN;
+        }
+        loc.extensions.transform.lang = Some(id.id);
+    }
     canonicalize_keyword_values(&mut loc);
     let out = loc.to_string();
     let out = if long {
@@ -602,20 +621,44 @@ mod tests {
         );
         assert_eq!(canonicalize("posix").as_deref(), Some("posix"));
         // A tlang starts with a unicode_language_subtag, which may have 5-8
-        // letters; the rest of the tlang is canonicalized as ICU4X does
-        // for any tlang (lowercased, variants sorted).
+        // letters; the rest of the tlang is canonicalized as for any tlang
+        // (lowercased, variants sorted, aliases applied).
         for (tag, want) in [
             ("en-t-posix", "en-t-posix"),
             ("fr-t-abcdefgh-latn", "fr-t-abcdefgh-latn"),
             ("EN-T-POSIX-US", "en-t-posix-us"),
-            (
-                "en-t-abcde-Latn-heploc-hepburn",
-                "en-t-abcde-latn-hepburn-heploc",
-            ),
+            ("en-t-abcde-Latn-rozaj-biske", "en-t-abcde-latn-biske-rozaj"),
+            ("en-t-posix-DD", "en-t-posix-de"),
+            ("en-t-posix-SU", "en-t-posix-ru"),
             ("en-t-abcde-us-m0-names", "en-t-abcde-us-m0-prprname"),
             ("posix-t-abcdef-fonipa", "posix-t-abcdef-fonipa"),
             ("en-u-ca-gregory-t-posix", "en-t-posix-u-ca-gregory"),
             ("en-x-t-abcdef", "en-x-t-abcdef"),
+        ] {
+            assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
+        }
+        // UTS 35 Annex C: a tlang is canonicalized as a languageId, with
+        // the language, script, region and variant aliases.
+        for (tag, want) in [
+            ("en-t-iw", "en-t-he"),
+            ("en-t-ja-DD", "en-t-ja-de"),
+            ("en-t-und-Qaai", "en-t-und-zinh"),
+            // "SU" has several replacements; the likely region of "hy" is
+            // one of them.
+            ("en-t-hy-SU", "en-t-hy-am"),
+            // Variant aliases: "heploc" is "alalc97" and "aaland" is the
+            // region "AX".
+            ("en-t-ja-latn-hepburn-heploc", "en-t-ja-latn-alalc97"),
+            ("en-t-sv-aaland", "en-t-sv-ax"),
+            // test262 intl402/Intl/getCanonicalLocales/
+            // transformed-ext-canonical.js.
+            ("sl-t-sl-rozaj-biske-1994", "sl-t-sl-1994-biske-rozaj"),
+            ("DE-T-M0-DIN-K0-QWERTZ", "de-t-k0-qwertz-m0-din"),
+            ("en-t-m0-true", "en-t-m0-true"),
+            (
+                "und-Latn-t-und-hani-m0-names",
+                "und-Latn-t-und-hani-m0-prprname",
+            ),
         ] {
             assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
         }
