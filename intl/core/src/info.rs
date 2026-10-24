@@ -7,6 +7,7 @@
 //! methods (ECMA-402, "Intl.Locale.prototype.getCalendars" and friends).
 //! Each table is a generated file in core/data, parsed once on first use.
 
+use crate::supported::data_lines;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
@@ -15,7 +16,7 @@ type Table = BTreeMap<String, Vec<String>>;
 /// Parse a generated `<key> <value>...` file; `#` lines are comments.
 fn parse(text: &str) -> Table {
     let mut table = Table::new();
-    for line in text.lines().filter(|l| !l.starts_with('#')) {
+    for line in data_lines(text) {
         let mut words = line.split_whitespace();
         let key = words.next().expect("data file: empty line");
         let values: Vec<String> = words.map(str::to_owned).collect();
@@ -92,43 +93,43 @@ mod tests {
         assert_eq!(f("AQ"), None);
     }
 
+    /// Check the keys and value lists every table must have.
+    fn check_table(name: &str, table: &Table, check_value: impl Fn(&str) -> bool) {
+        for (key, list) in table {
+            let region = match key.rsplit_once('-') {
+                None => key.as_str(),
+                Some((language, region)) => {
+                    assert_eq!(
+                        canonicalize(language).as_deref(),
+                        Some(language),
+                        "{name} key {key}: language"
+                    );
+                    region
+                }
+            };
+            let und = format!("und-{region}");
+            assert_eq!(
+                canonicalize(&und).as_deref(),
+                Some(und.as_str()),
+                "{name} key {key}"
+            );
+            assert!(!list.is_empty(), "{name} key {key}: empty");
+            let mut seen = std::collections::BTreeSet::new();
+            for v in list {
+                assert!(seen.insert(v), "{name} key {key}: repeated {v}");
+                assert!(check_value(v), "{name} key {key}: bad value {v}");
+            }
+        }
+    }
+
     #[test]
     fn data_files_are_well_formed() {
         let calendars = values(Kind::Calendar);
-        for (name, table) in [
-            ("calendar", calendar_table()),
-            ("hour cycle", hour_cycle_table()),
-        ] {
-            for (key, list) in table {
-                let region = match key.rsplit_once('-') {
-                    None => key.as_str(),
-                    Some((language, region)) => {
-                        assert_eq!(
-                            canonicalize(language).as_deref(),
-                            Some(language),
-                            "{name} key {key}: language"
-                        );
-                        region
-                    }
-                };
-                let und = format!("und-{region}");
-                assert_eq!(
-                    canonicalize(&und).as_deref(),
-                    Some(und.as_str()),
-                    "{name} key {key}"
-                );
-                assert!(!list.is_empty(), "{name} key {key}: empty");
-                let mut seen = std::collections::BTreeSet::new();
-                for v in list {
-                    assert!(seen.insert(v), "{name} key {key}: repeated {v}");
-                    if name == "calendar" {
-                        assert!(
-                            calendars.contains(v) || v == "islamic" || v == "islamic-rgsa",
-                            "{name} key {key}: unsupported calendar {v}"
-                        );
-                    }
-                }
-            }
-        }
+        check_table("calendar", calendar_table(), |v| {
+            calendars.iter().any(|c| c == v) || v == "islamic" || v == "islamic-rgsa"
+        });
+        check_table("hour cycle", hour_cycle_table(), |v| {
+            ["h11", "h12", "h23", "h24"].contains(&v)
+        });
     }
 }

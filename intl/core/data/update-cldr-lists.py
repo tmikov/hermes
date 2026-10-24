@@ -81,8 +81,11 @@ def calendar_preferences(supplemental, convert):
 def hour_cycles(supplemental):
     table = {}
     for h in supplemental.findall(".//timeData/hours"):
+        preferred, allowed = h.get("preferred"), h.get("allowed")
+        if preferred is None or allowed is None or h.get("regions") is None:
+            sys.exit(f"timeData hours element lacks an attribute: {h.attrib}")
         values = []
-        for symbol in [h.get("preferred")] + h.get("allowed").split():
+        for symbol in [preferred] + allowed.split():
             if symbol not in HOUR_SYMBOLS:
                 sys.exit(f"unknown hour symbol {symbol!r}")
             if HOUR_SYMBOLS[symbol] not in values:

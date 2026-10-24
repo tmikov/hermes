@@ -98,7 +98,7 @@ pub fn values(kind: Kind) -> Vec<String> {
 }
 
 /// The non-comment lines of a data file.
-fn data_lines(text: &str) -> Vec<String> {
+pub(crate) fn data_lines(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
