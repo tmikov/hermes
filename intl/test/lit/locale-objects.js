@@ -64,8 +64,8 @@ loc.toString = function () {
 print(JSON.stringify(Intl.getCanonicalLocales([loc, 'en-US'])), calls);
 // CHECK-NEXT: ["en-US"] 0
 // Nor by the constructor, which also takes the tag from the slot.
-print(new Intl.Locale(loc).toString === loc.toString, calls);
-// CHECK-NEXT: false 0
+print(Intl.Locale.prototype.toString.call(new Intl.Locale(loc)), calls);
+// CHECK-NEXT: en-US 0
 
 // A Locale and a string with the same canonical tag are one entry.
 print(JSON.stringify(Intl.getCanonicalLocales([new Intl.Locale('en-us'), 'EN-US'])));

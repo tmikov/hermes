@@ -28,6 +28,15 @@ var LocalePrototype = Intl.Locale.prototype;
 var localeToString = LocalePrototype.toString;
 var localeMaximize = LocalePrototype.maximize;
 var localeMinimize = LocalePrototype.minimize;
+/// The original getter of Intl.Locale.prototype[name].
+function getter(name) {
+  return Object.getOwnPropertyDescriptor(LocalePrototype, name).get;
+}
+var getBaseName = getter('baseName');
+var getVariants = getter('variants');
+var getCalendar = getter('calendar');
+var getFirstDayOfWeek = getter('firstDayOfWeek');
+var getNumeric = getter('numeric');
 var boom = function () {
   throw new Error('tampered intrinsic was used');
 };
@@ -125,6 +134,25 @@ print(apply(localeToString, apply(localeMinimize, locale, []), []));
 // replaced toString.
 print(stringify(Intl.getCanonicalLocales([locale])));
 // CHECK-NEXT: ["en-Latn-GB-u-ca-gregory"]
+// The getters, the variants option (UpdateLanguageId), an option that
+// overrides a keyword of the tag in place (MakeLocaleRecord),
+// WeekdayToUValue, and numeric.
+var full = new OriginalLocale('en-latn-us-u-ca-buddhist', {
+  variants: 'Fonipa',
+  calendar: 'gregory',
+  firstDayOfWeek: '1',
+  numeric: true,
+});
+print(apply(localeToString, full, []));
+// CHECK-NEXT: en-Latn-US-fonipa-u-ca-gregory-fw-mon-kn
+print(
+  apply(getBaseName, full, []),
+  apply(getVariants, full, []),
+  apply(getCalendar, full, []),
+  apply(getFirstDayOfWeek, full, []),
+  apply(getNumeric, full, []),
+);
+// CHECK-NEXT: en-Latn-US-fonipa fonipa gregory mon true
 print(thrown(() => new OriginalLocale('en', {region: '1234'}), OriginalRangeError));
 // CHECK-NEXT: ok
 print(thrown(() => apply(localeToString, {}, []), OriginalTypeError));

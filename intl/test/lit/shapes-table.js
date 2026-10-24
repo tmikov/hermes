@@ -95,6 +95,7 @@ function check(row) {
     f = d.get;
     if (typeof f !== 'function') return label + 'no getter';
     if (isConstructor(f)) problems.push('constructible');
+    if (Object.prototype.hasOwnProperty.call(f, 'prototype')) problems.push('prototype');
   } else {
     return label + 'unknown kind ' + row[2];
   }
