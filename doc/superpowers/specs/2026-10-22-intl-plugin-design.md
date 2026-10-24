@@ -678,7 +678,11 @@ builds the part objects.
   (`isAvailableLocale`) where the spec names
   `%Intl.Collator%.[[AvailableLocales]]` and
   `%Intl.NumberFormat%.[[AvailableLocales]]`. Phases 2 and 3 must keep it
-  that way, or update these two methods.
+  that way, or update these two methods. They must also use the same data:
+  Phase 2's Collator takes `[[SortLocaleData]].[[co]]` from
+  `collationsOfLocale`, and Phase 3's NumberFormat takes its default
+  `[[nu]]` from `defaultNumberingSystem`, so `getCollations` and
+  `getNumberingSystems` agree with the constructors.
 - Each formatter type is a `jsi::NativeState` subclass that owns its Rust
   pointer and frees it in its destructor.
 - Native code reports only internal errors, as C++ exceptions. Hermes turns a
