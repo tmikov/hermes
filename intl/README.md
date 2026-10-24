@@ -256,7 +256,8 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 
 ## Updating the CLDR lists
 
-`core/data/currencies.txt` and `core/data/numbering-systems.txt` come from
+`core/data/currencies.txt`, `core/data/numbering-systems.txt`,
+`core/data/calendar-preferences.txt` and `core/data/hour-cycles.txt` come from
 CLDR. When ICU4X is upgraded, regenerate them from the CLDR release that
 ICU4X version uses, and commit the result:
 

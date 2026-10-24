@@ -46,6 +46,7 @@ pub unsafe extern "C" fn hi_string_free(s: HiString) {
 }
 
 mod host;
+mod info;
 mod locale;
 mod supported;
 
@@ -192,6 +193,46 @@ pub unsafe extern "C" fn hi_time_zone_canonicalize(
     )
 }
 
+/// The CLDR calendar preferences of a region: when it returns true, `out` is
+/// the calendar types, most preferred first, separated by single spaces.
+/// False if CLDR has no line for `region`.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_calendar_preferences(
+    region: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(region, len)
+            .and_then(info::calendar_preferences)
+            .map(|v| v.join(" ")),
+    )
+}
+
+/// The CLDR hour cycles of a region or `<language>-<region>` key: when it
+/// returns true, `out` is the hour cycles, preferred first, separated by
+/// single spaces. False if CLDR has no line for `key`.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_hour_cycles(
+    key: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(key, len)
+            .and_then(info::hour_cycles)
+            .map(|v| v.join(" ")),
+    )
+}
+
 /// Which list hi_supported_values returns.
 #[repr(C)]
 pub enum HiValueKind {
@@ -257,10 +298,23 @@ mod tests {
     }
 
     #[test]
+    fn ffi_looks_up_calendars_and_hour_cycles() {
+        let c = hi_locale_calendar_preferences;
+        assert_eq!(call(c, "TH").as_deref(), Some("buddhist gregory"));
+        assert_eq!(call(c, "US"), None);
+        let h = hi_locale_hour_cycles;
+        assert_eq!(call(h, "en-001").as_deref(), Some("h12 h23"));
+        assert_eq!(call(h, "AQ"), None);
+        assert_eq!(call(h, ""), None);
+    }
+
+    #[test]
     fn ffi_rejects_invalid_utf8() {
         let bad = [0xffu8, 0xfe];
         let mut out = HiString::EMPTY;
         assert!(!unsafe { hi_locale_canonicalize(bad.as_ptr(), bad.len(), &mut out) });
+        assert!(out.data.is_null());
+        assert!(!unsafe { hi_locale_hour_cycles(bad.as_ptr(), bad.len(), &mut out) });
         assert!(out.data.is_null());
     }
 }

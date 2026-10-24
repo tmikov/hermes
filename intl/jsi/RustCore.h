@@ -51,6 +51,18 @@ inline std::optional<std::string> removeLikelySubtags(std::string_view tag) {
   return callOptional(hi_locale_remove_likely_subtags, tag);
 }
 
+/// The CLDR calendar types for \p region, preferred first, space-separated;
+/// nullopt if CLDR has no line for it.
+inline std::optional<std::string> calendarPreferences(std::string_view region) {
+  return callOptional(hi_locale_calendar_preferences, region);
+}
+
+/// The CLDR hour cycles for \p key (a region or language-region), preferred
+/// first, space-separated; nullopt if CLDR has no line for it.
+inline std::optional<std::string> hourCycles(std::string_view key) {
+  return callOptional(hi_locale_hour_cycles, key);
+}
+
 /// Whether \p tag (canonical, no extensions) is an available locale.
 inline bool isAvailableLocale(std::string_view tag) {
   return hi_locale_is_available(

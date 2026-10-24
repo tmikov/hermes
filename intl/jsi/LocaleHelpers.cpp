@@ -34,6 +34,16 @@ std::string removeLikelySubtags(jsi::Runtime &, const std::string &tag) {
   throw std::logic_error("Intl internal error: removeLikelySubtags: " + tag);
 }
 
+std::optional<std::string> calendarPreferences(
+    jsi::Runtime &,
+    const std::string &region) {
+  return core::calendarPreferences(region);
+}
+
+std::optional<std::string> hourCycles(jsi::Runtime &, const std::string &key) {
+  return core::hourCycles(key);
+}
+
 bool isAvailableLocale(jsi::Runtime &, const std::string &tag) {
   return core::isAvailableLocale(tag);
 }
