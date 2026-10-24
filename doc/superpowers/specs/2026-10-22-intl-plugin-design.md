@@ -779,6 +779,15 @@ builds the part objects.
   changes, which the plugin follows: CollationsOfLocale has no default-locale
   fallback (tc39/ecma402#1072), and WeekInfoOfLocale goes through
   RegionPreference (#1051).
+- **Keyword and field value aliases.** Canonicalization (UTS 35 Annex C)
+  replaces a `-u-` keyword value or `-t-` field value that CLDR's
+  `common/bcp47` lists as an alias of its key: a deprecated type maps to its
+  `preferred` value, and each `alias` of a type that is a well-formed value
+  maps to the type's name (`eire` is `iedub`, `yes` is `true` for `kn`).
+  `update-cldr-lists.py` writes them to
+  `intl/core/data/extension-value-aliases.txt`. Only a whole value is
+  replaced, and a `-u-` value is removed only when the whole value is `true`
+  after that (`en-u-ca-true-foo` stays).
 - **Size work comes later.** Smaller presets, if measurements call for them,
   would come from a checked-in script that runs `icu4x-datagen` once and
   commits its output, picked up through `ICU4X_DATA_DIR`. The library size per

@@ -25,7 +25,7 @@ constructors arrive in later phases (see "Phasing" in the spec).
 | `core/src/info.rs` | The lookups behind the `Intl.Locale` information methods: calendars, hour cycles, time zones, week data, text direction, numbering system and collations. |
 | `core/src/host.rs` | Turning host settings (POSIX locale names, `TZ`, `/etc/localtime`) into ECMA-402 values. |
 | `core/src/supported.rs` | The lists behind `Intl.supportedValuesOf`. |
-| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, and `update-cldr-lists.py`. |
+| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
 | `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
 | `js/20-Locale.js` | `Intl.Locale`: the constructor, the getters, the information methods, `maximize` and `minimize`. |
@@ -151,6 +151,8 @@ cmake --build <build> --target check-intl
 - `check-intl-lit`: the lit tests in `test/lit/` and the gtests in
   `test/unit/`;
 - `check-intl-runner`: unit tests of the test262 runner's plugin mode;
+- `check-intl-data`: unit tests of `core/data/update-cldr-lists.py` on
+  fixture CLDR XML;
 - `check-intl-test262`: test262 `intl402` and the `built-ins` tests of the
   methods ECMA-402 overrides, through `utils/test_runner.py --intl-plugin`.
 
@@ -260,8 +262,9 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 ## Updating the CLDR lists
 
 `core/data/currencies.txt`, `core/data/numbering-systems.txt`,
-`core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt` and
-`core/data/time-zones-by-region.txt` come from CLDR. When ICU4X is upgraded,
+`core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt`,
+`core/data/time-zones-by-region.txt` and
+`core/data/extension-value-aliases.txt` come from CLDR. When ICU4X is upgraded,
 regenerate them from the CLDR release that ICU4X version uses, and commit the
 result:
 
@@ -269,9 +272,22 @@ result:
 python3 intl/core/data/update-cldr-lists.py release-48-2
 ```
 
-The last three feed the `Intl.Locale` information methods and are read by
+`calendar-preferences.txt`, `hour-cycles.txt` and `time-zones-by-region.txt`
+feed the `Intl.Locale` information methods and are read by
 `core/src/info.rs`. `time-zones-by-region.txt` lists zones as CLDR names
 them; `info.rs` turns each into its primary identifier when it is used.
+
+`extension-value-aliases.txt` holds the value aliases that
+`core/src/locale.rs` replaces when it canonicalizes a tag (UTS 35 Annex C),
+from every file in CLDR's `common/bcp47` (the generator lists that directory
+through the GitHub API): a deprecated type maps to its
+`preferred` value, and each alias of a type to the type's name, as
+`<extension> <key> <alias> <value>` lines with the extension `u` or `t`.
+Aliases that are not well-formed values (IANA names such as
+`America/Havana`, or `gregorian`, which has 9 letters) cannot occur in a tag
+and are left out. `core/data/test_update_cldr_lists.py` tests these rules
+(`check-intl-data`); a Rust test checks that every line of the file
+canonicalizes to its value.
 
 `core/data/locales.txt` is the set of locales ICU4X's compiled data covers
 (ICU4X's "recommended" set) and has no generator; replace it with the new

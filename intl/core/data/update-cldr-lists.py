@@ -5,25 +5,37 @@
 # LICENSE file in the root directory of this source tree.
 
 """Regenerate the CLDR-derived data files from CLDR: currencies.txt,
-numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt and
-time-zones-by-region.txt.
+numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt,
+time-zones-by-region.txt and extension-value-aliases.txt.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
 the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
 """
 
+import json
 import os
+import re
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 
 BASE = "https://raw.githubusercontent.com/unicode-org/cldr/{tag}/common/{path}"
+LISTING = (
+    "https://api.github.com/repos/unicode-org/cldr/contents/common/{path}?ref={tag}"
+)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def fetch(tag, path):
     with urllib.request.urlopen(BASE.format(tag=tag, path=path)) as r:
         return ET.fromstring(r.read())
+
+
+def bcp47_files(tag):
+    """The names of the files in common/bcp47 at `tag`."""
+    with urllib.request.urlopen(LISTING.format(tag=tag, path="bcp47")) as r:
+        entries = json.load(r)
+    return sorted(e["name"] for e in entries if e["name"].endswith(".xml"))
 
 
 def write(name, tag, comment, values):
@@ -122,6 +134,94 @@ def time_zones_by_region(timezone):
     return {region: sorted(ids) for region, ids in table.items()}
 
 
+# A -u- keyword value (UTS 35 `uvalue`, lowercased) and a -t- field value
+# (`tvalue`) have the same grammar: subtags of 3-8 alphanumerics.
+EXTENSION_VALUE = re.compile(r"[a-z0-9]{3,8}(-[a-z0-9]{3,8})*\Z")
+
+
+def extension_value_aliases(roots):
+    """The value aliases of the keys in `roots` (parsed bcp47/*.xml files),
+    for UTS 35 Annex C: a dict from (extension, key, alias) to the canonical
+    value, with extension "u" or "t", and the aliases skipped, as a list of
+    (extension, key, alias, why).
+
+    - A `<type>` with `deprecated="true"` and a `preferred` value maps to
+      that value. One without `preferred` stays as it is.
+    - Each value of a `<type>`'s `alias` attribute maps to the type's name,
+      lowercased, if it is a well-formed value. Other aliases are legacy
+      identifiers that no tag can contain (IANA names such as
+      "America/Havana", or "gregorian", which has 9 letters) and are
+      skipped. So is an alias that is itself the name of a type of the key:
+      a name stays as it is ("islamic-civil" is a type and an alias of the
+      deprecated "islamicc").
+    - An alias of a deprecated type with a `preferred` value maps to that
+      value, the end of the chain, so one replacement gives the canonical
+      value.
+
+    Exits on a conflict: an alias that maps to two values."""
+    table = {}
+    skipped = []
+
+    def add(ext, key, alias, value):
+        if not EXTENSION_VALUE.match(value):
+            sys.exit(f"{ext} {key}: {alias!r} maps to ill-formed {value!r}")
+        if alias == value:
+            return
+        if table.setdefault((ext, key, alias), value) != value:
+            sys.exit(
+                f"{ext} {key}: {alias!r} maps to both "
+                f"{table[(ext, key, alias)]!r} and {value!r}"
+            )
+
+    for root in roots:
+        for k in root.iter("key"):
+            ext = k.get("extension", "u")
+            key = k.get("name")
+            types = k.findall("type")
+            names = {t.get("name") for t in types}
+            preferred = {
+                t.get("name"): t.get("preferred")
+                for t in types
+                if t.get("deprecated") == "true" and t.get("preferred")
+            }
+
+            def resolve(name):
+                seen = set()
+                while name in preferred:
+                    if name in seen:
+                        sys.exit(f"{ext} {key}: preferred values loop at {name!r}")
+                    seen.add(name)
+                    name = preferred[name]
+                return name
+
+            for name in preferred:
+                add(ext, key, name, resolve(name))
+            for t in types:
+                for alias in (t.get("alias") or "").split():
+                    lower = alias.lower()
+                    if not EXTENSION_VALUE.match(lower):
+                        skipped.append((ext, key, alias, "not a well-formed value"))
+                    elif lower in names:
+                        if lower != t.get("name"):
+                            skipped.append((ext, key, alias, "the name of a type"))
+                    else:
+                        add(ext, key, lower, resolve(t.get("name")))
+    return table, skipped
+
+
+def write_value_aliases(name, tag, table):
+    """Write one `<extension> <key> <alias> <value>` line per alias, sorted."""
+    with open(os.path.join(HERE, name), "w") as f:
+        f.write(
+            "# -u- keyword and -t- field value aliases with their canonical "
+            "values (bcp47/*.xml):\n"
+        )
+        f.write("# <extension> <key> <alias> <value>.\n")
+        f.write(f"# Generated by update-cldr-lists.py from CLDR {tag}.\n")
+        for (ext, key, alias), value in sorted(table.items()):
+            f.write(f"{ext} {key} {alias} {value}\n")
+
+
 def main():
     tag = sys.argv[1]
     # currency.xml also holds key cf (currency format), whose types
@@ -171,6 +271,10 @@ def main():
         "each zone, not always its primary identifier.",
         time_zones_by_region(fetch(tag, "bcp47/timezone.xml")),
     )
+    table, _ = extension_value_aliases(
+        [fetch(tag, "bcp47/" + f) for f in bcp47_files(tag)]
+    )
+    write_value_aliases("extension-value-aliases.txt", tag, table)
 
 
 if __name__ == "__main__":

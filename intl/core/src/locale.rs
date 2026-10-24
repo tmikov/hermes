@@ -164,85 +164,70 @@ fn keep_true_subtags(tag: &str, loc: &mut Locale) {
     }
 }
 
-/// The -u- value half of UTS 35 canonicalization, which ICU4X leaves out: "yes" means "true",
-/// "true" is dropped, and deprecated values map to their preferred ones (CLDR bcp47/*.xml).
-// The aliases CLDR lists for ca, ks, ms and the common tz ones; extend from CLDR as needed.
+/// The value aliases of data/extension-value-aliases.txt (CLDR
+/// bcp47/*.xml): (extension, key, alias) to the canonical value, where the
+/// extension is "u" for a -u- keyword and "t" for a -t- field.
+pub(crate) fn value_aliases(
+) -> &'static BTreeMap<(&'static str, &'static str, &'static str), &'static str> {
+    static MAP: OnceLock<BTreeMap<(&str, &str, &str), &str>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        include_str!("../data/extension-value-aliases.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| match l.split(' ').collect::<Vec<_>>()[..] {
+                [ext, key, alias, value] => ((ext, key, alias), value),
+                _ => panic!("data/extension-value-aliases.txt: bad line {l:?}"),
+            })
+            .collect()
+    })
+}
+
+/// The canonical value of `value`, a value of `key` in extension `ext`
+/// ("u" or "t"), if `value` is an alias.
+fn value_alias(ext: &str, key: &str, value: &str) -> Option<&'static str> {
+    value_aliases().get(&(ext, key, value)).copied()
+}
+
+/// The keyword and field value half of UTS 35 Annex C, which ICU4X leaves
+/// out: a -u- keyword value or -t- field value that CLDR lists as an alias
+/// of its key (value_aliases) is replaced by its canonical value, and then a
+/// -u- value that is "true" is removed. Only a whole value is replaced.
+/// CLDR's aliases include "yes" for "true" for the boolean collation keys
+/// (kb, kc, kh, kk, kn), so en-u-kn-yes becomes en-u-kn.
 fn canonicalize_keyword_values(loc: &mut Locale) {
-    use icu::locale::extensions::unicode::Value;
-    const ALIASES: &[(&str, &str, &str)] = &[
-        ("ca", "ethiopic-amete-alem", "ethioaa"),
-        ("ca", "islamicc", "islamic-civil"),
-        ("ks", "primary", "level1"),
-        ("ks", "secondary", "level2"),
-        ("ks", "tertiary", "level3"),
-        ("ks", "quarternary", "level4"),
-        ("ks", "quaternary", "level4"),
-        ("ks", "identical", "identic"),
-        ("ms", "imperial", "uksystem"),
-        ("tz", "aqams", "nzakl"),
-        ("tz", "cnckg", "cnsha"),
-        ("tz", "cnhrb", "cnsha"),
-        ("tz", "cnkhg", "cnurc"),
-        ("tz", "cuba", "cuhav"),
-        ("tz", "egypt", "egcai"),
-        ("tz", "eire", "iedub"),
-        ("tz", "est", "papty"),
-        ("tz", "gmt0", "gmt"),
-        ("tz", "hongkong", "hkhkg"),
-        ("tz", "hst", "utcw10"),
-        ("tz", "iceland", "isrey"),
-        ("tz", "iran", "irthr"),
-        ("tz", "israel", "jeruslm"),
-        ("tz", "jamaica", "jmkin"),
-        ("tz", "japan", "jptyo"),
-        ("tz", "libya", "lytip"),
-        ("tz", "mst", "utcw07"),
-        ("tz", "navajo", "usden"),
-        ("tz", "poland", "plwaw"),
-        ("tz", "portugal", "ptlis"),
-        ("tz", "prc", "cnsha"),
-        ("tz", "roc", "twtpe"),
-        ("tz", "rok", "krsel"),
-        ("tz", "turkey", "trist"),
-        ("tz", "uct", "utc"),
-        ("tz", "usnavajo", "usden"),
-        ("tz", "zulu", "utc"),
-    ];
-    let kw = &mut loc.extensions.unicode.keywords;
-    let fixes: Vec<_> = kw
+    use icu::locale::extensions::{transform, unicode};
+    let keywords = &mut loc.extensions.unicode.keywords;
+    let fixes: Vec<(unicode::Key, String)> = keywords
         .iter()
-        .filter_map(|(k, v)| {
-            let v = v.to_string();
-            let key = k.as_str();
-            // "yes" is an alias of "true" only for the boolean collation keys.
-            let boolean = matches!(key, "kb" | "kc" | "kh" | "kk" | "kn");
-            let new = if v == "true" || (boolean && v == "yes") {
-                String::new()
-            } else {
-                ALIASES
-                    .iter()
-                    .find(|a| a.0 == key && a.1 == v)
-                    .map(|a| a.2.to_owned())?
-            };
-            Some((*k, new))
+        .filter_map(|(key, value)| {
+            let value = value.to_string();
+            let new = value_alias("u", key.as_str(), &value).unwrap_or(&value);
+            (new != value || new == "true").then(|| (*key, new.to_owned()))
         })
         .collect();
-    for (k, v) in fixes {
-        kw.set(
-            k,
-            if v.is_empty() {
-                Value::default()
+    for (key, value) in fixes {
+        keywords.set(
+            key,
+            if value == "true" {
+                unicode::Value::default()
             } else {
-                v.parse().unwrap_or_default()
+                // Collected, not parsed, so that a "true" subtag stays.
+                value.split('-').filter_map(|s| s.parse().ok()).collect()
             },
         );
     }
-    // The one -t- field alias CLDR defines (bcp47/transform.xml).
-    if let Ok(m0) = "m0".parse() {
-        let fields = &mut loc.extensions.transform.fields;
-        if fields.get(&m0).is_some_and(|v| v.to_string() == "names") {
-            if let Ok(v) = "prprname".parse() {
-                fields.set(m0, v);
+    let fields = &mut loc.extensions.transform.fields;
+    for (&(ext, key, alias), value) in value_aliases() {
+        if ext != "t" {
+            continue;
+        }
+        let Ok(key) = key.parse::<transform::Key>() else {
+            continue;
+        };
+        if fields.get(&key).is_some_and(|v| v.to_string() == alias) {
+            if let Ok(value) = value.parse() {
+                fields.set(key, value);
             }
         }
     }
@@ -783,6 +768,63 @@ mod tests {
             ),
         ] {
             assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn canonicalizes_value_aliases() {
+        for (tag, want) in [
+            // Deprecated time zones with a preferred value (CLDR 48.2).
+            ("en-u-tz-aukns", "en-u-tz-auhba"),
+            ("en-u-tz-camtr", "en-u-tz-cator"),
+            ("en-u-tz-caffs", "en-u-tz-cawnp"),
+            ("en-u-tz-aqams", "en-u-tz-aqmcm"),
+            ("en-u-tz-cnckg", "en-u-tz-cnsha"),
+            // Well-formed IANA aliases of a zone; uppercase input.
+            ("en-u-tz-EIRE", "en-u-tz-iedub"),
+            ("en-u-tz-gmt0", "en-u-tz-gmt"),
+            // An alias of a deprecated zone goes on to its preferred value.
+            ("en-u-tz-est5edt", "en-u-tz-usnyc"),
+            ("en-u-ms-imperial", "en-u-ms-uksystem"),
+            ("en-u-ks-primary", "en-u-ks-level1"),
+            ("en-u-ca-ethiopic-amete-alem", "en-u-ca-ethioaa"),
+            ("en-u-ca-islamicc", "en-u-ca-islamic-civil"),
+            ("en-t-m0-names", "en-t-m0-prprname"),
+            ("en-t-m0-beta-metsehaf", "en-t-m0-betamets"),
+            ("en-t-d0-name", "en-t-d0-charname"),
+            // "yes" is "true" for the boolean collation keys only, and a
+            // value that is "true" after replacement is removed.
+            ("en-u-kn-yes", "en-u-kn"),
+            ("en-u-kb-yes-kc-yes", "en-u-kb-kc"),
+            ("en-u-kf-yes", "en-u-kf-yes"),
+            ("en-u-co-yes", "en-u-co-yes"),
+            // Only a whole value is replaced, and only for its own key and
+            // extension.
+            ("en-u-tz-cuba-foo", "en-u-tz-cuba-foo"),
+            ("en-u-ca-cuba", "en-u-ca-cuba"),
+            ("en-u-tz-names", "en-u-tz-names"),
+            ("en-t-m0-imperial", "en-t-m0-imperial"),
+            // Names stay, even when another type lists them as an alias.
+            ("en-u-ca-islamic-civil", "en-u-ca-islamic-civil"),
+            // Deprecated values with no preferred value stay.
+            ("en-u-co-direct", "en-u-co-direct"),
+            ("en-u-hc-c12", "en-u-hc-c12"),
+        ] {
+            assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn every_value_alias_canonicalizes_to_its_value() {
+        assert!(value_aliases().len() > 60);
+        for (&(ext, key, alias), &value) in value_aliases() {
+            let want = if ext == "u" && value == "true" {
+                format!("und-u-{key}")
+            } else {
+                format!("und-{ext}-{key}-{value}")
+            };
+            let tag = format!("und-{ext}-{key}-{alias}");
+            assert_eq!(canonicalize(&tag), Some(want), "{tag:?}");
         }
     }
 

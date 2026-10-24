@@ -232,7 +232,13 @@ if(HERMES_ENABLE_TEST_SUITE)
     COMMENT "Running the test262 plugin-mode unit tests"
     VERBATIM)
 
+  add_custom_target(check-intl-data
+    COMMAND ${Python_EXECUTABLE} -B
+      ${HERMES_INTL_CORE_DIR}/data/test_update_cldr_lists.py
+    COMMENT "Running the unit tests of the CLDR list generator"
+    VERBATIM)
+
   add_custom_target(check-intl)
   add_dependencies(check-intl check-intl-rust check-intl-lit check-intl-runner
-    check-intl-test262)
+    check-intl-data check-intl-test262)
 endif()

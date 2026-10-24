@@ -137,6 +137,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn calendar_aliases_are_the_cldr_ones() {
+        let cldr: Vec<(&str, &str)> = crate::locale::value_aliases()
+            .iter()
+            .filter(|((ext, key, _), value)| {
+                (*ext, *key) == ("u", "ca") && CALENDARS.contains(value)
+            })
+            .map(|((_, _, alias), value)| (*alias, *value))
+            .collect();
+        assert_eq!(cldr, CALENDAR_ALIASES);
+    }
+
+    #[test]
     fn calendars_are_icu4x_calendars() {
         use icu::calendar::preferences::CalendarAlgorithm;
         use icu::calendar::AnyCalendarKind;
