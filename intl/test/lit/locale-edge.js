@@ -80,3 +80,18 @@ for (var k = 0; k < longTlangs.length; k++) {
 // CHECK-NEXT: en-t-posix en-t-posix en-Latn-US-t-posix en-t-posix
 // CHECK-NEXT: fr-t-abcdefgh-latn fr-t-abcdefgh-latn fr-Latn-FR-t-abcdefgh-latn fr-t-abcdefgh-latn
 // CHECK-NEXT: de-t-posix-at de-t-posix-at de-Latn-DE-t-posix-at de-t-posix-at
+
+// UTS 35 Annex C removes a keyword value only when the whole value is
+// "true", so a "true" subtag of a longer value stays: in a tag, in a
+// constructor option, and through maximize and minimize, next to a long
+// tlang.
+print(Intl.getCanonicalLocales('en-u-ca-true-foo')[0]);
+// CHECK-NEXT: en-u-ca-true-foo
+var trueFoo = new Intl.Locale('en', {calendar: 'true-foo'});
+print(trueFoo.calendar, trueFoo.toString());
+// CHECK-NEXT: true-foo en-u-ca-true-foo
+var trueTlang = new Intl.Locale('en-t-posix', {calendar: 'true-foo'});
+print(trueTlang.maximize().toString(), trueTlang.minimize().toString());
+// CHECK-NEXT: en-Latn-US-t-posix-u-ca-true-foo en-t-posix-u-ca-true-foo
+print(new Intl.Locale('en', {numeric: true}).toString());
+// CHECK-NEXT: en-u-kn

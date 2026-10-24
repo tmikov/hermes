@@ -88,6 +88,9 @@ pub fn canonicalize(tag: &str) -> Option<String> {
         tag.clone()
     };
     let mut loc: Locale = parsed.parse().ok()?;
+    // Before the canonicalizer runs, so that it still applies the
+    // subdivision aliases to -u-rg and -u-sd.
+    keep_true_subtags(&parsed, &mut loc);
     static C: OnceLock<LocaleCanonicalizer> = OnceLock::new();
     let canonicalizer = C.get_or_init(LocaleCanonicalizer::new_extended);
     canonicalizer.canonicalize(&mut loc);
@@ -117,6 +120,48 @@ pub fn canonicalize(tag: &str) -> Option<String> {
         out
     };
     restore_long_tlang(out, tlang)
+}
+
+/// Set each keyword value of `loc`'s -u- extension to the value as written
+/// in `tag`, the tag `loc` was parsed from. ICU4X's parser drops every
+/// "true" subtag of a value, but UTS 35 Annex C removes a value only when
+/// the whole value is "true" (canonicalize_keyword_values does that), so
+/// en-u-ca-true-foo keeps its value. Collecting subtags into a Value keeps
+/// them. A repeated key keeps its first value, as in ICU4X's parse.
+fn keep_true_subtags(tag: &str, loc: &mut Locale) {
+    use icu::locale::extensions::unicode::{Key, Value};
+    use icu::locale::subtags::Subtag;
+    // The subtags after the language. The language has 2 or more
+    // characters, so the first "u" among them is the -u- singleton, unless
+    // a "x" comes first: everything after it is private use.
+    let mut subtags = tag.split('-').skip(1);
+    if !subtags
+        .by_ref()
+        .take_while(|s| !s.eq_ignore_ascii_case("x"))
+        .any(|s| s.eq_ignore_ascii_case("u"))
+    {
+        return;
+    }
+    // The attributes and keywords, up to the next singleton.
+    let mut keywords: Vec<(Key, Vec<Subtag>)> = Vec::new();
+    for subtag in subtags.take_while(|s| s.len() > 1) {
+        if subtag.len() == 2 {
+            let Ok(key) = subtag.parse() else { return };
+            keywords.push((key, Vec::new()));
+        } else if let Some((_, value)) = keywords.last_mut() {
+            let Ok(subtag) = subtag.parse() else { return };
+            value.push(subtag);
+        }
+    }
+    let mut seen = BTreeSet::new();
+    for (key, value) in keywords {
+        if seen.insert(key) {
+            loc.extensions
+                .unicode
+                .keywords
+                .set(key, value.into_iter().collect::<Value>());
+        }
+    }
 }
 
 /// The -u- value half of UTS 35 canonicalization, which ICU4X leaves out: "yes" means "true",
@@ -574,6 +619,12 @@ mod tests {
                 "de-Latn-DE-t-posix-at-m0-prprname",
             ),
             ("posix-t-abcdef", "posix-t-abcdef"),
+            // The extensions are kept as they are: a 5-8 letter tlang
+            // language and a "true" subtag of a longer -u- value.
+            (
+                "en-t-posix-u-ca-true-foo",
+                "en-Latn-US-t-posix-u-ca-true-foo",
+            ),
         ];
         for (tag, want) in cases {
             assert_eq!(add_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
@@ -608,6 +659,10 @@ mod tests {
             ("en-Latn-US-t-posix", "en-t-posix"),
             ("fr-t-abcdefgh-latn", "fr-t-abcdefgh-latn"),
             ("de-Latn-DE-t-posix-AT", "de-t-posix-at"),
+            (
+                "en-Latn-US-t-posix-u-ca-true-foo",
+                "en-t-posix-u-ca-true-foo",
+            ),
         ];
         for (tag, want) in cases {
             assert_eq!(remove_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
@@ -646,7 +701,42 @@ mod tests {
             canonicalize("en-u-ca-islamicc").as_deref(),
             Some("en-u-ca-islamic-civil")
         );
-        assert_eq!(canonicalize("en-u-kn-true").as_deref(), Some("en-u-kn"));
+        // UTS 35 Annex C removes a keyword value only when the whole value
+        // is "true"; a "true" subtag of a longer value stays.
+        for (tag, want) in [
+            ("en-u-kn-true", "en-u-kn"),
+            ("EN-U-KN-TRUE", "en-u-kn"),
+            ("en-u-ca-true-foo", "en-u-ca-true-foo"),
+            ("en-u-ca-foo-true", "en-u-ca-foo-true"),
+            ("en-u-co-true-true", "en-u-co-true-true"),
+            ("en-u-CA-True-Foo", "en-u-ca-true-foo"),
+            // The first occurrence of a repeated key wins; attributes are
+            // sorted and deduplicated.
+            ("en-u-ca-true-foo-ca-bar", "en-u-ca-true-foo"),
+            ("en-u-ca-bar-ca-true-foo", "en-u-ca-bar"),
+            ("en-u-bbb-aaa-bbb-ca-true-foo", "en-u-aaa-bbb-ca-true-foo"),
+            // Keys are sorted, each with its own value.
+            (
+                "en-u-nu-true-arab-ca-true-foo-kn",
+                "en-u-ca-true-foo-kn-nu-true-arab",
+            ),
+            // Private use is not an extension.
+            ("en-x-u-ca-true-foo", "en-x-u-ca-true-foo"),
+            (
+                "en-u-ca-true-foo-x-u-ca-true",
+                "en-u-ca-true-foo-x-u-ca-true",
+            ),
+            // Next to the other extensions, and with a 5-8 letter language.
+            (
+                "en-u-ca-true-foo-t-posix-a-bc",
+                "en-a-bc-t-posix-u-ca-true-foo",
+            ),
+            ("posix-u-ca-true-foo", "posix-u-ca-true-foo"),
+            // ICU4X still applies the subdivision aliases.
+            ("en-u-sd-cn11", "en-u-sd-cnbj"),
+        ] {
+            assert_eq!(canonicalize(tag).as_deref(), Some(want), "{tag:?}");
+        }
         assert_eq!(
             canonicalize("de-u-co-phonebk-ka-shifted").as_deref(),
             Some("de-u-co-phonebk-ka-shifted")
