@@ -17,11 +17,11 @@
 
 // (tag) The canonicalized tag, or undefined if tag is not well-formed.
 HERMES_INTL_HELPER(canonicalizeLocale, OptUtf8, Utf8)
-// (tag) The Add Likely Subtags result for a canonical tag. Throws if tag does
-// not parse.
+// (tag) The Add Likely Subtags result for a canonical tag, itself a canonical
+// tag (RegionPreference relies on this). Throws if tag does not parse.
 HERMES_INTL_HELPER(addLikelySubtags, Utf8, Utf8)
-// (tag) The Remove Likely Subtags result for a canonical tag. Throws if tag
-// does not parse.
+// (tag) The Remove Likely Subtags result for a canonical tag, itself a
+// canonical tag. Throws if tag does not parse.
 HERMES_INTL_HELPER(removeLikelySubtags, Utf8, Utf8)
 // (region) The CLDR calendar types for a region ("US", "001"), preferred
 // first, space-separated, or undefined if CLDR has no line for it.

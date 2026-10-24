@@ -15,6 +15,7 @@
 
 // Stubs for what the plugin's C++ passes to setup. The canonicalizer
 // lowercases the language, uppercases regions and title-cases scripts.
+var hostDefaults = {locales: ['en-US'], timeZone: 'UTC'};
 var native = {
   canonicalizeLocale: function (tag) {
     var parts = tag.split('-');
@@ -148,6 +149,10 @@ print(show(GetLocaleVariants('sl-rozaj-biske')) + ' ' + show(GetLocaleVariants('
 // CHECK-NEXT: "rozaj-biske" "rozaj" undefined
 print(show(GetLocaleVariants('sl-Latn-IT-rozaj-1994-u-ca-gregory')));
 // CHECK-NEXT: "rozaj-1994"
+print(show(GetLocaleVariants('en-US-1994')) + ' ' + show(GetLocaleVariants('sl-rozaj')));
+// CHECK-NEXT: "1994" "rozaj"
+print(GetLocaleBaseName('en-US-1994-u-ca-gregory') + ' ' + GetLocaleBaseName('sl-rozaj-t-ja'));
+// CHECK-NEXT: en-US-1994 sl-rozaj
 
 // UnicodeExtensionValue: undefined stands for ~empty~.
 print(show(UnicodeExtensionValue('en-u-ca-gregory', 'ca')) + ' ' + show(UnicodeExtensionValue('en-u-kn', 'kn')) + ' ' + show(UnicodeExtensionValue('en', 'ca')));
