@@ -302,10 +302,12 @@ MappedFileId statFileId(const std::string &path) {
 
 /// The absolute path of the file mapped at \p addr, from /proc/self/maps
 /// (see pathFromMapsLine); empty if it cannot be read or the file cannot be
-/// named. Unlike dladdr's dli_fname, which is the path the library was
-/// loaded by and may be relative to a directory the process has since left,
-/// the kernel's path is absolute.
-std::string mappedFilePath(const void *addr) {
+/// named. \p mapping gets the mapping's device and inode when the line has
+/// them (exists is true), even when the path is empty. Unlike dladdr's
+/// dli_fname, which is the path the library was loaded by and may be relative
+/// to a directory the process has since left, the kernel's path is absolute.
+std::string mappedFilePath(const void *addr, MappedFileId *mapping) {
+  *mapping = MappedFileId{};
   FILE *maps = std::fopen("/proc/self/maps", "re");
   if (!maps)
     return "";
@@ -314,9 +316,18 @@ std::string mappedFilePath(const void *addr) {
   char *line = nullptr;
   size_t capacity = 0;
   while (::getline(&line, &capacity, maps) > 0) {
-    unsigned long long start, end;
+    unsigned long long start, end, inode;
+    unsigned devMajor, devMinor;
     if (std::sscanf(line, "%llx-%llx", &start, &end) == 2 && a >= start &&
         a < end) {
+      if (std::sscanf(
+              line,
+              "%*llx-%*llx %*s %*s %x:%x %llu",
+              &devMajor,
+              &devMinor,
+              &inode) == 3 &&
+          inode != 0)
+        *mapping = MappedFileId{true, devMajor, devMinor, inode};
       path = pathFromMapsLine(line, statFileId);
       break;
     }
@@ -348,17 +359,37 @@ std::string hermesDirectory() {
     path = mainExecutablePath();
   } else {
 #if defined(__linux__)
-    path = mappedFilePath(reinterpret_cast<const void *>(&hermesDirectory));
-#endif
+    MappedFileId mapping;
+    path = mappedFilePath(
+        reinterpret_cast<const void *>(&hermesDirectory), &mapping);
     if (path.empty() && info.dli_fname) {
-      // dladdr's path may be relative to a directory the process has left,
-      // or name a file since removed. Unless realpath finds the file, it
-      // names no directory that can be trusted.
+      // dladdr's path is the one given to dlopen. A relative one may be
+      // relative to a directory the process has left, and realpath shows
+      // only that some file is there now: use it only if it is absolute,
+      // resolves, and, when the mapping's device and inode are known, is
+      // the mapped file.
+      char resolved[PATH_MAX];
+      if (info.dli_fname[0] != '/' || !::realpath(info.dli_fname, resolved))
+        return "";
+      if (mapping.exists) {
+        MappedFileId id = statFileId(resolved);
+        if (!id.exists || id.devMajor != mapping.devMajor ||
+            id.devMinor != mapping.devMinor || id.inode != mapping.inode)
+          return "";
+      }
+      path = resolved;
+    }
+#else
+    if (info.dli_fname) {
+      // dyld records a canonical absolute path for a library loaded from
+      // disk. Unless realpath finds the file, it names no directory that
+      // can be trusted.
       char resolved[PATH_MAX];
       if (!::realpath(info.dli_fname, resolved))
         return "";
       path = resolved;
     }
+#endif
   }
   if (path.empty())
     return "";

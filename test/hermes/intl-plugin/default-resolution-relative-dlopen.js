@@ -55,6 +55,17 @@
 // RUN: cp %t/lib/libhermesvm.so %t/A/lib/
 // RUN: cp %t/lib/%intl_library_name %t/B/lib/
 // RUN: cd %t/A && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so %t/B delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// The same, with a decoy B/lib/libhermesvm.so (plain text): realpath of
+// dladdr's relative path then succeeds, but names another file.
+// RUN: mkdir -p %t/C/lib %t/D/lib
+// RUN: cp %t/lib/libhermesvm.so %t/C/lib/
+// RUN: echo "not a library" > %t/D/lib/libhermesvm.so
+// RUN: cp %t/lib/%intl_library_name %t/D/lib/
+// RUN: cd %t/C && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so %t/D delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by an absolute path, then replaced by another file, as an upgrade
+// would: dladdr's path resolves, but not to the mapped file.
+// RUN: cp -r %t/lib %t/upgraded
+// RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/upgraded/libhermesvm.so / replace | %FileCheck --match-full-lines --check-prefix=NONE %s
 
 // CHECK: plugin
 // NONE: no plugin

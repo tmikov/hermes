@@ -370,13 +370,15 @@ For each new runtime:
       or all as written; with the suffix kept or stripped) whose `stat`
       device and inode are the mapping's. Otherwise, as for a mapping
       without an inode or an unreadable `/proc`, the loader falls back to
-      `dladdr`'s path, and only if `realpath` resolves it: an unresolved
-      `dladdr` path may be relative to a directory the host has left, or
-      name a removed file, so it gives no directory. A removed libhermesvm
+      `dladdr`'s path, but only if it is absolute, `realpath` resolves it,
+      and, when the maps line gave the mapping's device and inode, `stat`
+      of the resolved path has them. A relative `dladdr` path may be
+      relative to a directory the host has left, and `realpath` shows only
+      that some file is there now; otherwise there is no directory. A removed libhermesvm
       therefore usually finds no plugin, which is the safer result: it
       usually means an upgrade, and the plugin beside it would be from
-      another build. On Apple platforms `dladdr`'s path is used, under the
-      same `realpath` rule: dyld records an absolute path for a library
+      another build. On Apple platforms `dladdr`'s path is used if
+      `realpath` resolves it: dyld records an absolute path for a library
       loaded from disk (it asks the kernel for the path of the file it
       opened, with `F_GETPATH`). The directory is taken after `realpath`.
       Failing to find it is never fatal: resolution goes on to the next

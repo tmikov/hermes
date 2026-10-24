@@ -9,8 +9,9 @@
 // test), RTLD_LOCAL, changes to the directory in argv[2], then creates a
 // runtime through the public factory and reports whether the (fake) Intl
 // plugin was installed by default resolution. With "delete" as argv[3] it
-// removes the library's file after loading it. dladdr reports the path a
-// library was loaded by, so a relative one no longer names the library
+// removes the library's file after loading it; with "replace", it also
+// writes another file in its place, as an upgrade would. dladdr reports the
+// path a library was loaded by, so a relative one no longer names the library
 // after the change of directory.
 
 #include "hermes/hermes.h"
@@ -25,10 +26,12 @@
 static const char kFactory[] =
     "_ZN8facebook6hermes17makeHermesRuntimeERKN6hermes2vm13RuntimeConfigE";
 
-/// Usage: intl_relative_host <libhermesvm> <dir> [delete]. Prints "plugin"
-/// or "no plugin".
+/// Usage: intl_relative_host <libhermesvm> <dir> [delete|replace]. Prints
+/// "plugin" or "no plugin".
 int main(int argc, char **argv) {
-  if (argc != 3 && !(argc == 4 && std::strcmp(argv[3], "delete") == 0))
+  bool replace = argc == 4 && std::strcmp(argv[3], "replace") == 0;
+  if (argc != 3 &&
+      !(argc == 4 && (replace || std::strcmp(argv[3], "delete") == 0)))
     return 2;
   void *vm = ::dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
   if (!vm) {
@@ -43,6 +46,11 @@ int main(int argc, char **argv) {
   }
   if (argc == 4 && ::unlink(argv[1]) != 0)
     return 2;
+  if (replace) {
+    FILE *f = std::fopen(argv[1], "w");
+    if (!f || std::fputs("not a library\n", f) < 0 || std::fclose(f) != 0)
+      return 2;
+  }
   if (::chdir(argv[2]) != 0)
     return 2;
   auto rt = make(::hermes::vm::RuntimeConfig());
