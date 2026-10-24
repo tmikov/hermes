@@ -21,5 +21,8 @@
 // RUN: %hermes -Xintl-default-locale=ff -Xintl-default-locale=ff-Adlm-BF %s | %FileCheck --check-prefix=OK %s
 // RUN: %hermes -Xintl-default-locale=EN-us -Xintl-default-time-zone=asia/calcutta %s | %FileCheck --check-prefix=OK %s
 // RUN: %hermes -Xintl-default-locale=tlh -Xintl-default-locale=en-US-u-ca-buddhist %s | %FileCheck --check-prefix=OK %s
+// Only the language identifier decides the default: a 5-8 letter tlang
+// language, which ICU4X does not parse, is dropped with the extensions.
+// RUN: %hermes -Xintl-default-locale=en-US-t-posix %s | %FileCheck --check-prefix=OK %s
 // OK: ok
 print('ok');

@@ -242,6 +242,14 @@ TEST(DefaultsTest, ExplicitLocaleExtensionsAreDropped) {
   EXPECT_EQ(config.default_locales, (std::vector<std::string>{"en-US"}));
 }
 
+TEST(DefaultsTest, ExplicitLocaleWithLongTlangIsReduced) {
+  // ICU4X does not parse the whole tag ("posix" has 5 letters); the default
+  // depends only on its language identifier.
+  hermes_intl_config config{{"en-US-t-posix"}, ""};
+  EXPECT_EQ(resolveDefaults(&config, fakeHost({})), "");
+  EXPECT_EQ(config.default_locales, (std::vector<std::string>{"en-US"}));
+}
+
 TEST(DefaultsTest, ExplicitAvailableLocaleIsKept) {
   hermes_intl_config config{{"zh-TW"}, ""};
   EXPECT_EQ(resolveDefaults(&config, fakeHost({})), "");

@@ -129,12 +129,12 @@ pub fn script_direction(script: &str) -> Option<&'static str> {
 }
 
 /// The numbering system of `locale`'s decimal symbols data (found with
-/// ICU4X's locale fallback); None if `locale` does not parse.
+/// ICU4X's locale fallback); None if the language identifier of `locale`
+/// does not parse.
 pub fn default_numbering_system(locale: &str) -> Option<String> {
     use icu::decimal::provider::{Baked, DecimalSymbolsV1};
     use icu_provider::prelude::*;
-    let locale: Locale = locale.parse().ok()?;
-    let data_locale = DataLocale::from(&locale);
+    let data_locale = DataLocale::from(&crate::locale::language_id(locale)?);
     let response = DataProvider::<DecimalSymbolsV1>::load(
         &Baked,
         DataRequest {
@@ -148,7 +148,8 @@ pub fn default_numbering_system(locale: &str) -> Option<String> {
 
 /// The collation types (among those `Intl.supportedValuesOf("collation")`
 /// lists) that have a tailoring for `locale` or a locale on its fallback
-/// chain, sorted. Empty if `locale` does not parse.
+/// chain, sorted. Empty if the language identifier of `locale` does not
+/// parse.
 pub fn collations_of_locale(locale: &str) -> Vec<&'static str> {
     let mut types: Vec<&'static str> = COLLATIONS
         .iter()
@@ -337,6 +338,9 @@ mod tests {
         assert_eq!(f("hi-IN").as_deref(), Some("latn"));
         assert_eq!(f("und").as_deref(), Some("latn"));
         assert_eq!(f("not a tag"), None);
+        // Only the language identifier is used; ICU4X does not parse this
+        // whole tag.
+        assert_eq!(f("ar-EG-t-posix").as_deref(), Some("arab"));
     }
 
     #[test]
@@ -355,5 +359,8 @@ mod tests {
             assert!(list.windows(2).all(|w| w[0] < w[1]), "{l}");
         }
         assert!(f("not a tag").is_empty());
+        // Only the language identifier is used; ICU4X does not parse this
+        // whole tag.
+        assert_eq!(f("de-t-posix"), ["emoji", "eor", "phonebk"]);
     }
 }

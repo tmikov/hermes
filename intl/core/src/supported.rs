@@ -99,18 +99,18 @@ pub fn values(kind: Kind) -> Vec<String> {
 
 /// Whether ICU4X has a collation tailoring of type `co` for `locale`. The
 /// baked provider falls back through the locale's parents (so "emoji" loads
-/// for every locale, from "und"), never across collation types. False if
-/// `locale` does not parse.
+/// for every locale, from "und"), never across collation types. Only the
+/// language identifier of `locale` is used. False if it does not parse.
 pub(crate) fn tailoring_loads(co: &str, locale: &str) -> bool {
     use icu::collator::provider::{Baked, CollationTailoringV1};
     use icu_provider::prelude::*;
-    let Ok(loc) = locale.parse::<icu::locale::Locale>() else {
+    let Some(id) = crate::locale::language_id(locale) else {
         return false;
     };
     let Ok(attributes) = DataMarkerAttributes::try_from_str(co) else {
         return false;
     };
-    let data_locale = DataLocale::from(&loc);
+    let data_locale = DataLocale::from(&id);
     let mut metadata = DataRequestMetadata::default();
     metadata.silent = true;
     DataProvider::<CollationTailoringV1>::load(

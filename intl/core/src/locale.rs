@@ -208,6 +208,33 @@ fn expander() -> &'static LocaleExpander {
     E.get_or_init(LocaleExpander::new_extended)
 }
 
+/// `tag` split before its first singleton: its unicode_language_id, and
+/// its extensions and private use (empty, or starting with '-'). Every
+/// subtag of a language identifier but the first has 2 or more characters,
+/// so the first one-character subtag after the first subtag is a
+/// singleton.
+fn split_language_id(tag: &str) -> (&str, &str) {
+    // The end of the subtags seen so far.
+    let mut end = 0;
+    for (i, subtag) in tag.split('-').enumerate() {
+        if i > 0 && subtag.len() == 1 {
+            return tag.split_at(end);
+        }
+        end += usize::from(i > 0) + subtag.len();
+    }
+    (tag, "")
+}
+
+/// The unicode_language_id of `tag`, parsed with its extensions and private
+/// use left out. Operations on the language, script, region and variants
+/// use this, never a parse of the whole tag: ICU4X rejects tags that are
+/// well-formed (a 5-8 letter tlang language) and changes others (it drops
+/// "true" subtags of -u- values). None if the language identifier does not
+/// parse, as for a 5-8 letter language.
+pub(crate) fn language_id(tag: &str) -> Option<LanguageIdentifier> {
+    split_language_id(tag).0.parse().ok()
+}
+
 /// Which direction `likely_subtags` goes.
 enum Likely {
     Add,
@@ -220,24 +247,25 @@ enum Likely {
 /// canonical order), extensions and private use stay as they are.
 fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
     let canonical = canonicalize(tag)?;
+    let (id, rest) = split_language_id(&canonical);
     // ICU4X languages are 2-3 letters. A 5-8 letter language is never "und",
     // so Lookup has no likely subtags for it: leave the tag alone.
-    let first = canonical.split('-').next().unwrap_or("");
-    if first.len() >= 5 {
+    if is_long_language(id.split('-').next().unwrap_or("")) {
         return Some(canonical);
     }
-    // ICU4X does not parse a 5-8 letter tlang language either; only the
-    // language identifier changes here, so hide it and put it back.
-    let (hidden, tlang) = hide_long_tlang(&canonical);
-    let mut loc: Locale = hidden.parse().ok()?;
+    // Only the language identifier changes, so only it is parsed, and the
+    // canonical extensions and private use are put back as they are.
+    // ICU4X could not round-trip them: it does not parse a 5-8 letter tlang
+    // language, and its parser drops every "true" subtag of a -u- value.
+    let mut id: LanguageIdentifier = id.parse().ok()?;
     // UTS 35 Remove Likely Subtags starts with Add Likely Subtags (its step
     // 1), so both directions maximize first. ICU4X's minimize maximizes
     // again, which leaves a maximal tag unchanged.
-    maximize(&mut loc.id);
+    maximize(&mut id);
     if let Likely::Remove = dir {
-        expander().minimize(&mut loc.id);
+        expander().minimize(&mut id);
     }
-    restore_long_tlang(canonicalize(&loc.to_string())?, tlang)
+    Some(format!("{}{rest}", canonicalize(&id.to_string())?))
 }
 
 /// UTS 35 Add Likely Subtags on a language identifier.
@@ -359,7 +387,7 @@ pub fn is_available(tag: &str) -> bool {
 
 /// The script `tag` is written in: its script subtag, or the likely one.
 pub fn likely_script(tag: &str) -> Option<Script> {
-    let mut id = tag.parse::<Locale>().ok()?.id;
+    let mut id = language_id(tag)?;
     expander().maximize(&mut id);
     id.script
 }
@@ -369,9 +397,9 @@ pub fn likely_script(tag: &str) -> Option<Script> {
 /// longest available prefix of it, or None. Because the extensions are gone
 /// there is no dangling singleton to drop while truncating.
 pub fn lookup(tag: &str) -> Option<String> {
-    // Only the language identifier is used, so a long tlang may be hidden.
-    let loc: Locale = hide_long_tlang(tag).0.parse().ok()?;
-    let mut prefix = loc.id.to_string();
+    // The language identifier of a canonical tag is canonical, so it is
+    // truncated as it is, without a parse.
+    let mut prefix = split_language_id(tag).0.to_owned();
     loop {
         if is_available(&prefix) {
             return Some(prefix);
@@ -410,6 +438,10 @@ mod tests {
         let cases = [
             ("en-US-u-ca-buddhist", Some("en-US")),
             ("EN-us-t-de-x-foo", Some("en-US")),
+            // Only the language identifier matters: a 5-8 letter tlang
+            // language, which ICU4X does not parse, changes nothing.
+            ("en-US-t-posix", Some("en-US")),
+            ("de-t-abcdefgh-latn-u-ca-buddhist", Some("de")),
             ("zh-TW", Some("zh-TW")),
             ("zh-Hant-US", Some("zh-Hant")),
             ("iw", Some("he")),
@@ -681,6 +713,29 @@ mod tests {
         ] {
             assert_eq!(canonicalize(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn splits_off_the_language_id() {
+        for (tag, id, rest) in [
+            ("en", "en", ""),
+            ("en-Latn-US-fonipa", "en-Latn-US-fonipa", ""),
+            ("en-US-t-posix", "en-US", "-t-posix"),
+            ("de-u-co-phonebk-x-a", "de", "-u-co-phonebk-x-a"),
+            ("posix-x-private", "posix", "-x-private"),
+            ("sl-1994-a-bc", "sl-1994", "-a-bc"),
+        ] {
+            assert_eq!(split_language_id(tag), (id, rest), "{tag:?}");
+        }
+        // The language identifier parses even where the whole tag does not.
+        assert_eq!(
+            language_id("en-US-t-posix")
+                .map(|id| id.to_string())
+                .as_deref(),
+            Some("en-US")
+        );
+        assert_eq!(likely_script("sr-RS-t-posix"), Some(script!("Cyrl")));
+        assert_eq!(language_id("posix"), None);
     }
 
     #[test]
