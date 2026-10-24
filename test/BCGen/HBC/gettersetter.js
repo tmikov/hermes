@@ -53,32 +53,32 @@ var obj = {
 // CHECK-NEXT:    NewObject         r2
 // CHECK-NEXT:    LoadConstString   r4, "b"
 // CHECK-NEXT:    LoadConstUndefined r0
-// CHECK-NEXT:    CreateClosure     r3, r0, Function<set b>
-// CHECK-NEXT:    CreateClosure     r1, r0, Function<get b>
+// CHECK-NEXT:    CreateClosure     r3, r0, NCFunction<set b>
+// CHECK-NEXT:    CreateClosure     r1, r0, NCFunction<get b>
 // CHECK-NEXT:    DefineOwnGetterSetterByVal r2, r4, r1, r3, 1
 // CHECK-NEXT:    LoadConstString   r3, "c"
-// CHECK-NEXT:    CreateClosure     r1, r0, Function<get c>
+// CHECK-NEXT:    CreateClosure     r1, r0, NCFunction<get c>
 // CHECK-NEXT:    DefineOwnGetterSetterByVal r2, r3, r1, r0, 1
 // CHECK-NEXT:    LoadConstString   r3, "d"
-// CHECK-NEXT:    CreateClosure     r1, r0, Function<set d>
+// CHECK-NEXT:    CreateClosure     r1, r0, NCFunction<set d>
 // CHECK-NEXT:    DefineOwnGetterSetterByVal r2, r3, r0, r1, 1
 // CHECK-NEXT:    GetGlobalObject   r1
 // CHECK-NEXT:    PutByIdLoose      r1, r2, 0, "obj"
 // CHECK-NEXT:    Ret               r0
 
-// CHECK:Function<get b>(1 params, 1 registers, 0 numbers, 1 non-pointers):
+// CHECK:NCFunction<get b>(1 params, 1 registers, 0 numbers, 1 non-pointers):
 // CHECK-NEXT:    LoadConstUndefined r0
 // CHECK-NEXT:    Ret               r0
 
-// CHECK:Function<set b>(2 params, 1 registers, 0 numbers, 1 non-pointers):
+// CHECK:NCFunction<set b>(2 params, 1 registers, 0 numbers, 1 non-pointers):
 // CHECK-NEXT:    LoadConstUndefined r0
 // CHECK-NEXT:    Ret               r0
 
-// CHECK:Function<get c>(1 params, 1 registers, 0 numbers, 1 non-pointers):
+// CHECK:NCFunction<get c>(1 params, 1 registers, 0 numbers, 1 non-pointers):
 // CHECK-NEXT:    LoadConstUndefined r0
 // CHECK-NEXT:    Ret               r0
 
-// CHECK:Function<set d>(2 params, 1 registers, 0 numbers, 1 non-pointers):
+// CHECK:NCFunction<set d>(2 params, 1 registers, 0 numbers, 1 non-pointers):
 // CHECK-NEXT:    LoadConstUndefined r0
 // CHECK-NEXT:    Ret               r0
 

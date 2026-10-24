@@ -111,7 +111,7 @@ function accessorObjectLiteral(func) {
 // IRGEN-NEXT:       ReturnInst %0: object
 // IRGEN-NEXT:function_end
 
-// IRGEN:function "get c"(): number
+// IRGEN:method "get c"(): number
 // IRGEN-NEXT:%BB0:
 // IRGEN-NEXT:  %0 = LIRLoadConstInst (:number) 42: number
 // IRGEN-NEXT:       ReturnInst %0: number

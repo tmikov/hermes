@@ -2063,7 +2063,7 @@ Value *ESTreeIRGen::genObjectExpr(ESTree::ObjectExpressionNode *Expr) {
             llvh::cast<ESTree::FunctionExpressionNode>(prop->_value),
             Identifier{},
             /* superClassNode */ nullptr,
-            Function::DefinitionKind::ES5Function,
+            Function::DefinitionKind::ES6Method,
             /* homeObject */ capturedObj,
             /* parentNode */ prop);
       } else {
@@ -2155,7 +2155,7 @@ Value *ESTreeIRGen::genObjectExpr(ESTree::ObjectExpressionNode *Expr) {
             propValue->getterNode,
             Builder.createIdentifier("get " + keyStr.str()),
             /* superClassNode */ nullptr,
-            Function::DefinitionKind::ES5Function,
+            Function::DefinitionKind::ES6Method,
             /* homeObject */ capturedObj,
             /* parentNode */ propValue->getterProp);
       }
@@ -2166,7 +2166,7 @@ Value *ESTreeIRGen::genObjectExpr(ESTree::ObjectExpressionNode *Expr) {
             propValue->setterNode,
             Builder.createIdentifier("set " + keyStr.str()),
             /* superClassNode */ nullptr,
-            Function::DefinitionKind::ES5Function,
+            Function::DefinitionKind::ES6Method,
             /* homeObject */ capturedObj,
             /* parentNode */ propValue->setterProp);
       }

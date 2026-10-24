@@ -297,7 +297,7 @@ function accessorObjectLiteral2(func) {
 
 // CHECK:scope %VS12 []
 
-// CHECK:function "get c"(): any
+// CHECK:method "get c"(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS11: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS12: any, %0: environment
