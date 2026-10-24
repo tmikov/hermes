@@ -316,6 +316,53 @@ class IntlPluginTest(unittest.TestCase):
         results.append(Result("test/intl402/c.js", {"strict": HARD_FAIL}))
         self.assertIsNone(update(results, old, self.root, "def", ROOTS))
 
+    def test_update_with_unexplained_entries_writes_and_fails(self):
+        from testsuite.cli import intl_verdict
+
+        out_file = os.path.join(self.root, "expectations.txt")
+
+        def verdict(old_text, results):
+            intl = {
+                "expectations": self.expectations(old_text),
+                "file": out_file,
+                "update": True,
+                "root": self.root,
+                "roots": ROOTS,
+                "commit": "def",
+            }
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = intl_verdict(results, intl)
+            with open(out_file) as f:
+                return code, stdout.getvalue(), f.read()
+
+        # Every entry has a reason: written, exit 0.
+        code, out, written = verdict(
+            "", [Result("test/intl402/a.js", {"strict": PASS, "non-strict": PASS})]
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("UNEXPLAINED", out)
+        # A new failure with no phase, and a retained entry outside the run's
+        # roots, are both UNEXPLAINED: the file is still written, every such
+        # entry is listed, and the exit code is 1.
+        code, out, written = verdict(
+            "test/built-ins/x/d.js strict UNEXPLAINED\n"
+            "test/intl402/a.js both explained\n",
+            [
+                Result(
+                    "test/intl402/b.js", {"strict": JS_FAIL, "non-strict": JS_FAIL}
+                ),
+                Result("test/intl402/a.js", {"strict": JS_FAIL, "non-strict": PASS}),
+            ],
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("test/intl402/b.js both UNEXPLAINED", written)
+        self.assertIn("test/built-ins/x/d.js strict UNEXPLAINED", written)
+        self.assertIn("test/intl402/b.js [strict]", out)
+        self.assertIn("test/intl402/b.js [non-strict]", out)
+        self.assertIn("test/built-ins/x/d.js [strict]", out)
+        self.assertNotIn("test/intl402/a.js [", out)
+
     def test_regenerating_keeps_only_the_header_comments(self):
         text = (
             HEADER

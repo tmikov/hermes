@@ -635,6 +635,22 @@ def intl_verdict(results, intl) -> int:
         with open(intl["file"], "w") as f:
             f.write(intl_plugin.render_expectations(new))
         print(f"Wrote {intl['file']}")
+        # The file is written either way, but an entry without a reason fails
+        # check-intl, so the update fails too until each is explained.
+        unexplained = [
+            f"{path} [{mode}]"
+            for path, modes in sorted(new.entries.items())
+            for mode, reason in sorted(modes.items())
+            if reason == intl_plugin.UNEXPLAINED
+        ]
+        if unexplained:
+            print(
+                f"{len(unexplained)} entr{'y' if len(unexplained) == 1 else 'ies'}"
+                " without a reason (UNEXPLAINED); explain each by hand:"
+            )
+            for u in unexplained:
+                print("  " + u)
+            return 1
         return 0
     problems = intl_plugin.evaluate(
         results, intl["expectations"], intl["root"], intl["roots"]

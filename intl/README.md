@@ -199,7 +199,8 @@ The paths are the ones `check-intl-test262` passes in `intl/CMakeLists.txt`.
 Existing reasons are kept. A new failure gets a reason from its path ("Phase
 3: Intl.NumberFormat"), or `UNEXPLAINED` when no phase covers it. Every
 `UNEXPLAINED` entry must be investigated and given a real reason by hand
-before `check-intl` passes again. Entries for tests the run covers but did
+before `check-intl` passes again; while there is one, the update still
+writes the file but lists them all and exits with status 1. Entries for tests the run covers but did
 not run in that mode are dropped. The file's header comment is written
 afresh and no other comment is kept, so every explanation belongs in a
 reason. The update refuses to run if anything crashed or hit a plugin
