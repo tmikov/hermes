@@ -253,8 +253,9 @@ pub unsafe extern "C" fn hi_locale_time_zones_of_region(
 
 /// The week data of a region: when it returns true, `out` is the ISO number
 /// of the first day of the week (Monday 1 to Sunday 7), then the weekend days
-/// ascending, separated by single spaces. False if `region` is not a region
-/// code.
+/// ascending, separated by single spaces. Any syntactically valid region
+/// gets data (`001`'s when ICU4X has none for it); false only if `region`
+/// does not parse as a region.
 ///
 /// # Safety
 /// As hi_locale_canonicalize.

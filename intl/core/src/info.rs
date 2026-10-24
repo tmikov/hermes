@@ -81,11 +81,11 @@ pub fn time_zones_of_region(region: &str) -> Vec<String> {
     zones
 }
 
-/// The week data of `region` (an uppercase region code or `001`) as ISO
-/// weekday numbers (Monday 1 to Sunday 7): the first day of the week, and the
-/// weekend days ascending. ICU4X falls back to `001` for a region it has no
-/// entry for, so a region always has data; None only if `region` is not a
-/// region code.
+/// The week data of `region` as ISO weekday numbers (Monday 1 to Sunday 7):
+/// the first day of the week, and the weekend days ascending. Any
+/// syntactically valid region, assigned or not and in any case, gets its
+/// data, or `001`'s when ICU4X has no entry for it (`ZZ`, `GB`, `AQ`); None
+/// only if `region` does not parse as a region.
 pub fn week_info(region: &str) -> Option<(u8, Vec<u8>)> {
     let region: Region = region.parse().ok()?;
     let mut locale = Locale::UNKNOWN;
@@ -272,6 +272,15 @@ mod tests {
         assert_eq!(f("AQ"), Some((1, vec![6, 7])));
         assert_eq!(f("english"), None);
         assert_eq!(f(""), None);
+    }
+
+    /// CLDR's 001 data applies to regions it does not list, and ICU4X drops
+    /// entries equal to 001, so these regions only get data by fallback.
+    #[test]
+    fn week_info_of_regions_equal_to_001() {
+        for region in ["GB", "AQ", "001", "ZZ"] {
+            assert_eq!(week_info(region), Some((1, vec![6, 7])), "{region}");
+        }
     }
 
     #[test]
