@@ -9,8 +9,8 @@
 // and then changes directory still finds the plugin next to libhermesvm.
 // dladdr reports the relative path the library was loaded by, which no
 // longer names it; on Linux the loader finds the library's file in
-// /proc/self/maps instead, and accepts a reading of its pathname only if
-// stat finds the mapping's device and inode there.
+// /proc/self/maps instead. The unit tests in unittests/IntlLoader cover the
+// choice between readings of the pathname with a fake stat.
 
 // REQUIRES: linux, hermesvm_lib
 // RUN: rm -rf %t && mkdir -p %t/lib
@@ -38,8 +38,7 @@
 // RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host 'x\012y/libhermesvm.so' / | %FileCheck --match-full-lines %s
 
 // The kernel appends " (deleted)" to a file removed after it was mapped, and
-// no file has the mapping's identity any more: the loader falls back to
-// dladdr's path. Loaded by an absolute path in a directory literally named
+// no file has that name: the loader falls back to dladdr's path. Loaded by an absolute path in a directory literally named
 // "lib\142" (not "libb"), that still finds the plugin.
 // RUN: cp -r %t/lib %t/'lib\142'
 // RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/'lib\142/libhermesvm.so' / delete | %FileCheck --match-full-lines %s

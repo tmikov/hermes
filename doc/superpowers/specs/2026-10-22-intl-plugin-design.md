@@ -362,11 +362,17 @@ For each new runtime:
       since left. So on Linux and Android the library's file is the one
       `/proc/self/maps` shows mapped at the address of a loader function.
       The kernel escapes only a newline there (as `\012`) and appends
-      ` (deleted)` to a removed file, so the text is ambiguous: of its two
-      readings (with `\012` as a newline, and as written) the one whose
-      `stat` device and inode are the mapping's is taken. When neither
-      matches (a removed file, a mapping without an inode, an unreadable
-      `/proc`), `dladdr`'s path is the fallback. On Apple platforms
+      ` (deleted)` to a removed file. A pathname without `\012` is used as
+      written if it exists; its device and inode are not compared, because
+      on overlayfs and btrfs subvolumes they differ from what `stat`
+      reports. A removed file's name does not exist, so it falls back: a
+      deleted libhermesvm usually means an upgrade, and the plugin beside it
+      would be from another build. A pathname with `\012` has two readings
+      (a newline, or four characters): the one whose `stat` device and
+      inode are the mapping's is taken, else the only one that exists; if
+      both exist and the identity cannot decide, it falls back. Every
+      fallback (also a mapping without an inode, or an unreadable `/proc`)
+      uses `dladdr`'s path. On Apple platforms
       `dladdr`'s path is used: dyld records an absolute path for a library
       loaded from disk (it asks the kernel for the path of the file it
       opened, with `F_GETPATH`). The directory is taken after `realpath`.

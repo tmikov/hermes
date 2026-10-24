@@ -11,6 +11,9 @@
 
 #include <jsi/jsi.h>
 
+#include <functional>
+#include <string>
+
 namespace facebook::hermes {
 
 /// Install the Intl plugin into \p rt as \p config asks, and record the
@@ -25,6 +28,28 @@ void installIntlPlugin(
 /// (or none), the default locales and time zone the parent's plugin actually
 /// received, and the parent's Intl flag. Everything else is the default.
 ::hermes::vm::RuntimeConfig makeWorkerRuntimeConfig(jsi::Runtime &parent);
+
+/// What stat says about a file: whether it exists, and its device numbers
+/// and inode.
+struct MappedFileId {
+  bool exists = false;
+  unsigned devMajor = 0;
+  unsigned devMinor = 0;
+  unsigned long long inode = 0;
+};
+
+/// The path of the file that \p line, one line of /proc/self/maps,
+/// describes, or "" if it names none that can be trusted, in which case the
+/// loader falls back to dladdr. \p lookup stats a path. The kernel escapes
+/// only a newline in the pathname, as "\012", and appends " (deleted)" to a
+/// removed file. Without a "\012" the pathname is used if it exists. With
+/// one, it may be a newline or four characters: the reading whose device
+/// and inode are the mapping's is used, else the only reading that exists.
+/// Linux and Android only, in effect; portable so tests can run it on fake
+/// lines.
+std::string pathFromMapsLine(
+    const std::string &line,
+    const std::function<MappedFileId(const std::string &)> &lookup);
 
 /// How many times this process has resolved the default plugin (0 or 1).
 /// For tests.

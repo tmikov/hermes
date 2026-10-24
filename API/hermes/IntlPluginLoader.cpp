@@ -292,77 +292,38 @@ void promoteHermesImage() {
 }
 
 #if defined(__linux__)
-/// \p path, a pathname as /proc/self/maps shows it, with the kernel's one
-/// escape undone: it writes a newline in a name as "\012". Nothing else is
-/// escaped, a backslash included, so any other "\ooo" is literal.
-std::string unescapeMapsPath(const std::string &path) {
-  std::string out;
-  for (size_t i = 0; i < path.size(); ++i) {
-    if (path.compare(i, 4, "\\012") == 0) {
-      out += '\n';
-      i += 3;
-    } else {
-      out += path[i];
-    }
-  }
-  return out;
+/// What stat says about \p path.
+MappedFileId statFileId(const std::string &path) {
+  struct stat st;
+  if (::stat(path.c_str(), &st) != 0)
+    return MappedFileId{};
+  return MappedFileId{true, major(st.st_dev), minor(st.st_dev), st.st_ino};
 }
 
-/// The absolute path of the file mapped at \p addr, from /proc/self/maps;
-/// empty if it cannot be read or the file cannot be identified. Unlike
-/// dladdr's dli_fname, which is the path the library was loaded by and may
-/// be relative to a directory the process has since left, the kernel's path
-/// is absolute.
-///
-/// The pathname is ambiguous: a "\012" in it is a newline or those four
-/// characters, and a removed file gets " (deleted)" appended. So a candidate
-/// reading is accepted only if stat finds the mapping's own file there, by
-/// device and inode; otherwise the result is empty and the caller falls
-/// back to dladdr.
+/// The absolute path of the file mapped at \p addr, from /proc/self/maps
+/// (see pathFromMapsLine); empty if it cannot be read or the file cannot be
+/// named. Unlike dladdr's dli_fname, which is the path the library was
+/// loaded by and may be relative to a directory the process has since left,
+/// the kernel's path is absolute.
 std::string mappedFilePath(const void *addr) {
   FILE *maps = std::fopen("/proc/self/maps", "re");
   if (!maps)
     return "";
   auto a = reinterpret_cast<uintptr_t>(addr);
   std::string path;
-  unsigned devMajor = 0, devMinor = 0;
-  unsigned long long inode = 0;
   char *line = nullptr;
   size_t capacity = 0;
-  ssize_t length;
-  while ((length = ::getline(&line, &capacity, maps)) > 0) {
-    // start-end perms offset major:minor inode [pathname]
+  while (::getline(&line, &capacity, maps) > 0) {
     unsigned long long start, end;
-    int pathStart = 0;
-    if (std::sscanf(
-            line,
-            "%llx-%llx %*s %*s %x:%x %llu %n",
-            &start,
-            &end,
-            &devMajor,
-            &devMinor,
-            &inode,
-            &pathStart) < 5 ||
-        a < start || a >= end)
-      continue;
-    if (inode != 0 && pathStart > 0 && line[pathStart] == '/') {
-      path.assign(line + pathStart, length - pathStart);
-      if (!path.empty() && path.back() == '\n')
-        path.pop_back();
+    if (std::sscanf(line, "%llx-%llx", &start, &end) == 2 && a >= start &&
+        a < end) {
+      path = pathFromMapsLine(line, statFileId);
+      break;
     }
-    break;
   }
   std::free(line);
   std::fclose(maps);
-  if (path.empty())
-    return "";
-  for (const std::string &candidate : {unescapeMapsPath(path), path}) {
-    struct stat st;
-    if (::stat(candidate.c_str(), &st) == 0 && major(st.st_dev) == devMajor &&
-        minor(st.st_dev) == devMinor && st.st_ino == inode)
-      return candidate;
-  }
-  return "";
+  return path;
 }
 #endif
 
@@ -372,8 +333,8 @@ std::string mappedFilePath(const void *addr) {
 /// For a library, dladdr reports the path given to dlopen, which a host may
 /// have given relative to a directory it has since left. On Linux and
 /// Android the library's file is found in /proc/self/maps by the address of
-/// this function instead, identified by its device and inode, and dladdr's
-/// path is the fallback. On Apple platforms dyld records an absolute path
+/// this function instead (see pathFromMapsLine), and dladdr's path is the
+/// fallback. On Apple platforms dyld records an absolute path
 /// for a library loaded from disk (it asks the kernel for the path of the
 /// file it opened), so dladdr's path is used.
 std::string hermesDirectory() {
@@ -576,6 +537,73 @@ void installIntlPlugin(
     }
   }
   rt.setRuntimeData(kIntlRecordUUID, record);
+}
+
+namespace {
+
+/// \p path, a pathname as /proc/self/maps shows it, with the kernel's one
+/// escape undone: it writes a newline in a name as "\012". Nothing else is
+/// escaped, a backslash included, so any other "\ooo" is literal.
+std::string unescapeMapsPath(const std::string &path) {
+  std::string out;
+  for (size_t i = 0; i < path.size(); ++i) {
+    if (path.compare(i, 4, "\\012") == 0) {
+      out += '\n';
+      i += 3;
+    } else {
+      out += path[i];
+    }
+  }
+  return out;
+}
+
+} // namespace
+
+std::string pathFromMapsLine(
+    const std::string &line,
+    const std::function<MappedFileId(const std::string &)> &lookup) {
+  // start-end perms offset major:minor inode [pathname]
+  unsigned devMajor = 0, devMinor = 0;
+  unsigned long long inode = 0;
+  int pathStart = 0;
+  if (std::sscanf(
+          line.c_str(),
+          "%*llx-%*llx %*s %*s %x:%x %llu %n",
+          &devMajor,
+          &devMinor,
+          &inode,
+          &pathStart) < 3 ||
+      inode == 0 || pathStart <= 0 || line.c_str()[pathStart] != '/')
+    return "";
+  std::string path = line.substr(pathStart);
+  if (!path.empty() && path.back() == '\n')
+    path.pop_back();
+  // Without a "\012" the pathname is the file's name as written. Its
+  // device and inode are not checked: on overlayfs and btrfs subvolumes
+  // they differ from what stat reports. A removed file's name has
+  // " (deleted)" appended, so it does not exist, and neither does a name
+  // from another mount namespace: the caller falls back. (A deleted
+  // libhermesvm usually means an upgrade, and the plugin now beside it
+  // would be from another build.)
+  if (path.find("\\012") == std::string::npos)
+    return lookup(path).exists ? path : "";
+  // "\012" is a newline or those four characters, since a backslash is not
+  // escaped. The reading whose device and inode are the mapping's wins;
+  // where the identity cannot decide (overlayfs), the only reading that
+  // exists; if both exist, neither.
+  std::string readings[] = {unescapeMapsPath(path), path};
+  const std::string *existing = nullptr;
+  unsigned existingCount = 0;
+  for (const std::string &reading : readings) {
+    MappedFileId id = lookup(reading);
+    if (!id.exists)
+      continue;
+    if (id.devMajor == devMajor && id.devMinor == devMinor && id.inode == inode)
+      return reading;
+    existing = &reading;
+    ++existingCount;
+  }
+  return existingCount == 1 ? *existing : "";
 }
 
 unsigned intlDefaultResolutionsForTests() {

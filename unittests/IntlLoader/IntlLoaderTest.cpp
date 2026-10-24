@@ -20,6 +20,8 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <functional>
+#include <map>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -390,6 +392,95 @@ void workerConfigCopiesDisabledState() {
 TEST_F(IntlLoaderTest, WorkerConfigCopiesDisabledState) {
   EXPECT_EXIT(
       workerConfigCopiesDisabledState(), ::testing::ExitedWithCode(0), "");
+}
+
+/// A fake stat over \p files: path to its id.
+std::function<MappedFileId(const std::string &)> fakeStat(
+    std::map<std::string, MappedFileId> files) {
+  return [files](const std::string &path) {
+    auto it = files.find(path);
+    return it == files.end() ? MappedFileId{} : it->second;
+  };
+}
+
+/// A /proc/self/maps line for device 08:02, inode 1234, and \p path.
+std::string mapsLine(const std::string &path) {
+  return "7f0000000000-7f0000100000 r-xp 00000000 08:02 1234"
+         "                       " +
+      path + "\n";
+}
+
+/// The id the mapping of mapsLine has, and one it does not.
+const MappedFileId kMapped{true, 8, 2, 1234};
+const MappedFileId kOther{true, 0, 0x2a, 99};
+
+TEST(IntlMapsLineTest, PlainPathIsUsedAsWritten) {
+  std::string path = "/usr/lib/libhermesvm.so";
+  EXPECT_EQ(
+      pathFromMapsLine(mapsLine(path), fakeStat({{path, kMapped}})), path);
+  // On overlayfs and btrfs subvolumes stat reports another device and inode
+  // than the mapping: the path is still the file's.
+  EXPECT_EQ(pathFromMapsLine(mapsLine(path), fakeStat({{path, kOther}})), path);
+  // Escapes other than "\012" do not exist: "\141" is four characters.
+  std::string literal = "/opt/lib\\141/libhermesvm.so";
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(literal),
+          fakeStat({{literal, kOther}, {"/opt/liba/libhermesvm.so", kMapped}})),
+      literal);
+}
+
+TEST(IntlMapsLineTest, MissingOrDeletedPathFallsBack) {
+  std::string path = "/usr/lib/libhermesvm.so";
+  EXPECT_EQ(pathFromMapsLine(mapsLine(path), fakeStat({})), "");
+  // A removed file: even when a new file is at the old path, fall back.
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(path + " (deleted)"), fakeStat({{path, kOther}})),
+      "");
+  // A file whose name really ends in " (deleted)".
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(path + " (deleted)"),
+          fakeStat({{path + " (deleted)", kOther}})),
+      path + " (deleted)");
+}
+
+TEST(IntlMapsLineTest, NewlineEscapeIsDecidedByIdentityThenExistence) {
+  std::string raw = "/opt/x\\012y/libhermesvm.so";
+  std::string decoded = "/opt/x\ny/libhermesvm.so";
+  // The identity decides when both exist.
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(raw), fakeStat({{raw, kMapped}, {decoded, kOther}})),
+      raw);
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(raw), fakeStat({{raw, kOther}, {decoded, kMapped}})),
+      decoded);
+  // Without an identity match (overlayfs), the only reading that exists.
+  EXPECT_EQ(
+      pathFromMapsLine(mapsLine(raw), fakeStat({{decoded, kOther}})), decoded);
+  EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({{raw, kOther}})), raw);
+  // Both exist and the identity cannot decide, or neither exists: fall back.
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(raw), fakeStat({{raw, kOther}, {decoded, kOther}})),
+      "");
+  EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({})), "");
+}
+
+TEST(IntlMapsLineTest, LinesWithoutAFileGiveNothing) {
+  auto all = [](const std::string &) { return kMapped; };
+  EXPECT_EQ(
+      pathFromMapsLine(
+          "7f0000000000-7f0000100000 rw-p 00000000 00:00 0 \n", all),
+      "");
+  EXPECT_EQ(
+      pathFromMapsLine(
+          "7ffd00000000-7ffd00021000 rw-p 00000000 00:00 0  [stack]\n", all),
+      "");
+  EXPECT_EQ(pathFromMapsLine("garbage\n", all), "");
 }
 
 } // namespace
