@@ -57,6 +57,61 @@ inline std::optional<std::string> canonicalizeLocale(std::string_view tag) {
   return callOptional(hi_locale_canonicalize, tag);
 }
 
+/// Add Likely Subtags of a canonical tag; nullopt if it does not parse.
+inline std::optional<std::string> addLikelySubtags(std::string_view tag) {
+  return callOptional(hi_locale_add_likely_subtags, tag);
+}
+
+/// Remove Likely Subtags of a canonical tag; nullopt if it does not parse.
+inline std::optional<std::string> removeLikelySubtags(std::string_view tag) {
+  return callOptional(hi_locale_remove_likely_subtags, tag);
+}
+
+/// The CLDR calendar types for \p region, preferred first, space-separated;
+/// the "001" ones for a region with no line of its own, nullopt only if
+/// \p region is not a region code.
+inline std::optional<std::string> calendarPreferences(std::string_view region) {
+  return callOptional(hi_locale_calendar_preferences, region);
+}
+
+/// The CLDR hour cycles for \p key (a region or language-region), preferred
+/// first, space-separated; the "001" ones for a region with no line of its
+/// own, nullopt for a language-region key with no line.
+inline std::optional<std::string> hourCycles(std::string_view key) {
+  return callOptional(hi_locale_hour_cycles, key);
+}
+
+/// The primary IANA ids of the time zones of \p region, sorted,
+/// space-separated; empty for a region with none.
+inline std::string timeZonesOfRegion(std::string_view region) {
+  return callOptional(hi_locale_time_zones_of_region, region).value_or("");
+}
+
+/// The week data of \p region: the ISO number of the first day of the week
+/// (Monday 1 to Sunday 7), then the weekend days ascending, space-separated;
+/// nullopt if \p region is not a region code.
+inline std::optional<std::string> weekInfo(std::string_view region) {
+  return callOptional(hi_locale_week_info, region);
+}
+
+/// "ltr" or "rtl" for a script code; nullopt if unknown.
+inline std::optional<std::string> scriptDirection(std::string_view script) {
+  return callOptional(hi_locale_script_direction, script);
+}
+
+/// The numbering system of \p locale's decimal data; nullopt if \p locale
+/// does not parse.
+inline std::optional<std::string> defaultNumberingSystem(
+    std::string_view locale) {
+  return callOptional(hi_locale_default_numbering_system, locale);
+}
+
+/// The collation types \p locale has tailorings for, sorted,
+/// space-separated.
+inline std::string collationsOfLocale(std::string_view locale) {
+  return callOptional(hi_locale_collations, locale).value_or("");
+}
+
 /// Whether \p tag (canonical, no extensions) is an available locale.
 inline bool isAvailableLocale(std::string_view tag) {
   return hi_locale_is_available(

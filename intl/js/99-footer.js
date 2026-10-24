@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// See 00-header.js. ECMA-402 draft of October 22, 2026.
+// See 00-header.js. ECMA-402 draft of October 24, 2026.
 
 /// Called once per runtime by intl/jsi/Plugin.cpp, before any user code,
 /// with the native helpers and the resolved defaults. Design spec "What

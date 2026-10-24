@@ -11,9 +11,9 @@ The design, and the reasons behind it, are in
 Phase 0 plan is
 [doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md](../doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md).
 
-Phase 0 is infrastructure: `Intl` has only `getCanonicalLocales` and
-`supportedValuesOf`. The constructors arrive in later phases (see "Phasing"
-in the spec).
+Phase 0 was infrastructure, and Phase 1 added `Intl.Locale`. `Intl` has
+`getCanonicalLocales`, `supportedValuesOf` and `Locale`. The other
+constructors arrive in later phases (see "Phasing" in the spec).
 
 ## Layout
 
@@ -22,10 +22,13 @@ in the spec).
 | `core/` | Rust crate `hermes_intl_core` on ICU4X, with an `extern "C"` interface. cbindgen generates `hermes_intl_core.h` from it at build time. |
 | `core/src/lib.rs` | The C interface. |
 | `core/src/locale.rs` | Well-formedness, canonicalization, `[[AvailableLocales]]`, lookup, the default-locale reduction. |
+| `core/src/info.rs` | The lookups behind the `Intl.Locale` information methods: calendars, hour cycles, time zones, week data, text direction, numbering system and collations. |
 | `core/src/host.rs` | Turning host settings (POSIX locale names, `TZ`, `/etc/localtime`) into ECMA-402 values. |
 | `core/src/supported.rs` | The lists behind `Intl.supportedValuesOf`. |
-| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `extension-value-aliases.txt`, `update-cldr-lists.py` and its tests. |
+| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
+| `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
+| `js/20-Locale.js` | `Intl.Locale`: the constructor, the getters, the information methods, `maximize` and `minimize`. |
 | `jsi/` | C++: the entry point (`Plugin.cpp`), the embedded bytecode, the native helpers JS calls, and default detection (`Defaults.cpp`). |
 | `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
@@ -259,14 +262,21 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 
 ## Updating the CLDR lists
 
-`core/data/currencies.txt`, `core/data/numbering-systems.txt` and
-`core/data/extension-value-aliases.txt` come from CLDR. When ICU4X is
-upgraded, regenerate them from the CLDR release that ICU4X version uses, and
-commit the result:
+`core/data/currencies.txt`, `core/data/numbering-systems.txt`,
+`core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt`,
+`core/data/time-zones-by-region.txt` and
+`core/data/extension-value-aliases.txt` come from CLDR. When ICU4X is upgraded,
+regenerate them from the CLDR release that ICU4X version uses, and commit the
+result:
 
 ```
 python3 intl/core/data/update-cldr-lists.py release-48-2
 ```
+
+`calendar-preferences.txt`, `hour-cycles.txt` and `time-zones-by-region.txt`
+feed the `Intl.Locale` information methods and are read by
+`core/src/info.rs`. `time-zones-by-region.txt` lists zones as CLDR names
+them; `info.rs` turns each into its primary identifier when it is used.
 
 `extension-value-aliases.txt` holds the value aliases that
 `core/src/locale.rs` replaces when it canonicalizes a tag (UTS 35 Annex C),

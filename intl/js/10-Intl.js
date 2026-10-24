@@ -6,7 +6,7 @@
  */
 
 // ECMA-402 8: The Intl Object, following the draft
-// https://tc39.es/ecma402/ dated October 22, 2026. ECMA-262 section numbers
+// https://tc39.es/ecma402/ dated October 24, 2026. ECMA-262 section numbers
 // are from the https://tc39.es/ecma262/ draft of the same date. The object is
 // created when the bytecode runs, so its [[Prototype]] is the intrinsic
 // %Object.prototype%.
@@ -29,6 +29,14 @@ function AvailableCanonicalUnits() {
   // 1. Return the List, sorted by code unit, of the unique simple unit
   //    identifiers in every row of Table 2, except the header row.
   return SANCTIONED_UNITS;
+}
+
+// 6.9.1 AvailableCalendars ( )
+function AvailableCalendars() {
+  // 1. Return the List, sorted by code unit, of the unique calendar types
+  //    the implementation supports, including their aliases (the native
+  //    list).
+  return splitSpaces(native.supportedValues('calendar'));
 }
 
 /// Split a space-separated list from native code into a List. Empty items
@@ -76,7 +84,7 @@ function installIntl() {
         //    a. Let list be a new empty List.
         list = [];
         //    b. For each element identifier of AvailableCalendars(), do
-        var calendars = splitSpaces(native.supportedValues(key));
+        var calendars = AvailableCalendars();
         for (var i = 0; i < calendars.length; i++) {
           var identifier = calendars[i];
           //    i. Let canonical be CanonicalizeUValue("ca", identifier).
@@ -114,11 +122,13 @@ function installIntl() {
       return CreateArrayFromList(list);
     },
   });
-  // 2. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
+  // 2. ECMA-402 8.2: the constructor properties of Intl.
+  installLocale(IntlObject);
+  // 3. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
   //    "Intl", { [[Writable]]: false, [[Enumerable]]: false,
   //    [[Configurable]]: true }.
   setToStringTag(IntlObject, 'Intl');
-  // 3. ECMA-402 8: Intl is the initial value of the "Intl" property of the
+  // 4. ECMA-402 8: Intl is the initial value of the "Intl" property of the
   //    global object. ECMA-262 18 gives such data properties the attributes
   //    { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }.
   ObjectDefineProperty(global, 'Intl', {

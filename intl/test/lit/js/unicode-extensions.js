@@ -26,6 +26,13 @@ var native = {
   },
 };
 var hostDefaults = {locales: ['fr'], timeZone: 'UTC'};
+// 20-Locale.js is not included, so no object is an Intl.Locale.
+function isLocaleObject(o) {
+  return false;
+}
+function localeObjectTag(o) {
+  throw new Error('not a Locale');
+}
 /// The class of the exception f throws, or 'none'.
 function thrown(f) {
   try {

@@ -6,7 +6,7 @@
  */
 
 // ECMA-402 options processing (9.2.10 to 9.2.14, 16.1.2), following the
-// draft https://tc39.es/ecma402/ dated October 22, 2026. GetOptionsObject is
+// draft https://tc39.es/ecma402/ dated October 24, 2026. GetOptionsObject is
 // ECMA-262 7.3.36 in the https://tc39.es/ecma262/ draft of the same date.
 
 /// The `default` argument of GetOption that makes the option required.

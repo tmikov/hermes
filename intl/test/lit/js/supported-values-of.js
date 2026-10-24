@@ -32,6 +32,15 @@ var native = {
   },
 };
 var hostDefaults = {locales: ['en'], timeZone: 'UTC'};
+// 20-Locale.js is not included, so no object is an Intl.Locale,
+// and installIntl installs no Intl.Locale.
+function isLocaleObject(o) {
+  return false;
+}
+function localeObjectTag(o) {
+  throw new Error('not a Locale');
+}
+function installLocale(intl) {}
 installIntl();
 
 print(JSON.stringify(globalThis.Intl.supportedValuesOf('calendar')));

@@ -7,7 +7,7 @@
 
 // Every intrinsic the implementation uses, captured when the plugin's
 // bytecode runs, before any user code; and the ECMA-262 conversions built on
-// them. Plugin code calls only these. ECMA-402 draft of October 22, 2026;
+// them. Plugin code calls only these. ECMA-402 draft of October 24, 2026;
 // ECMA-262 section numbers are from the https://tc39.es/ecma262/ draft of
 // the same date.
 

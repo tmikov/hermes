@@ -6,7 +6,7 @@
  */
 
 // The Hermes Intl plugin's ECMA-402 implementation, following the draft
-// https://tc39.es/ecma402/ dated October 22, 2026. 00-header.js and
+// https://tc39.es/ecma402/ dated October 24, 2026. 00-header.js and
 // 99-footer.js wrap the other files (concatenated in name order) in one
 // function scope, so nothing defined here is reachable from user code. The
 // completion value of the compiled bytecode is the setup function in

@@ -17,6 +17,35 @@
 
 // (tag) The canonicalized tag, or undefined if tag is not well-formed.
 HERMES_INTL_HELPER(canonicalizeLocale, OptUtf8, Utf8)
+// (tag) The Add Likely Subtags result for a canonical tag, itself a canonical
+// tag (RegionPreference relies on this). Throws if tag does not parse.
+HERMES_INTL_HELPER(addLikelySubtags, Utf8, Utf8)
+// (tag) The Remove Likely Subtags result for a canonical tag, itself a
+// canonical tag. Throws if tag does not parse.
+HERMES_INTL_HELPER(removeLikelySubtags, Utf8, Utf8)
+// (region) The CLDR calendar types for a region ("TH", "001"), preferred
+// first, space-separated. A region with no line of its own ("US") gets the
+// "001" line; undefined only if region is not a region code.
+HERMES_INTL_HELPER(calendarPreferences, OptUtf8, Utf8)
+// (key) The CLDR hour cycles for a region or "language-REGION" key, preferred
+// first, space-separated. A region with no line of its own ("AQ") gets the
+// "001" line; undefined for a "language-REGION" key with no line.
+HERMES_INTL_HELPER(hourCycles, OptUtf8, Utf8)
+// (region) The primary IANA ids of the region's time zones ("JP", "PS"),
+// sorted, space-separated; empty for a region with none.
+HERMES_INTL_HELPER(timeZonesOfRegion, Utf8, Utf8)
+// (region) The week data of a region ("US", "001"): the ISO number of the
+// first day of the week (Monday 1 to Sunday 7), then the weekend days
+// ascending, space-separated. Throws if region is not a region code.
+HERMES_INTL_HELPER(weekInfo, Utf8, Utf8)
+// (script) "ltr" or "rtl" for a script code ("Arab"), or undefined if unknown.
+HERMES_INTL_HELPER(scriptDirection, OptUtf8, Utf8)
+// (locale) The numbering system of the locale's decimal data ("latn").
+// Throws if locale does not parse.
+HERMES_INTL_HELPER(defaultNumberingSystem, Utf8, Utf8)
+// (locale) The collation types the locale has tailorings for, sorted,
+// space-separated ("emoji eor phonebk" for "de").
+HERMES_INTL_HELPER(collationsOfLocale, Utf8, Utf8)
 // (tag) Whether tag (canonical, without extensions) is an available locale.
 HERMES_INTL_HELPER(isAvailableLocale, Bool, Utf8)
 // (key) The values for Intl.supportedValuesOf(key), sorted, space-separated.

@@ -12,11 +12,37 @@
 // of row gets its check below.
 
 var TABLE = [
+  // [holder, property, 'constructor', name, length]
   // [holder, property, 'method', name, length]
+  // [holder, property, 'getter', name], whose length is 0
   // [holder, '@@toStringTag', 'toStringTag', value]
   ['Intl', 'getCanonicalLocales', 'method', 'getCanonicalLocales', 1],
   ['Intl', 'supportedValuesOf', 'method', 'supportedValuesOf', 1],
+  ['Intl', 'Locale', 'constructor', 'Locale', 1],
   ['Intl', '@@toStringTag', 'toStringTag', 'Intl'],
+  ['Intl.Locale.prototype', 'baseName', 'getter', 'get baseName'],
+  ['Intl.Locale.prototype', 'calendar', 'getter', 'get calendar'],
+  ['Intl.Locale.prototype', 'caseFirst', 'getter', 'get caseFirst'],
+  ['Intl.Locale.prototype', 'collation', 'getter', 'get collation'],
+  ['Intl.Locale.prototype', 'firstDayOfWeek', 'getter', 'get firstDayOfWeek'],
+  ['Intl.Locale.prototype', 'hourCycle', 'getter', 'get hourCycle'],
+  ['Intl.Locale.prototype', 'language', 'getter', 'get language'],
+  ['Intl.Locale.prototype', 'numberingSystem', 'getter', 'get numberingSystem'],
+  ['Intl.Locale.prototype', 'numeric', 'getter', 'get numeric'],
+  ['Intl.Locale.prototype', 'region', 'getter', 'get region'],
+  ['Intl.Locale.prototype', 'script', 'getter', 'get script'],
+  ['Intl.Locale.prototype', 'variants', 'getter', 'get variants'],
+  ['Intl.Locale.prototype', 'getCalendars', 'method', 'getCalendars', 0],
+  ['Intl.Locale.prototype', 'getCollations', 'method', 'getCollations', 0],
+  ['Intl.Locale.prototype', 'getHourCycles', 'method', 'getHourCycles', 0],
+  ['Intl.Locale.prototype', 'getNumberingSystems', 'method', 'getNumberingSystems', 0],
+  ['Intl.Locale.prototype', 'getTextInfo', 'method', 'getTextInfo', 0],
+  ['Intl.Locale.prototype', 'getTimeZones', 'method', 'getTimeZones', 0],
+  ['Intl.Locale.prototype', 'getWeekInfo', 'method', 'getWeekInfo', 0],
+  ['Intl.Locale.prototype', 'maximize', 'method', 'maximize', 0],
+  ['Intl.Locale.prototype', 'minimize', 'method', 'minimize', 0],
+  ['Intl.Locale.prototype', 'toString', 'method', 'toString', 0],
+  ['Intl.Locale.prototype', '@@toStringTag', 'toStringTag', 'Intl.Locale'],
 ];
 
 function isConstructor(f) {
@@ -58,11 +84,31 @@ function check(row) {
     if (typeof f !== 'function') return label + 'not a function';
     if (isConstructor(f)) problems.push('constructible');
     if (Object.prototype.hasOwnProperty.call(f, 'prototype')) problems.push('prototype');
+  } else if (row[2] === 'constructor') {
+    if (!d.writable || d.enumerable || !d.configurable) problems.push('holder attributes');
+    f = d.value;
+    if (typeof f !== 'function') return label + 'not a function';
+    if (!isConstructor(f)) problems.push('not constructible');
+    // The prototype is non-writable, non-enumerable and non-configurable,
+    // and its constructor is the function.
+    var pd = Object.getOwnPropertyDescriptor(f, 'prototype');
+    if (!pd || pd.writable || pd.enumerable || pd.configurable) problems.push('prototype attributes');
+    var cd = pd && Object.getOwnPropertyDescriptor(pd.value, 'constructor');
+    if (!cd || cd.value !== f) problems.push('prototype.constructor');
+  } else if (row[2] === 'getter') {
+    // An accessor with no setter: non-enumerable, configurable.
+    if (!('get' in d)) return label + 'not an accessor';
+    if (d.set !== undefined || d.enumerable || !d.configurable) problems.push('holder attributes');
+    f = d.get;
+    if (typeof f !== 'function') return label + 'no getter';
+    if (isConstructor(f)) problems.push('constructible');
+    if (Object.prototype.hasOwnProperty.call(f, 'prototype')) problems.push('prototype');
   } else {
     return label + 'unknown kind ' + row[2];
   }
   checkFunctionProperty(f, 'name', row[3], problems);
-  checkFunctionProperty(f, 'length', row[4], problems);
+  // A getter's length is 0.
+  checkFunctionProperty(f, 'length', row[2] === 'getter' ? 0 : row[4], problems);
   if (Function.prototype.toString.call(f).indexOf('[native code]') === -1)
     problems.push('toString');
   return label + (problems.length ? problems.join(', ') : 'ok');
@@ -71,8 +117,35 @@ function check(row) {
 for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK: Intl.getCanonicalLocales: ok
 // CHECK-NEXT: Intl.supportedValuesOf: ok
+// CHECK-NEXT: Intl.Locale: ok
 // CHECK-NEXT: Intl.@@toStringTag: ok
+// CHECK-NEXT: Intl.Locale.prototype.baseName: ok
+// CHECK-NEXT: Intl.Locale.prototype.calendar: ok
+// CHECK-NEXT: Intl.Locale.prototype.caseFirst: ok
+// CHECK-NEXT: Intl.Locale.prototype.collation: ok
+// CHECK-NEXT: Intl.Locale.prototype.firstDayOfWeek: ok
+// CHECK-NEXT: Intl.Locale.prototype.hourCycle: ok
+// CHECK-NEXT: Intl.Locale.prototype.language: ok
+// CHECK-NEXT: Intl.Locale.prototype.numberingSystem: ok
+// CHECK-NEXT: Intl.Locale.prototype.numeric: ok
+// CHECK-NEXT: Intl.Locale.prototype.region: ok
+// CHECK-NEXT: Intl.Locale.prototype.script: ok
+// CHECK-NEXT: Intl.Locale.prototype.variants: ok
+// CHECK-NEXT: Intl.Locale.prototype.getCalendars: ok
+// CHECK-NEXT: Intl.Locale.prototype.getCollations: ok
+// CHECK-NEXT: Intl.Locale.prototype.getHourCycles: ok
+// CHECK-NEXT: Intl.Locale.prototype.getNumberingSystems: ok
+// CHECK-NEXT: Intl.Locale.prototype.getTextInfo: ok
+// CHECK-NEXT: Intl.Locale.prototype.getTimeZones: ok
+// CHECK-NEXT: Intl.Locale.prototype.getWeekInfo: ok
+// CHECK-NEXT: Intl.Locale.prototype.maximize: ok
+// CHECK-NEXT: Intl.Locale.prototype.minimize: ok
+// CHECK-NEXT: Intl.Locale.prototype.toString: ok
+// CHECK-NEXT: Intl.Locale.prototype.@@toStringTag: ok
 
-// Intl has exactly the table's properties.
+// Intl and each prototype have exactly the table's properties, and a
+// prototype also its constructor.
 print(Reflect.ownKeys(Intl).map(String).join(','));
-// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Locale,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)

@@ -28,6 +28,13 @@ var native = {
 // The loader passes the defaults already reduced to available locales,
 // most preferred first; DefaultLocale takes the first.
 var hostDefaults = {locales: ['fr', 'de'], timeZone: 'UTC'};
+// 20-Locale.js is not included, so no object is an Intl.Locale.
+function isLocaleObject(o) {
+  return false;
+}
+function localeObjectTag(o) {
+  throw new Error('not a Locale');
+}
 /// The class of the exception f throws, or 'none'.
 function thrown(f) {
   try {
