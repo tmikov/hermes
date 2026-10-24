@@ -6,8 +6,9 @@
  */
 
 // ECMA-402 "Locale Objects": the Intl.Locale constructor, UpdateLanguageId,
-// MakeLocaleRecord and the Intl.Locale prototype, following the draft
-// https://tc39.es/ecma402/ dated October 24, 2026. The Locale abstract
+// MakeLocaleRecord, the abstract operations of the locale information
+// methods and the Intl.Locale prototype, following the draft
+// https://tc39.es/ecma402/ dated October 24, 2026. The other Locale abstract
 // operations they use are in 05-tags.js.
 
 /// %Intl.Locale%.[[LocaleExtensionKeys]] ("Internal slots" under
@@ -65,8 +66,7 @@ class LocaleSlots extends ReturnOverride {
   /// [[InitializedLocale]]).
   static get(o, name) {
     // 1. Perform ? RequireInternalSlot(o, [[InitializedLocale]]).
-    if (!LocaleSlots.is(o))
-      throw new _TypeError('Receiver is not an Intl.Locale object');
+    requireInitializedLocale(o);
     // 2. Return the slot.
     switch (name) {
       case 'locale':
@@ -88,6 +88,14 @@ class LocaleSlots extends ReturnOverride {
     }
     throw new _TypeError('Intl internal error: no Locale slot ' + name);
   }
+}
+
+/// ECMA-262 RequireInternalSlot(o, [[InitializedLocale]]).
+function requireInitializedLocale(o) {
+  // 1. If o is not an Object, or has no [[InitializedLocale]] internal slot,
+  //    throw a TypeError exception.
+  if (!LocaleSlots.is(o))
+    throw new _TypeError('Receiver is not an Intl.Locale object');
 }
 
 /// Whether o is an Object with an [[InitializedLocale]] internal slot; used
@@ -460,6 +468,307 @@ function MakeLocaleRecord(tag, options, localeExtensionKeys) {
   return result;
 }
 
+/// ECMA-262 CreateDataPropertyOrThrow(o, key, v) on an ordinary extensible
+/// object with no property key, which cannot throw: a writable, enumerable,
+/// configurable data property, defined without consulting setters on the
+/// prototype chain.
+function createDataProperty(o, key, v) {
+  // 1. Perform ! DefinePropertyOrThrow(o, key, PropertyDescriptor {
+  //    [[Value]]: v, [[Writable]]: true, [[Enumerable]]: true,
+  //    [[Configurable]]: true }).
+  ObjectDefineProperty(o, key, {
+    __proto__: null,
+    value: v,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+// CalendarsOfLocale ( loc )
+function CalendarsOfLocale(loc) {
+  // 1. If loc.[[Calendar]] is not undefined, then
+  //    a. Return CreateArrayFromList(« loc.[[Calendar]] »).
+  var calendar = LocaleSlots.get(loc, 'calendar');
+  if (calendar !== undefined) return CreateArrayFromList([calendar]);
+  // 2. Let preference be RegionPreference(loc.[[Locale]]).
+  var preference = RegionPreference(LocaleSlots.get(loc, 'locale'));
+  // 3. If preference.[[RegionOverride]] is not undefined, let
+  //    preferredRegions be « preference.[[RegionOverride]],
+  //    preference.[[Region]] »; else let preferredRegions be
+  //    « preference.[[Region]] ».
+  var preferredRegions =
+    preference.regionOverride !== undefined
+      ? [preference.regionOverride, preference.region]
+      : [preference.region];
+  // 4. Let calendarsInUse be a new empty List.
+  var calendarsInUse = [];
+  // 5. Let language be GetLocaleLanguage(loc.[[Locale]]).
+  //    Only step 6.b uses it, and that step never applies (see there).
+  // 6. For each String region of preferredRegions, do
+  for (var i = 0; i < preferredRegions.length; i++) {
+    var region = preferredRegions[i];
+    // a. Let locale be the string-concatenation of language, "-", and
+    //    region.
+    // b. If calendarsInUse is empty and calendar preference data for locale
+    //    locale are available, then
+    //    i. Set calendarsInUse to a List of unique calendar types in common
+    //       use for date and time formatting in locale locale, sorted by
+    //       descending preference of use in locale.
+    //    CLDR's calendarPreferenceData is keyed by region only, so there
+    //    are no such data for any locale.
+    // c. If calendarsInUse is empty and calendar preference data for region
+    //    region are available, then
+    //    i. Set calendarsInUse to a List of unique calendar types in common
+    //       use for date and time formatting in region region, sorted by
+    //       descending preference of use in region.
+    if (calendarsInUse.length === 0) {
+      var preferences = native.calendarPreferences(region);
+      if (preferences !== undefined) calendarsInUse = splitSpaces(preferences);
+    }
+  }
+  // 7. Let list be a new empty List.
+  var list = [];
+  // 8. Let availableCalendars be AvailableCalendars().
+  var availableCalendars = AvailableCalendars();
+  // 9. For each element identifier of calendarsInUse, do
+  for (var j = 0; j < calendarsInUse.length; j++) {
+    // a. Let canonical be CanonicalizeUValue("ca", identifier).
+    var canonical = CanonicalizeUValue('ca', calendarsInUse[j]);
+    // b. If availableCalendars contains canonical and list does not contain
+    //    canonical, then
+    //    i. Append canonical to list.
+    if (
+      listContains(availableCalendars, canonical) &&
+      !listContains(list, canonical)
+    ) {
+      listPush(list, canonical);
+    }
+  }
+  // 10. If list is empty, set list to « "gregory" ».
+  if (list.length === 0) list = ['gregory'];
+  // 11. Return CreateArrayFromList(list).
+  return CreateArrayFromList(list);
+}
+
+// CollationsOfLocale ( loc )
+function CollationsOfLocale(loc) {
+  // 1. If loc.[[Collation]] is not undefined, then
+  //    a. Return CreateArrayFromList(« loc.[[Collation]] »).
+  var collation = LocaleSlots.get(loc, 'collation');
+  if (collation !== undefined) return CreateArrayFromList([collation]);
+  // 2. Let match be LookupMatchingLocaleByPrefix(%Intl.Collator%.
+  //    [[AvailableLocales]], « loc.[[Locale]] »). That is the plugin's one
+  //    [[AvailableLocales]] list (isAvailableLocale).
+  var match = LookupMatchingLocaleByPrefix(isAvailableLocale, [
+    LocaleSlots.get(loc, 'locale'),
+  ]);
+  var list;
+  if (match !== undefined) {
+    // 3. If match is not undefined, then
+    //    a. Let foundLocale be match.[[locale]].
+    //    b. Let foundLocaleData be %Intl.Collator%.[[SortLocaleData]].
+    //       [[<foundLocale>]].
+    //    c. Let list be a copy of foundLocaleData.[[co]].
+    //    d. Assert: list[0] is null.
+    //    e. Remove the first element from list.
+    //    The native list is foundLocale's [[co]] without its leading null:
+    //    the collation types it has tailorings for.
+    list = splitSpaces(native.collationsOfLocale(match.locale));
+  } else {
+    // 4. Else,
+    //    a. Let list be « "emoji", "eor" ».
+    list = ['emoji', 'eor'];
+  }
+  // 5. Let sorted be a copy of list, sorted according to lexicographic code
+  //    unit order. Both lists are sorted already: the native one by its
+  //    contract, and step 4's as written.
+  // 6. Return CreateArrayFromList(sorted).
+  return CreateArrayFromList(list);
+}
+
+// HourCyclesOfLocale ( loc )
+function HourCyclesOfLocale(loc) {
+  // 1. If loc.[[HourCycle]] is not undefined, then
+  //    a. Return CreateArrayFromList(« loc.[[HourCycle]] »).
+  var hourCycle = LocaleSlots.get(loc, 'hourCycle');
+  if (hourCycle !== undefined) return CreateArrayFromList([hourCycle]);
+  // 2. Let preference be RegionPreference(loc.[[Locale]]).
+  var preference = RegionPreference(LocaleSlots.get(loc, 'locale'));
+  // 3. If preference.[[RegionOverride]] is not undefined, let
+  //    preferredRegions be « preference.[[RegionOverride]],
+  //    preference.[[Region]] »; else let preferredRegions be
+  //    « preference.[[Region]] ».
+  var preferredRegions =
+    preference.regionOverride !== undefined
+      ? [preference.regionOverride, preference.region]
+      : [preference.region];
+  // 4. Let hourCycles be a new empty List.
+  var hourCycles = [];
+  // 5. Let language be GetLocaleLanguage(loc.[[Locale]]).
+  var language = GetLocaleLanguage(LocaleSlots.get(loc, 'locale'));
+  // 6. For each String region of preferredRegions, do
+  for (var i = 0; i < preferredRegions.length; i++) {
+    var region = preferredRegions[i];
+    // a. Let locale be the string-concatenation of language, "-", and
+    //    region.
+    var locale = language + '-' + region;
+    var data;
+    // b. If hourCycles is empty and time data for locale locale are
+    //    available, then
+    //    i. Set hourCycles to a List of unique hour cycle identifiers, which
+    //       must be lower case Strings indicating either the 12-hour format
+    //       ("h11", "h12") or the 24-hour format ("h23", "h24"), sorted in
+    //       descending preference of those in common use for date and time
+    //       formatting in locale locale.
+    if (hourCycles.length === 0) {
+      data = native.hourCycles(locale);
+      if (data !== undefined) hourCycles = splitSpaces(data);
+    }
+    // c. If hourCycles is empty and time data for region region are
+    //    available, then
+    //    i. Set hourCycles to a List of unique hour cycle identifiers, which
+    //       must be lower case Strings indicating either the 12-hour format
+    //       ("h11", "h12") or the 24-hour format ("h23", "h24"), sorted in
+    //       descending preference of those in common use for date and time
+    //       formatting in region region.
+    if (hourCycles.length === 0) {
+      data = native.hourCycles(region);
+      if (data !== undefined) hourCycles = splitSpaces(data);
+    }
+  }
+  // 7. If hourCycles is empty, set hourCycles to « "h23" ».
+  if (hourCycles.length === 0) hourCycles = ['h23'];
+  // 8. Return CreateArrayFromList(hourCycles).
+  return CreateArrayFromList(hourCycles);
+}
+
+// NumberingSystemsOfLocale ( loc )
+function NumberingSystemsOfLocale(loc) {
+  // 1. If loc.[[NumberingSystem]] is not undefined, then
+  //    a. Return CreateArrayFromList(« loc.[[NumberingSystem]] »).
+  var numberingSystem = LocaleSlots.get(loc, 'numberingSystem');
+  if (numberingSystem !== undefined)
+    return CreateArrayFromList([numberingSystem]);
+  // 2. Let match be LookupMatchingLocaleByPrefix(%Intl.NumberFormat%.
+  //    [[AvailableLocales]], « loc.[[Locale]] »). That is the plugin's one
+  //    [[AvailableLocales]] list (isAvailableLocale).
+  var match = LookupMatchingLocaleByPrefix(isAvailableLocale, [
+    LocaleSlots.get(loc, 'locale'),
+  ]);
+  var list;
+  if (match !== undefined) {
+    // 3. If match is not undefined, then
+    //    a. Let foundLocale be match.[[locale]].
+    //    b. Let foundLocaleData be %Intl.NumberFormat%.[[LocaleData]].
+    //       [[<foundLocale>]].
+    //    c. Let numberingSystems be foundLocaleData.[[nu]].
+    //    d. Let list be « numberingSystems[0] ».
+    //    numberingSystems[0] is the numbering system of foundLocale's
+    //    decimal data, which the native helper gives.
+    list = [native.defaultNumberingSystem(match.locale)];
+  } else {
+    // 4. Else,
+    //    a. Let list be « "latn" ».
+    list = ['latn'];
+  }
+  // 5. Return CreateArrayFromList(list).
+  return CreateArrayFromList(list);
+}
+
+// TimeZonesOfLocale ( loc )
+function TimeZonesOfLocale(loc) {
+  // 1. Let region be GetLocaleRegion(loc.[[Locale]]).
+  var region = GetLocaleRegion(LocaleSlots.get(loc, 'locale'));
+  // 2. If region is undefined, return undefined.
+  if (region === undefined) return undefined;
+  // 3. Let list be a List of unique canonical time zone identifiers, which
+  //    must be String values indicating a canonical Zone name of the IANA
+  //    Time Zone Database, of those in common use in region. The list is
+  //    empty if no time zones are commonly used in region. The list is
+  //    sorted according to lexicographic code unit order.
+  //    The native list is exactly that: primary identifiers, sorted.
+  var list = splitSpaces(native.timeZonesOfRegion(region));
+  // 4. Return CreateArrayFromList(list).
+  return CreateArrayFromList(list);
+}
+
+// TextDirectionOfLocale ( loc )
+function TextDirectionOfLocale(loc) {
+  // 1. Let locale be loc.[[Locale]].
+  var locale = LocaleSlots.get(loc, 'locale');
+  // 2. Let script be GetLocaleScript(locale).
+  var script = GetLocaleScript(locale);
+  // 3. If script is undefined, then
+  if (script === undefined) {
+    // a. Let maximal be the result of the Add Likely Subtags algorithm
+    //    applied to locale. If an error is signaled, return undefined.
+    //    (locale is canonical, so the native helper cannot fail.)
+    var maximal = native.addLikelySubtags(locale);
+    // b. Set script to GetLocaleScript(maximal).
+    script = GetLocaleScript(maximal);
+    // c. If script is undefined, return undefined.
+    if (script === undefined) return undefined;
+  }
+  var direction = native.scriptDirection(script);
+  // 4. If the default general ordering of characters within a line in
+  //    script is right-to-left, return "rtl".
+  if (direction === 'rtl') return 'rtl';
+  // 5. If the default general ordering of characters within a line in
+  //    script is left-to-right, return "ltr".
+  if (direction === 'ltr') return 'ltr';
+  // 6. Return undefined.
+  return undefined;
+}
+
+// WeekInfoOfLocale ( loc ). The WeekInfo Record is a null-prototype record
+// with fields firstDay and weekend.
+function WeekInfoOfLocale(loc) {
+  // 1. Let preference be RegionPreference(loc.[[Locale]]).
+  var preference = RegionPreference(LocaleSlots.get(loc, 'locale'));
+  // 2. Let region be preference.[[Region]].
+  var region = preference.region;
+  // 3. Let regionOverride be preference.[[RegionOverride]].
+  var regionOverride = preference.regionOverride;
+  // 4. If regionOverride is not undefined and week data for region
+  //    regionOverride are available, then
+  //    a. Let lookupRegion be regionOverride.
+  // 5. Else if week data for region region are available, then
+  //    a. Let lookupRegion be region.
+  // 6. Else,
+  //    a. Let lookupRegion be "001".
+  //    Week data are available for every region: CLDR's "001" data apply
+  //    to each region it does not list, and the native helper always
+  //    loads with that fallback. (ICU4X drops the regions whose data equal
+  //    "001", so an exact load would wrongly skip them.) Steps 5 and 6.a
+  //    therefore reduce to the override, if any, and else the region.
+  var lookupRegion = regionOverride !== undefined ? regionOverride : region;
+  // 7. Let weekInfo be a Record whose fields are defined by the WeekInfo
+  //    Record Fields table, with values based on region lookupRegion.
+  //    The native data are the first day, then the weekend days in
+  //    ascending order.
+  var data = splitSpaces(native.weekInfo(lookupRegion));
+  var weekend = [];
+  for (var i = 1; i < data.length; i++) listPush(weekend, ToNumber(data[i]));
+  var weekInfo = {
+    __proto__: null,
+    firstDay: ToNumber(data[0]),
+    weekend: weekend,
+  };
+  // 8. Let firstDayString be loc.[[FirstDayOfWeek]].
+  var firstDayString = LocaleSlots.get(loc, 'firstDayOfWeek');
+  // 9. If firstDayString is not undefined, then
+  if (firstDayString !== undefined) {
+    // a. Let firstDay be WeekdayUValueToNumber(firstDayString).
+    var firstDay = WeekdayUValueToNumber(firstDayString);
+    // b. If firstDay is not undefined, set weekInfo.[[FirstDay]] to
+    //    firstDay.
+    if (firstDay !== undefined) weekInfo.firstDay = firstDay;
+  }
+  // 10. Return weekInfo.
+  return weekInfo;
+}
+
 /// Install Intl.Locale and its prototype on intl; called by installIntl.
 function installLocale(intl) {
   // 1. Let proto be %Intl.Locale.prototype%, an ordinary object whose
@@ -558,6 +867,89 @@ function installLocale(intl) {
   });
   // 4. The method properties of the prototype.
   defineMethods(proto, {
+    // Intl.Locale.prototype.getCalendars ( )
+    getCalendars() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Return CalendarsOfLocale(loc).
+      return CalendarsOfLocale(loc);
+    },
+    // Intl.Locale.prototype.getCollations ( )
+    getCollations() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Return CollationsOfLocale(loc).
+      return CollationsOfLocale(loc);
+    },
+    // Intl.Locale.prototype.getHourCycles ( )
+    getHourCycles() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Return HourCyclesOfLocale(loc).
+      return HourCyclesOfLocale(loc);
+    },
+    // Intl.Locale.prototype.getNumberingSystems ( )
+    getNumberingSystems() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Return NumberingSystemsOfLocale(loc).
+      return NumberingSystemsOfLocale(loc);
+    },
+    // Intl.Locale.prototype.getTextInfo ( )
+    getTextInfo() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Let info be OrdinaryObjectCreate(%Object.prototype%).
+      var info = {};
+      // 4. Let dir be TextDirectionOfLocale(loc).
+      var dir = TextDirectionOfLocale(loc);
+      // 5. Perform ! CreateDataPropertyOrThrow(info, "direction", dir).
+      createDataProperty(info, 'direction', dir);
+      // 6. Return info.
+      return info;
+    },
+    // Intl.Locale.prototype.getTimeZones ( )
+    getTimeZones() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Return TimeZonesOfLocale(loc).
+      return TimeZonesOfLocale(loc);
+    },
+    // Intl.Locale.prototype.getWeekInfo ( )
+    getWeekInfo() {
+      // 1. Let loc be the this value.
+      var loc = this;
+      // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
+      requireInitializedLocale(loc);
+      // 3. Let info be OrdinaryObjectCreate(%Object.prototype%).
+      var info = {};
+      // 4. Let weekInfo be WeekInfoOfLocale(loc).
+      var weekInfo = WeekInfoOfLocale(loc);
+      // 5. Perform ! CreateDataPropertyOrThrow(info, "firstDay",
+      //    weekInfo.[[FirstDay]]).
+      createDataProperty(info, 'firstDay', weekInfo.firstDay);
+      // 6. Perform ! CreateDataPropertyOrThrow(info, "weekend",
+      //    CreateArrayFromList(weekInfo.[[Weekend]])).
+      createDataProperty(
+        info,
+        'weekend',
+        CreateArrayFromList(weekInfo.weekend),
+      );
+      // 7. Return info.
+      return info;
+    },
     // Intl.Locale.prototype.maximize ( )
     maximize() {
       // 1. Let loc be the this value.

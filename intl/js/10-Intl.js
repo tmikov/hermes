@@ -31,6 +31,14 @@ function AvailableCanonicalUnits() {
   return SANCTIONED_UNITS;
 }
 
+// 6.9.1 AvailableCalendars ( )
+function AvailableCalendars() {
+  // 1. Return the List, sorted by code unit, of the unique calendar types
+  //    the implementation supports, including their aliases (the native
+  //    list).
+  return splitSpaces(native.supportedValues('calendar'));
+}
+
 /// Split a space-separated list from native code into a List. Empty items
 /// (from leading, trailing or repeated spaces) are skipped.
 function splitSpaces(s) {
@@ -76,7 +84,7 @@ function installIntl() {
         //    a. Let list be a new empty List.
         list = [];
         //    b. For each element identifier of AvailableCalendars(), do
-        var calendars = splitSpaces(native.supportedValues(key));
+        var calendars = AvailableCalendars();
         for (var i = 0; i < calendars.length; i++) {
           var identifier = calendars[i];
           //    i. Let canonical be CanonicalizeUValue("ca", identifier).

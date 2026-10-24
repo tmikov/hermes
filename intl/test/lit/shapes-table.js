@@ -32,6 +32,13 @@ var TABLE = [
   ['Intl.Locale.prototype', 'region', 'getter', 'get region'],
   ['Intl.Locale.prototype', 'script', 'getter', 'get script'],
   ['Intl.Locale.prototype', 'variants', 'getter', 'get variants'],
+  ['Intl.Locale.prototype', 'getCalendars', 'method', 'getCalendars', 0],
+  ['Intl.Locale.prototype', 'getCollations', 'method', 'getCollations', 0],
+  ['Intl.Locale.prototype', 'getHourCycles', 'method', 'getHourCycles', 0],
+  ['Intl.Locale.prototype', 'getNumberingSystems', 'method', 'getNumberingSystems', 0],
+  ['Intl.Locale.prototype', 'getTextInfo', 'method', 'getTextInfo', 0],
+  ['Intl.Locale.prototype', 'getTimeZones', 'method', 'getTimeZones', 0],
+  ['Intl.Locale.prototype', 'getWeekInfo', 'method', 'getWeekInfo', 0],
   ['Intl.Locale.prototype', 'maximize', 'method', 'maximize', 0],
   ['Intl.Locale.prototype', 'minimize', 'method', 'minimize', 0],
   ['Intl.Locale.prototype', 'toString', 'method', 'toString', 0],
@@ -124,6 +131,13 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.Locale.prototype.region: ok
 // CHECK-NEXT: Intl.Locale.prototype.script: ok
 // CHECK-NEXT: Intl.Locale.prototype.variants: ok
+// CHECK-NEXT: Intl.Locale.prototype.getCalendars: ok
+// CHECK-NEXT: Intl.Locale.prototype.getCollations: ok
+// CHECK-NEXT: Intl.Locale.prototype.getHourCycles: ok
+// CHECK-NEXT: Intl.Locale.prototype.getNumberingSystems: ok
+// CHECK-NEXT: Intl.Locale.prototype.getTextInfo: ok
+// CHECK-NEXT: Intl.Locale.prototype.getTimeZones: ok
+// CHECK-NEXT: Intl.Locale.prototype.getWeekInfo: ok
 // CHECK-NEXT: Intl.Locale.prototype.maximize: ok
 // CHECK-NEXT: Intl.Locale.prototype.minimize: ok
 // CHECK-NEXT: Intl.Locale.prototype.toString: ok
@@ -134,4 +148,4 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 print(Reflect.ownKeys(Intl).map(String).join(','));
 // CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Locale,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
-// CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,maximize,minimize,toString,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)

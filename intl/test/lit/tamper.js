@@ -28,6 +28,8 @@ var LocalePrototype = Intl.Locale.prototype;
 var localeToString = LocalePrototype.toString;
 var localeMaximize = LocalePrototype.maximize;
 var localeMinimize = LocalePrototype.minimize;
+var localeGetCalendars = LocalePrototype.getCalendars;
+var localeGetWeekInfo = LocalePrototype.getWeekInfo;
 /// The original getter of Intl.Locale.prototype[name].
 function getter(name) {
   return Object.getOwnPropertyDescriptor(LocalePrototype, name).get;
@@ -79,8 +81,16 @@ define(Array.prototype, '0', {__proto__: null, set: boom, get: boom, configurabl
 define(Array.prototype, '1', {__proto__: null, set: boom, get: boom, configurable: true});
 LocalePrototype.toString = boom;
 LocalePrototype.maximize = boom;
-// The names of the fields of the constructor's internal records.
-var recordFields = ['locale', 'calendar', 'ca', 'key', 'base', 'extension'];
+LocalePrototype.getCalendars = boom;
+LocalePrototype.getWeekInfo = boom;
+// The names of the fields of the constructor's internal records, of
+// RegionPreference's, and of the objects getWeekInfo returns. "region" is
+// left out: the constructor reads it from its options object, which
+// inherits from Object.prototype, as the spec requires.
+var recordFields = [
+  'locale', 'calendar', 'ca', 'key', 'base', 'extension', 'regionOverride',
+  'firstDay', 'weekend',
+];
 for (var k = 0; k < recordFields.length; k++)
   define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
 // The globals 01-intrinsics.js captures from, except String, whose
@@ -157,3 +167,12 @@ print(thrown(() => new OriginalLocale('en', {region: '1234'}), OriginalRangeErro
 // CHECK-NEXT: ok
 print(thrown(() => apply(localeToString, {}, []), OriginalTypeError));
 // CHECK-NEXT: ok
+
+// The information methods, through the references captured before the
+// tampering: RegionPreference, the native lists, AvailableCalendars and
+// the result object use none of the replaced intrinsics.
+print(stringify(apply(localeGetCalendars, new OriginalLocale('th'), [])));
+// CHECK-NEXT: ["buddhist","gregory"]
+var week = apply(localeGetWeekInfo, new OriginalLocale('en-US'), []);
+print(stringify(week.weekend), week.firstDay);
+// CHECK-NEXT: [6,7] 7
