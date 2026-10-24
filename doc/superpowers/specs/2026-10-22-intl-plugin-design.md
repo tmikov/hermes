@@ -675,7 +675,8 @@ builds the part objects.
   `calendarPreferences`, `hourCycles`, `timeZonesOfRegion`, `weekInfo`,
   `scriptDirection`, `defaultNumberingSystem` and `collationsOfLocale`. The
   last two use the plugin's one `[[AvailableLocales]]` list
-  (`isAvailableLocale`) where the spec names `%Intl.Collator%.[[AvailableLocales]]` and
+  (`isAvailableLocale`) where the spec names
+  `%Intl.Collator%.[[AvailableLocales]]` and
   `%Intl.NumberFormat%.[[AvailableLocales]]`. Phases 2 and 3 must keep it
   that way, or update these two methods.
 - Each formatter type is a `jsi::NativeState` subclass that owns its Rust
