@@ -7,6 +7,7 @@ add_hermes_tool(hvm
   hvm.cpp
   LINK_OBJLIBS hermesConsoleHost_obj
   LINK_LIBS hermesvm_a)
+hermes_export_dynamic_symbols(hvm)
 
 if(HERMES_ENABLE_NAPI)
   target_link_libraries(hvm hermesNapi)

@@ -135,6 +135,31 @@ struct VMOnlyRuntimeFlags {
       llvh::cl::init(vm::RuntimeConfig::getDefaultIntl()),
       llvh::cl::cat(RuntimeCategory)};
 
+  llvh::cl::opt<bool> IntlPlugin{
+      "Xintl-plugin",
+      llvh::cl::desc("Load the Intl plugin when one is available"),
+      llvh::cl::init(vm::RuntimeConfig::getDefaultEnableIntlPlugin()),
+      llvh::cl::cat(RuntimeCategory)};
+
+  llvh::cl::opt<std::string> IntlPluginPath{
+      "Xintl-plugin-path",
+      llvh::cl::desc("Load the Intl plugin from this library"),
+      llvh::cl::value_desc("path"),
+      llvh::cl::cat(RuntimeCategory)};
+
+  llvh::cl::list<std::string> IntlDefaultLocales{
+      "Xintl-default-locale",
+      llvh::cl::desc(
+          "Default locale for Intl; repeat to give a preference list"),
+      llvh::cl::value_desc("tag"),
+      llvh::cl::cat(RuntimeCategory)};
+
+  llvh::cl::opt<std::string> IntlDefaultTimeZone{
+      "Xintl-default-time-zone",
+      llvh::cl::desc("Default IANA time zone for Intl"),
+      llvh::cl::value_desc("zone"),
+      llvh::cl::cat(RuntimeCategory)};
+
   llvh::cl::opt<bool> MicrotaskQueue{
       "Xmicrotask-queue",
       llvh::cl::desc("Enable support for using microtasks"),
@@ -320,6 +345,14 @@ struct RuntimeFlags : public VMOnlyRuntimeFlags, CompilerRuntimeFlags {};
 /// Build runtime config from the parsed command line flags.
 vm::RuntimeConfig buildRuntimeConfig(const RuntimeFlags &flags);
 #endif // HERMES_IS_MOBILE_BUILD
+
+/// Set the Intl plugin options of \p builder (EnableIntlPlugin,
+/// IntlPluginPath, IntlDefaultLocales and IntlDefaultTimeZone) from \p flags,
+/// for buildRuntimeConfig and the tools that build their RuntimeConfig
+/// themselves. \return \p builder.
+vm::RuntimeConfig::Builder &withIntlPluginFlags(
+    vm::RuntimeConfig::Builder &builder,
+    const VMOnlyRuntimeFlags &flags);
 
 } // namespace hermes::cli
 

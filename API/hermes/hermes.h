@@ -22,6 +22,7 @@
 #include <unordered_map>
 
 struct HermesTestHelper;
+struct hermes_intl_entry;
 struct SHUnit;
 struct SHRuntime;
 
@@ -238,5 +239,13 @@ HERMES_EXPORT std::unique_ptr<jsi::ThreadSafeRuntime>
 makeThreadSafeHermesRuntime(
     const ::hermes::vm::RuntimeConfig &runtimeConfig =
         ::hermes::vm::RuntimeConfig());
+
+/// Make \p entry the default Intl plugin of this process: the way to use a
+/// plugin linked into the application statically. It must be called before
+/// the first runtime that uses the default plugin is created; a later call
+/// is fatal. \p entry must outlive every runtime. A null \p entry registers
+/// nothing (and clears an earlier registration), so default resolution
+/// proceeds normally.
+HERMES_EXPORT void registerIntlPlugin(const hermes_intl_entry *entry);
 } // namespace hermes
 } // namespace facebook

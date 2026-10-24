@@ -63,6 +63,7 @@ endif()
 set(api_sources
   hermes.cpp
   DebuggerAPI.cpp
+  IntlPluginLoader.cpp
   AsyncDebuggerAPI.cpp
   RuntimeTaskRunner.cpp
   ${CDP_API_SOURCES}
@@ -93,7 +94,8 @@ endif()
 
 add_hermes_library(hermesapi
   ${api_sources}
-  LINK_OBJLIBS hermesPublic LINK_LIBS jsi ${CDP_DEPS} ${API_JNI_DEPS}
+  LINK_OBJLIBS hermesPublic
+  LINK_LIBS jsi ${CDP_DEPS} ${API_JNI_DEPS} ${CMAKE_DL_LIBS}
   )
 target_include_directories(hermesapi_obj PUBLIC ..)
 

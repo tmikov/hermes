@@ -74,10 +74,33 @@ jobs:
       env:
         LIT_HERMES_EXTRA_FLAGS: ${{ matrix.lit_flags }}
       run: |-
-        cmake -S hermes -B build -GNinja -DHERMES_ENABLE_INTL=ON -DCMAKE_BUILD_TYPE=Debug ${{ matrix.cmake_flags }}
+        # This job tests the old, built-in Intl (HERMES_ENABLE_INTL); the plugin would replace it.
+        cmake -S hermes -B build -GNinja -DHERMES_ENABLE_INTL=ON -DHERMES_BUILD_INTL=OFF -DCMAKE_BUILD_TYPE=Debug ${{ matrix.cmake_flags }}
         cmake --build ./build
         cmake --build ./build --target check-hermes
         python3 hermes/utils/test_runner.py --test-intl test262/test -b build/bin ${{ matrix.test_runner_flags }}
+    - name: Ensure Rust (the Intl plugin needs it)
+      run: |-
+        # The plugin needs Rust 1.88 or newer: update a preinstalled rustup
+        # toolchain, or install one.
+        if command -v rustup; then
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+        elif ! command -v cargo; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+    - name: Run Hermes tests with the Intl plugin
+      env:
+        LIT_HERMES_EXTRA_FLAGS: ${{ matrix.lit_flags }}
+      run: |-
+        # A second build, configured like the Linux test262 job: the plugin
+        # instead of the old Intl.
+        cmake -S hermes -GNinja -B build-plugin -DCMAKE_BUILD_TYPE=Debug \
+          -DHERMES_ENABLE_INTL=OFF -DHERMES_BUILD_INTL=ON \
+          -DHERMES_INTL_TEST262_DIR=$PWD/test262 ${{ matrix.cmake_flags }}
+        cmake --build build-plugin --target check-hermes all
+        cmake --build build-plugin --target check-intl
 
   test-linux-test262:
     strategy:
@@ -106,15 +129,27 @@ jobs:
         git clone https://github.com/tc39/test262
         cd test262
         git checkout c9aa6126e8f6fe2c6f668c65bfba771ffc8a6096
+    - name: Ensure Rust (the Intl plugin needs it)
+      run: |-
+        # The plugin needs Rust 1.88 or newer: update a preinstalled rustup
+        # toolchain, or install one.
+        if command -v rustup; then
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+        elif ! command -v cargo; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
     - name: Run test262
       env:
         LIT_HERMES_EXTRA_FLAGS: ${{ matrix.lit_flags }}
       run: |-
-        cmake -S hermes -GNinja -B build -DCMAKE_BUILD_TYPE=Debug ${{ matrix.cmake_flags }}
+        cmake -S hermes -GNinja -B build -DCMAKE_BUILD_TYPE=Debug \
+          -DHERMES_INTL_TEST262_DIR=$PWD/test262 ${{ matrix.cmake_flags }}
         cmake --build build --target check-hermes all
+        cmake --build build --target check-intl
 
-        # Intl is unavailable on Linux: the ICU-backed implementation was
-        # removed with the ICU dependency, so intl402 is not run here.
+        # intl402 runs through check-intl, against the Intl plugin.
         python3 hermes/utils/test_runner.py test262/test -b build/bin ${{ matrix.test_runner_flags }}
 
   test-linux-armv7:

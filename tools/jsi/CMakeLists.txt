@@ -12,6 +12,7 @@ add_hermes_tool(hermes-jsi
   ${ALL_HEADER_FILES}
   LINK_OBJLIBS hermesvm_a timerStats
   )
+hermes_export_dynamic_symbols(hermes-jsi)
 
 # Additional targets to test linking against the other library variants.
 add_hermes_tool(hermes-jsi-lean
@@ -19,6 +20,7 @@ add_hermes_tool(hermes-jsi-lean
   ${ALL_HEADER_FILES}
   LINK_OBJLIBS hermesvmlean_a timerStats
   )
+hermes_export_dynamic_symbols(hermes-jsi-lean)
 
 add_hermes_tool(hermes-jsi-shared
   jsi.cpp

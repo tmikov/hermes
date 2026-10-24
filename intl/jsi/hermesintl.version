@@ -1,0 +1,16 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/* The plugin's one exported symbol (HERMES_INTL_ENTRY_SYMBOL). Everything
+   else, the Rust core and the C++ inline and template instances included,
+   stays local. */
+{
+  global:
+    hermes_intl_get_entry;
+  local:
+    *;
+};

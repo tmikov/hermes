@@ -6,6 +6,7 @@
 
 import argparse
 import asyncio
+import dataclasses
 import importlib.resources
 import os
 import shutil
@@ -102,6 +103,31 @@ def create_parser():
         help="Run supported Intl tests",
     )
     parser.add_argument(
+        "--intl-plugin",
+        dest="intl_plugin",
+        default=None,
+        help="Intl plugin mode: load this plugin library in every run, run "
+        "intl402, and judge results against --intl-expectations",
+    )
+    parser.add_argument(
+        "--intl-expectations",
+        dest="intl_expectations",
+        default=None,
+        help="Expected-failures file for --intl-plugin",
+    )
+    parser.add_argument(
+        "--intl-update-expectations",
+        dest="intl_update_expectations",
+        action="store_true",
+        help="Rewrite --intl-expectations from this run's results",
+    )
+    parser.add_argument(
+        "--intl-allow-commit-mismatch",
+        dest="intl_allow_commit_mismatch",
+        action="store_true",
+        help="Run even if the test262 checkout is not at the expectations' commit",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         dest="verbose",
@@ -184,6 +210,21 @@ def validate_args(args: argparse.Namespace):
         if len(args.paths) != 1:
             print("Argument error: Only one path is expected with --dump-source.")
             sys.exit(1)
+
+    if args.intl_plugin:
+        if not args.intl_expectations:
+            print("Argument error: --intl-plugin requires --intl-expectations.")
+            sys.exit(1)
+        # Plugin mode classifies runs only for the default compile-then-run
+        # path.
+        for flag, value in (
+            ("--lazy", args.lazy),
+            ("--shermes", args.shermes),
+            ("--bytecode-compat-check", args.bytecode_compat_check),
+        ):
+            if value:
+                print(f"Argument error: --intl-plugin cannot be used with {flag}.")
+                sys.exit(1)
 
     utils.check_hermes_exe(
         args.binary_directory, args.shermes, args.bytecode_compat_check
@@ -315,6 +356,7 @@ async def run(
     timeout: int,
     verbose: bool,
     show_slowest_tests: int = 0,
+    intl: Optional[dict] = None,
 ) -> int:
     """
     Run all tests with async subprocess and wait for results in completion order
@@ -330,6 +372,10 @@ async def run(
 
     After all tasks are done, print the test stats and relative paths of all
     failing tests (if there are).
+
+    In Intl plugin mode (intl is the dict from intl_prepare), the skiplist's
+    path entries do not apply to intl402, and the return value is the
+    verdict against the expectations file instead.
     """
 
     # Get the common path of all file/directory paths to be used when creating
@@ -360,36 +406,46 @@ async def run(
         assert suite, f"Test suite root directory is not found for {test_file}"
         full_test_name = suite.get_full_test_name(test_file)
 
-        # Check if this file should be skipped w.r.t. the test_skiplist flag.
-        skip_categories = [
-            SkipCategory.SKIP_LIST,
-            SkipCategory.PERMANENT_SKIP_LIST,
-            SkipCategory.MANUAL_SKIP_LIST,
-            SkipCategory.PLATFORM_SKIP_LIST,
-        ]
-        if lazy:
-            skip_categories.append(SkipCategory.LAZY_SKIP_LIST)
-        if test_result := skipped_paths_features.try_skip(
-            test_file,
-            skip_categories,
-            full_test_name,
-        ):
-            if not test_skiplist:
-                pd.update(test_result)
-                stats[test_result.code] += 1
-                continue
-            else:
-                skipped_tests[full_test_name] = suite.directory
-        # We check for intl tests separately since we don't run them frequently.
-        if test_result := skipped_paths_features.try_skip(
-            test_file, [SkipCategory.INTL_TESTS], full_test_name
-        ):
-            if not test_intl:
-                pd.update(test_result)
-                stats[test_result.code] += 1
-                continue
-            else:
-                skipped_tests[full_test_name] = suite.directory
+        # Plugin mode ignores every skiplist path entry for intl402. Elsewhere
+        # it ignores the intl_tests gate and the platform skip list (on Linux
+        # and macOS, the hosts plugin mode supports, those entries are all
+        # about the old Intl). The other lists record non-Intl Hermes bugs
+        # and still apply.
+        in_intl402 = "/test/intl402/" in test_file.replace(os.sep, "/")
+        if not (intl and in_intl402):
+            # Check if this file should be skipped w.r.t. the test_skiplist flag.
+            skip_categories = [
+                SkipCategory.SKIP_LIST,
+                SkipCategory.PERMANENT_SKIP_LIST,
+                SkipCategory.MANUAL_SKIP_LIST,
+            ]
+            if not intl:
+                skip_categories.append(SkipCategory.PLATFORM_SKIP_LIST)
+            if lazy:
+                skip_categories.append(SkipCategory.LAZY_SKIP_LIST)
+            if test_result := skipped_paths_features.try_skip(
+                test_file,
+                skip_categories,
+                full_test_name,
+            ):
+                if not test_skiplist:
+                    pd.update(test_result)
+                    stats[test_result.code] += 1
+                    continue
+                else:
+                    skipped_tests[full_test_name] = suite.directory
+            # We check for intl tests separately since we don't run them frequently.
+            if not intl and (
+                test_result := skipped_paths_features.try_skip(
+                    test_file, [SkipCategory.INTL_TESTS], full_test_name
+                )
+            ):
+                if not test_intl:
+                    pd.update(test_result)
+                    stats[test_result.code] += 1
+                    continue
+                else:
+                    skipped_tests[full_test_name] = suite.directory
 
         test_run_args = TestRunArgs(
             test_file,
@@ -404,6 +460,7 @@ async def run(
             opt,
             extra_compile_vm_args,
             timeout,
+            intl_plugin=intl["plugin"] if intl else None,
         )
         tasks.append(suite.run_test(test_run_args))
 
@@ -422,7 +479,10 @@ async def run(
     for task in asyncio.as_completed([wrap_task(fut) for fut in tasks]):
         result = await task
         stats[result.code] += 1
-        pd.update(result)
+        if intl:
+            pd.update(intl_display_result(result, intl))
+        else:
+            pd.update(result)
         if result.code.is_failure:
             failed_cases[result.code].append(result.test_name)
         # Collect non-skipped results for slowest-tests report.
@@ -444,6 +504,14 @@ async def run(
     elapsed = time.time() - start_time
     print(f"Testing time: {elapsed:.2f}")
 
+    if intl:
+        skipped = (
+            stats[TestResultCode.TEST_SKIPPED]
+            + stats[TestResultCode.TEST_PERMANENTLY_SKIPPED]
+        )
+        print(f"Intl plugin mode: {len(tests_files)} tests, {skipped} skipped")
+        return intl_verdict(all_results, intl)
+
     # Print result
     print_stats(stats)
     if show_slowest_tests > 0:
@@ -458,6 +526,139 @@ async def run(
         remove_tests_from_skiplist(skipped_passed, skipped_paths_features)
 
     return 1 if len(failed_cases) > 0 else 0
+
+
+def test262_root(tests_paths) -> str:
+    """The test262 checkout containing the first test path."""
+    # The trailing "/" also finds the root when the path is <root>/test.
+    p = os.path.abspath(tests_paths[0]).replace(os.sep, "/") + "/"
+    i = p.rfind("/test/")
+    return p[:i] if i >= 0 else p.rstrip("/")
+
+
+def intl_display_result(result: TestCaseResult, intl: dict) -> TestCaseResult:
+    """What plugin mode shows for one result: a pass when it is as the
+    expectations say, so only real problems print their output."""
+    from . import intl_plugin
+
+    if result.code in (
+        TestResultCode.TEST_SKIPPED,
+        TestResultCode.TEST_PERMANENTLY_SKIPPED,
+    ):
+        return result
+    problems = intl_plugin.judge(result, intl["expectations"], intl["update"])
+    if not problems:
+        return dataclasses.replace(
+            result, code=TestResultCode.TEST_PASSED, msg="As expected"
+        )
+    return dataclasses.replace(
+        result, code=TestResultCode.EXECUTE_FAILED, msg="; ".join(problems)
+    )
+
+
+def intl_load_expectations(args):
+    """The parsed expectations file, or None after printing why not. Under
+    --intl-update-expectations a missing file starts out empty."""
+    from . import intl_plugin
+
+    path = args.intl_expectations
+    if args.intl_update_expectations and not os.path.exists(path):
+        return intl_plugin.Expectations("")
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError as err:
+        print(f"Cannot read {path}: {err.strerror}")
+        return None
+    try:
+        return intl_plugin.parse_expectations(text)
+    except ValueError as err:
+        print(f"{path}: {err}")
+        return None
+
+
+def intl_prepare(args, binary_directory, work_dir, tests_paths) -> Optional[dict]:
+    """Check the plugin loads and the checkout's commit; None on failure."""
+    from . import intl_plugin
+
+    hermes = os.path.join(binary_directory, "hermes")
+    if problem := intl_plugin.probe(hermes, args.intl_plugin, work_dir):
+        print(f"Intl plugin probe failed:\n{problem}")
+        return None
+    expectations = intl_load_expectations(args)
+    if expectations is None:
+        return None
+    root = test262_root(tests_paths)
+    commit = intl_plugin.checkout_commit(root)
+    if (
+        commit != expectations.commit
+        and not args.intl_allow_commit_mismatch
+        and not args.intl_update_expectations
+    ):
+        print(
+            f"test262 at {root} is at {commit or 'an unknown commit'}, but "
+            f"{args.intl_expectations} was made against {expectations.commit}. "
+            "Check out that commit, or pass --intl-allow-commit-mismatch."
+        )
+        return None
+    return {
+        "plugin": args.intl_plugin,
+        "expectations": expectations,
+        "file": args.intl_expectations,
+        "update": args.intl_update_expectations,
+        "root": root,
+        # The run's test files and directories, relative to the checkout.
+        "roots": [
+            os.path.relpath(os.path.abspath(p), root).replace(os.sep, "/")
+            for p in tests_paths
+        ],
+        "commit": commit,
+    }
+
+
+def intl_verdict(results, intl) -> int:
+    """Plugin mode's exit code: write the expectations file when updating,
+    otherwise judge results against it and print every problem."""
+    from . import intl_plugin
+
+    counts = intl_plugin.count_outcomes(results)
+    print(
+        "Intl plugin mode, runs by strictness mode: "
+        + ", ".join(f"{counts[o]} {o}" for o in intl_plugin.OUTCOMES)
+    )
+    if intl["update"]:
+        new = intl_plugin.update(
+            results, intl["expectations"], intl["root"], intl["commit"], intl["roots"]
+        )
+        if new is None:
+            return 1
+        with open(intl["file"], "w") as f:
+            f.write(intl_plugin.render_expectations(new))
+        print(f"Wrote {intl['file']}")
+        # The file is written either way, but an entry without a reason fails
+        # check-intl, so the update fails too until each is explained.
+        unexplained = [
+            f"{path} [{mode}]"
+            for path, modes in sorted(new.entries.items())
+            for mode, reason in sorted(modes.items())
+            if reason == intl_plugin.UNEXPLAINED
+        ]
+        if unexplained:
+            print(
+                f"{len(unexplained)} entr{'y' if len(unexplained) == 1 else 'ies'}"
+                " without a reason (UNEXPLAINED); explain each by hand:"
+            )
+            for u in unexplained:
+                print("  " + u)
+            return 1
+        return 0
+    problems = intl_plugin.evaluate(
+        results, intl["expectations"], intl["root"], intl["roots"]
+    )
+    for p in problems:
+        print(p)
+    print(f"Intl plugin mode: {len(problems)} problem(s)")
+    return 1 if problems else 0
 
 
 def print_preprocessed_source(path: PathT) -> None:
@@ -518,6 +719,14 @@ async def main() -> int:
         compile_args=args.extra_compile_args, vm_args=args.extra_vm_args
     )
 
+    intl = None
+    if args.intl_plugin:
+        intl = intl_prepare(args, args.binary_directory, work_dir, args.paths)
+        if intl is None:
+            if tmp_work_dir:
+                tmp_work_dir.cleanup()
+            return 1
+
     exit_code = await run(
         args.paths,
         args.binary_directory,
@@ -534,6 +743,7 @@ async def main() -> int:
         args.timeout,
         args.verbose,
         args.show_slowest_tests,
+        intl=intl,
     )
 
     # Explicitly clean up the temporary directory if we created one.

@@ -6,3 +6,4 @@
 add_hermes_tool(napi-runner
   napi-runner.cpp
   LINK_LIBS hermesNapiCompile hermesNapi hermesvm_a)
+hermes_export_dynamic_symbols(napi-runner)

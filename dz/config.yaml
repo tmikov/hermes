@@ -1,4 +1,5 @@
 name: Hermes
 components:
   - gc
+  - intl
   - test-runner

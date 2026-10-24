@@ -1,0 +1,37 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+[package]
+name = "hermes_intl_core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# ICU4X is pinned to 2.3 (CLDR 48.2): `~` keeps `cargo update` within 2.3.x.
+icu = { version = "~2.3.1", features = ["sync"] }
+icu_provider = "~2.3"
+# Not used directly. icu 2.3 asks for it with a caret requirement, which a
+# plain `cargo update` would satisfy with 2.4; this keeps it at 2.3.
+icu_locale_core = "~2.3"
+
+[build-dependencies]
+cbindgen = { version = "0.29", default-features = false }
+
+[profile.dev]
+opt-level = 1
+panic = "abort"
+
+# ICU4X is unusably slow unoptimized; optimize dependencies even in Debug.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+panic = "abort"

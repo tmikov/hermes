@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import auto, Enum, unique
 from functools import cache
 from pathlib import Path
-from typing import List, Set
+from typing import Dict, List, Optional, Set
 
 from .typing_defs import PathT
 
@@ -50,6 +50,11 @@ class TestCaseResult(object):
     output: str = ""
     # Subprocess wall-clock duration in seconds
     duration: float = 0.0
+    # Whether a failure happened in JS (an uncaught exception or a test262
+    # assertion) rather than a crash, timeout or compile error.
+    js_failure: bool = False
+    # Plugin mode: strictness mode ("strict" / "non-strict") -> outcome.
+    modes: Optional[Dict[str, str]] = None
 
 
 # Colors for stdout.
@@ -161,6 +166,15 @@ def check_hermes_exe(
         if not exe:
             print(f"Error: {exe} not found.")
             sys.exit(1)
+        # Probe b_hermes once for the Intl plugin flag; hermes.run() reads
+        # the cached result.
+        from .intl_plugin import args_for_binary, binary_help, DISABLE_PLUGIN_FLAG
+
+        if not args_for_binary([DISABLE_PLUGIN_FLAG], binary_help(exe)):
+            print(
+                f"Note: {exe} predates the Intl plugin; "
+                f"not passing {DISABLE_PLUGIN_FLAG} to it."
+            )
 
 
 HERMES_FEATURES_MATCHER = re.compile(

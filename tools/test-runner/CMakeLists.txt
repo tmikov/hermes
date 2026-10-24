@@ -8,6 +8,7 @@ add_hermes_tool(test-runner
   Executor.cpp
   LINK_OBJLIBS hermesConsoleHost_obj
   LINK_LIBS hermesvm_a)
+hermes_export_dynamic_symbols(test-runner)
 
 install(TARGETS test-runner
   RUNTIME DESTINATION bin

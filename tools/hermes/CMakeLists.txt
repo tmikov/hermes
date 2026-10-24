@@ -25,17 +25,18 @@ add_hermes_tool(hermes
   LINK_OBJLIBS hermesCompilerDriver_obj hermesConsoleHost_obj
   LINK_LIBS hermesvm_a ${LIBREADLINE}
   )
+hermes_export_dynamic_symbols(hermes)
 
 # NAPI module loading support: dlopen'd addons need to resolve NAPI API
 # symbols (napi_create_string_utf8, etc.) from the host binary. Since the
 # hermes binary doesn't directly call most NAPI functions, the linker
 # would normally discard them from hermesvm_a. Force-loading the NAPI
-# static library ensures all NAPI symbols are present. Additionally,
-# -export_dynamic / -rdynamic makes them visible to dlopen'd libraries.
+# static library ensures all NAPI symbols are present, and
+# hermes_export_dynamic_symbols above makes them visible to dlopen'd
+# libraries.
 if(HERMES_ENABLE_NAPI)
   if(APPLE)
     target_link_libraries(hermes -force_load hermesNapi)
-    target_link_options(hermes PRIVATE -Wl,-export_dynamic)
   elseif(MSVC)
     target_link_libraries(hermes hermesNapi)
     target_link_options(hermes PRIVATE /WHOLEARCHIVE:hermesNapi)
@@ -45,7 +46,10 @@ if(HERMES_ENABLE_NAPI)
       hermesNapi
       -Wl,--no-whole-archive
     )
-    target_link_options(hermes PRIVATE -rdynamic)
+    if(EMSCRIPTEN)
+      # hermes_export_dynamic_symbols does nothing for Emscripten.
+      target_link_options(hermes PRIVATE -rdynamic)
+    endif()
   endif()
 endif()
 

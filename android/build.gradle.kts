@@ -120,6 +120,8 @@ val configureBuildForHermes by
           hermesBuildDir.toString(),
           "-DJSI_DIR=" + jsiDir.absolutePath,
           "-DCMAKE_BUILD_TYPE=Debug",
+          // Builds the host hermesc only; no Intl plugin (it needs Rust).
+          "-DHERMES_BUILD_INTL=OFF",
       )
       if (Os.isFamily(Os.FAMILY_WINDOWS)) {
         cmakeCommandLine = cmakeCommandLine + "-GNMake Makefiles"

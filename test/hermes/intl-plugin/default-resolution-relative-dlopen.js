@@ -1,0 +1,71 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// A host that loads libhermesvm with dlopen by a relative path, RTLD_LOCAL,
+// and then changes directory still finds the plugin next to libhermesvm.
+// dladdr reports the relative path the library was loaded by, which no
+// longer names it; on Linux the loader finds the library's file in
+// /proc/self/maps instead. The unit tests in unittests/IntlLoader cover the
+// choice between readings of the pathname with a fake stat.
+
+// REQUIRES: linux, hermesvm_lib
+// RUN: rm -rf %t && mkdir -p %t/lib
+// RUN: cp %intl_hermesvm_lib %t/lib/libhermesvm.so
+// RUN: cp %intl_fixture_dir/libfake_intl_good.so %t/lib/%intl_library_name
+// RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so / | %FileCheck --match-full-lines %s
+
+// The kernel writes a newline in a name as "\012". The library is reached
+// through a symlink, and the kernel names its real directory.
+// RUN: cp -r %t/lib %t/$'new\nline'
+// RUN: ln -s $'new\nline' %t/plain
+// RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host plain/libhermesvm.so / | %FileCheck --match-full-lines %s
+
+// No other escape exists: a directory literally named "lib\141" is not
+// "liba", even when a liba/libhermesvm.so exists.
+// RUN: cp -r %t/lib %t/'lib\141'
+// RUN: mkdir -p %t/liba && cp %t/lib/libhermesvm.so %t/liba/
+// RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host 'lib\141/libhermesvm.so' / | %FileCheck --match-full-lines %s
+
+// A backslash is not escaped either, so "\012" in the kernel's text may be
+// four characters of the name. The file's identity decides: here the
+// directory is literally "x\012y", and a decoy library sits in "x<newline>y".
+// RUN: cp -r %t/lib %t/'x\012y'
+// RUN: mkdir -p %t/$'x\ny' && cp %t/lib/libhermesvm.so %t/$'x\ny'/
+// RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host 'x\012y/libhermesvm.so' / | %FileCheck --match-full-lines %s
+
+// The kernel appends " (deleted)" to a file removed after it was mapped. No
+// reading of that name is the file any more, and realpath cannot find
+// dladdr's path either, so there is no directory to search: no plugin, and
+// that is not fatal. Loaded by an absolute path in a directory literally
+// named "lib\142", with a decoy plugin in "libb".
+// RUN: cp -r %t/lib %t/'lib\142'
+// RUN: mkdir -p %t/libb && cp %t/lib/%intl_library_name %t/libb/
+// RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/'lib\142/libhermesvm.so' / delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by a relative path, and run from "/".
+// RUN: cp -r %t/lib %t/gone
+// RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host gone/libhermesvm.so / delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by a relative path from directory A, then run from directory B,
+// which has a plugin at that relative path but no libhermesvm: dladdr's
+// unresolved relative path must not be searched.
+// RUN: mkdir -p %t/A/lib %t/B/lib
+// RUN: cp %t/lib/libhermesvm.so %t/A/lib/
+// RUN: cp %t/lib/%intl_library_name %t/B/lib/
+// RUN: cd %t/A && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so %t/B delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// The same, with a decoy B/lib/libhermesvm.so (plain text): realpath of
+// dladdr's relative path then succeeds, but names another file.
+// RUN: mkdir -p %t/C/lib %t/D/lib
+// RUN: cp %t/lib/libhermesvm.so %t/C/lib/
+// RUN: echo "not a library" > %t/D/lib/libhermesvm.so
+// RUN: cp %t/lib/%intl_library_name %t/D/lib/
+// RUN: cd %t/C && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so %t/D delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by an absolute path, then replaced by another file, as an upgrade
+// would: dladdr's path resolves, but not to the mapped file.
+// RUN: cp -r %t/lib %t/upgraded
+// RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/upgraded/libhermesvm.so / replace | %FileCheck --match-full-lines --check-prefix=NONE %s
+
+// CHECK: plugin
+// NONE: no plugin

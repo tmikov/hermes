@@ -76,6 +76,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/")
 set(LLVH_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/llvh)
 
 include(Hermes)
+include(HermesIntl)
 include(Lit)
 
 # This is not a cache variable so that it is recomputed when the project
@@ -250,6 +251,46 @@ set(HERMES_ENABLE_CORE_EXTENSIONS ON CACHE BOOL
 
 set(HERMES_ENABLE_CONTRIB_EXTENSIONS ON CACHE BOOL
     "Include community-contributed extensions (can be disabled for critical deployments)")
+
+# The Intl plugin (intl/) builds for the host only until Phase 6 of
+# doc/superpowers/specs/2026-10-22-intl-plugin-design.md adds cross builds.
+# On macOS that also rules out a single CMAKE_OSX_ARCHITECTURES other than
+# the one cargo builds for. HERMES_INTL_UNSUPPORTED_REASON says why it cannot
+# build, if it cannot; intl/CMakeLists.txt makes HERMES_BUILD_INTL=ON fatal
+# then.
+set(HERMES_INTL_OSX_ARCH_MISMATCH OFF)
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+  find_program(HERMES_INTL_CARGO cargo)
+  if(HERMES_INTL_CARGO)
+    execute_process(
+      COMMAND ${HERMES_INTL_CARGO} -vV
+      OUTPUT_VARIABLE _hermes_intl_cargo_vv
+      ERROR_QUIET)
+    hermes_intl_osx_arch_mismatch("${CMAKE_OSX_ARCHITECTURES}"
+      "${_hermes_intl_cargo_vv}" HERMES_INTL_OSX_ARCH_MISMATCH)
+  endif()
+endif()
+hermes_intl_unsupported_reason(${HERMES_INTL_OSX_ARCH_MISMATCH}
+  HERMES_INTL_UNSUPPORTED_REASON)
+if(HERMES_INTL_UNSUPPORTED_REASON)
+  set(_hermes_intl_default OFF)
+else()
+  set(_hermes_intl_default ON)
+endif()
+# Remember the value HERMES_BUILD_INTL defaulted to, so that later
+# configures can tell it from one the user gave.
+if(NOT DEFINED CACHE{HERMES_BUILD_INTL})
+  set(HERMES_INTL_DEFAULTED_TO ${_hermes_intl_default} CACHE INTERNAL
+    "The value HERMES_BUILD_INTL took by default")
+endif()
+set(HERMES_BUILD_INTL ${_hermes_intl_default} CACHE BOOL
+  "Build the ICU4X-based Intl plugin (libhermesintl); requires Rust")
+if(NOT HERMES_BUILD_INTL AND NOT _hermes_intl_default AND
+   DEFINED CACHE{HERMES_INTL_DEFAULTED_TO} AND
+   HERMES_BUILD_INTL STREQUAL HERMES_INTL_DEFAULTED_TO)
+  message(STATUS "Intl plugin off by default: it does not build for "
+    "${HERMES_INTL_UNSUPPORTED_REASON}")
+endif()
 
 # Contrib extensions require core extensions.
 if(NOT HERMES_ENABLE_CORE_EXTENSIONS AND HERMES_ENABLE_CONTRIB_EXTENSIONS)
@@ -720,6 +761,10 @@ add_subdirectory(${HERMES_JSI_DIR}/jsi ${CMAKE_CURRENT_BINARY_DIR}/jsi)
 set(BUILD_SHARED_LIBS ${save_BUILD_SHARED_LIBS})
 set(CMAKE_POSITION_INDEPENDENT_CODE ${save_CMAKE_POSITION_INDEPENDENT_CODE})
 
+if(HERMES_BUILD_INTL)
+  add_subdirectory(intl)
+endif()
+
 # Configure the test suites
 #
 if(HERMES_ENABLE_TEST_SUITE)
@@ -729,6 +774,13 @@ if(HERMES_ENABLE_TEST_SUITE)
 
   add_subdirectory(unittests)
   add_subdirectory(test/static_asserts)
+  get_property(_intl_fixture_targets GLOBAL PROPERTY HERMES_INTL_FIXTURE_TARGETS)
+  list(APPEND HERMES_TEST_DEPS ${_intl_fixture_targets})
+  # Every %hermes run finds the real plugin in <build>/lib by default
+  # resolution, so the tests must run against the current one.
+  if(HERMES_BUILD_INTL)
+    list(APPEND HERMES_TEST_DEPS hermesintl)
+  endif()
 
   list(APPEND HERMES_TEST_DEPS
     HermesUnitTests
@@ -780,6 +832,7 @@ if(HERMES_ENABLE_TEST_SUITE)
     hbc_deltaprep=${HERMES_TOOLS_OUTPUT_DIR}/hbc-deltaprep
     dependency_extractor=${HERMES_TOOLS_OUTPUT_DIR}/dependency-extractor
     FileCheck=${HERMES_TOOLS_OUTPUT_DIR}/FileCheck
+    not=${HERMES_TOOLS_OUTPUT_DIR}/not
     hermes=${HERMES_TOOLS_OUTPUT_DIR}/hermes
     hermesc=${HERMES_TOOLS_OUTPUT_DIR}/hermesc
     hdb=${HERMES_TOOLS_OUTPUT_DIR}/hdb
@@ -803,7 +856,15 @@ if(HERMES_ENABLE_TEST_SUITE)
     qemu_run_prefix=${QEMU_RUN_PREFIX}
     napi_enabled=${HERMES_ENABLE_NAPI}
     python=${Python_EXECUTABLE}
+    intl_fixture_dir=${CMAKE_CURRENT_BINARY_DIR}/unittests/IntlLoader
     )
+
+  # For the Intl loader tests that load libhermesvm by hand.
+  if(TARGET hermesvm)
+    list(APPEND HERMES_LIT_TEST_PARAMS_BASE
+      hermesvm_lib=$<TARGET_FILE:hermesvm>)
+    list(APPEND HERMES_TEST_DEPS hermesvm)
+  endif()
 
   if(HERMES_ENABLE_NAPI)
     list(APPEND HERMES_LIT_TEST_PARAMS_BASE
@@ -835,8 +896,22 @@ if(HERMES_ENABLE_TEST_SUITE)
   if(HERMES_ENABLE_NAPI)
     add_dependencies(check-hermes check-napi)
   endif()
+  # The Node-API suites run hermes too, which loads the plugin from
+  # <build>/lib; they must not run while it is being linked.
+  if(HERMES_BUILD_INTL)
+    foreach(_napi_suite check-napi-cts check-napi-node-tests)
+      if(TARGET ${_napi_suite})
+        add_dependencies(${_napi_suite} hermesintl)
+      endif()
+    endforeach()
+  endif()
 
   list(APPEND SHERMES_TEST_DEPS shermes-dep)
+  # shermes -exec programs load <build>/lib/libhermesvm, whose default
+  # resolution loads the real plugin next to it.
+  if(HERMES_BUILD_INTL)
+    list(APPEND SHERMES_TEST_DEPS hermesintl)
+  endif()
   add_lit_testsuite(check-shermes "Running the Static Hermes regression tests"
     ${CMAKE_CURRENT_SOURCE_DIR}/test/shermes
     PARAMS ${HERMES_LIT_TEST_PARAMS}

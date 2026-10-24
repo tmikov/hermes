@@ -34,6 +34,7 @@ else()
 
   target_link_libraries(hcdp hermesvm_a)
 endif()
+hermes_export_dynamic_symbols(hcdp)
 
 install(TARGETS hcdp
   RUNTIME DESTINATION bin

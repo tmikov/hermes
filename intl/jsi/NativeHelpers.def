@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// The native helpers the JS layer calls, one line each:
+//   HERMES_INTL_HELPER(name, Result, Arg...)
+// with no Args for a helper that takes none. Result and every Arg is a
+// conversion tag from NativeHelpers.h:
+//   Bool     a JS boolean (results only)
+//   Utf8     a JS string as UTF-8: option strings and formatter output
+//   OptUtf8  a JS string or undefined (results only)
+// JS validates every argument first; a wrong count or type is a plugin bug.
+// No include guard: this file is included once per expansion.
+
+// (tag) The canonicalized tag, or undefined if tag is not well-formed.
+HERMES_INTL_HELPER(canonicalizeLocale, OptUtf8, Utf8)
+// (tag) Whether tag (canonical, without extensions) is an available locale.
+HERMES_INTL_HELPER(isAvailableLocale, Bool, Utf8)
+// (key) The values for Intl.supportedValuesOf(key), sorted, space-separated.
+// key is "calendar", "collation", "currency", "numberingSystem" or
+// "timeZone".
+HERMES_INTL_HELPER(supportedValues, Utf8, Utf8)
