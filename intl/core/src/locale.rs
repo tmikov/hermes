@@ -150,25 +150,28 @@ fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
         return Some(canonical);
     }
     let mut loc: Locale = canonical.parse().ok()?;
-    match dir {
-        Likely::Add => {
-            expander().maximize(&mut loc.id);
-            // ICU4X leaves a tag whose language is still "und" unchanged when
-            // its tables have no entry for the script or region (CLDR gives
-            // bare "und" en-Latn-US and "und-150" en-Latn-150). UTS 35 Lookup then
-            // ends at the "und" entry, en_Latn_US, whose fields fill whatever
-            // is still missing.
-            if loc.id.language.is_unknown() {
-                loc.id.language = language!("en");
-                loc.id.script.get_or_insert(script!("Latn"));
-                loc.id.region.get_or_insert(region!("US"));
-            }
-        }
-        Likely::Remove => {
-            expander().minimize(&mut loc.id);
-        }
+    // UTS 35 Remove Likely Subtags starts with Add Likely Subtags (its step
+    // 1), so both directions maximize first. ICU4X's minimize maximizes
+    // again, which leaves a maximal tag unchanged.
+    maximize(&mut loc.id);
+    if let Likely::Remove = dir {
+        expander().minimize(&mut loc.id);
     }
     canonicalize(&loc.to_string())
+}
+
+/// UTS 35 Add Likely Subtags on a language identifier.
+fn maximize(id: &mut LanguageIdentifier) {
+    expander().maximize(id);
+    // ICU4X leaves a tag whose language is still "und" unchanged when its
+    // tables have no entry for the script or region (CLDR gives bare "und"
+    // en-Latn-US and "und-150" en-Latn-150). UTS 35 Lookup then ends at the
+    // "und" entry, en_Latn_US, whose fields fill whatever is still missing.
+    if id.language.is_unknown() {
+        id.language = language!("en");
+        id.script.get_or_insert(script!("Latn"));
+        id.region.get_or_insert(region!("US"));
+    }
 }
 
 /// Add Likely Subtags of a canonical tag, or `None` if it does not parse.
@@ -408,6 +411,22 @@ mod tests {
         ("und-Latn-AQ", "en-AQ"),
     ];
 
+    // test262 intl402/Locale/prototype/minimize/
+    // removing-likely-subtags-first-adds-likely-subtags.js testDataMinimal.
+    const REMOVE_ADDS_FIRST: [(&str, &str); 11] = [
+        ("und", "en"),
+        ("und-Thai", "th"),
+        ("und-419", "es-419"),
+        ("und-150", "en-150"),
+        ("und-AT", "de-AT"),
+        ("aae-Latn-IT", "aae"),
+        ("aae-Thai-CO", "aae-Thai-CO"),
+        ("und-CW", "pap"),
+        ("und-US", "en"),
+        ("zh-Hant", "zh-TW"),
+        ("zh-Hani", "zh-Hani"),
+    ];
+
     #[test]
     fn adds_likely_subtags() {
         for (tag, want) in MAXIMAL {
@@ -460,9 +479,21 @@ mod tests {
             ("posix-u-ca-buddhist", "posix-u-ca-buddhist"),
             ("en-Latn-US-t-ja-x-a", "en-t-ja-x-a"),
             ("zh-Hant-TW", "zh-TW"),
+            // Remove Likely Subtags starts with Add Likely Subtags, so the
+            // "und" entry fills what ICU4X's tables leave missing.
+            ("und-Qaaa", "en-Qaaa"),
+            ("und-150-u-ca-buddhist", "en-150-u-ca-buddhist"),
         ];
         for (tag, want) in cases {
             assert_eq!(remove_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
+        }
+        for (tag, want) in REMOVE_ADDS_FIRST {
+            assert_eq!(remove_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
+            assert_eq!(
+                remove_likely_subtags(want).as_deref(),
+                Some(want),
+                "{want:?}"
+            );
         }
     }
 
