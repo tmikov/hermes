@@ -42,9 +42,10 @@ struct MappedFileId {
 /// describes, or "" if it names none that can be trusted, in which case the
 /// loader falls back to dladdr. \p lookup stats a path. The kernel escapes
 /// only a newline in the pathname, as "\012", and appends " (deleted)" to a
-/// removed file. Without a "\012" the pathname is used if it exists. With
-/// one, it may be a newline or four characters: the reading whose device
-/// and inode are the mapping's is used, else the only reading that exists.
+/// removed file. A pathname with neither is used if it exists. One with
+/// either is used only through a reading (the "\012"s decoded or as
+/// written, with or without the " (deleted)" suffix) whose device and inode
+/// are the mapping's.
 /// Linux and Android only, in effect; portable so tests can run it on fake
 /// lines.
 std::string pathFromMapsLine(

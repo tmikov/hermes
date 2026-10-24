@@ -37,15 +37,24 @@
 // RUN: mkdir -p %t/$'x\ny' && cp %t/lib/libhermesvm.so %t/$'x\ny'/
 // RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host 'x\012y/libhermesvm.so' / | %FileCheck --match-full-lines %s
 
-// The kernel appends " (deleted)" to a file removed after it was mapped, and
-// no file has that name: the loader falls back to dladdr's path. Loaded by an absolute path in a directory literally named
-// "lib\142" (not "libb"), that still finds the plugin.
+// The kernel appends " (deleted)" to a file removed after it was mapped. No
+// reading of that name is the file any more, and realpath cannot find
+// dladdr's path either, so there is no directory to search: no plugin, and
+// that is not fatal. Loaded by an absolute path in a directory literally
+// named "lib\142", with a decoy plugin in "libb".
 // RUN: cp -r %t/lib %t/'lib\142'
-// RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/'lib\142/libhermesvm.so' / delete | %FileCheck --match-full-lines %s
-// Loaded by a relative path, the fallback names nothing from the new
-// directory, and there is no plugin; that is not fatal.
+// RUN: mkdir -p %t/libb && cp %t/lib/%intl_library_name %t/libb/
+// RUN: env -u LD_LIBRARY_PATH %intl_relative_host %t/'lib\142/libhermesvm.so' / delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by a relative path, and run from "/".
 // RUN: cp -r %t/lib %t/gone
 // RUN: cd %t && env -u LD_LIBRARY_PATH %intl_relative_host gone/libhermesvm.so / delete | %FileCheck --match-full-lines --check-prefix=NONE %s
+// Loaded by a relative path from directory A, then run from directory B,
+// which has a plugin at that relative path but no libhermesvm: dladdr's
+// unresolved relative path must not be searched.
+// RUN: mkdir -p %t/A/lib %t/B/lib
+// RUN: cp %t/lib/libhermesvm.so %t/A/lib/
+// RUN: cp %t/lib/%intl_library_name %t/B/lib/
+// RUN: cd %t/A && env -u LD_LIBRARY_PATH %intl_relative_host lib/libhermesvm.so %t/B delete | %FileCheck --match-full-lines --check-prefix=NONE %s
 
 // CHECK: plugin
 // NONE: no plugin

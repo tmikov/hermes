@@ -362,18 +362,21 @@ For each new runtime:
       since left. So on Linux and Android the library's file is the one
       `/proc/self/maps` shows mapped at the address of a loader function.
       The kernel escapes only a newline there (as `\012`) and appends
-      ` (deleted)` to a removed file. A pathname without `\012` is used as
+      ` (deleted)` to a removed file. A pathname with neither is used as
       written if it exists; its device and inode are not compared, because
       on overlayfs and btrfs subvolumes they differ from what `stat`
-      reports. A removed file's name does not exist, so it falls back: a
-      deleted libhermesvm usually means an upgrade, and the plugin beside it
-      would be from another build. A pathname with `\012` has two readings
-      (a newline, or four characters): the one whose `stat` device and
-      inode are the mapping's is taken, else the only one that exists; if
-      both exist and the identity cannot decide, it falls back. Every
-      fallback (also a mapping without an inode, or an unreadable `/proc`)
-      uses `dladdr`'s path. On Apple platforms
-      `dladdr`'s path is used: dyld records an absolute path for a library
+      reports. A pathname with a `\012` or a ` (deleted)` suffix is
+      ambiguous, and is used only through a reading (each `\012` decoded,
+      or all as written; with the suffix kept or stripped) whose `stat`
+      device and inode are the mapping's. Otherwise, as for a mapping
+      without an inode or an unreadable `/proc`, the loader falls back to
+      `dladdr`'s path, and only if `realpath` resolves it: an unresolved
+      `dladdr` path may be relative to a directory the host has left, or
+      name a removed file, so it gives no directory. A removed libhermesvm
+      therefore usually finds no plugin, which is the safer result: it
+      usually means an upgrade, and the plugin beside it would be from
+      another build. On Apple platforms `dladdr`'s path is used, under the
+      same `realpath` rule: dyld records an absolute path for a library
       loaded from disk (it asks the kernel for the path of the file it
       opened, with `F_GETPATH`). The directory is taken after `realpath`.
       Failing to find it is never fatal: resolution goes on to the next

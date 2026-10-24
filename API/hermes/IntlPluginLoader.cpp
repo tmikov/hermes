@@ -350,8 +350,15 @@ std::string hermesDirectory() {
 #if defined(__linux__)
     path = mappedFilePath(reinterpret_cast<const void *>(&hermesDirectory));
 #endif
-    if (path.empty() && info.dli_fname)
-      path = info.dli_fname;
+    if (path.empty() && info.dli_fname) {
+      // dladdr's path may be relative to a directory the process has left,
+      // or name a file since removed. Unless realpath finds the file, it
+      // names no directory that can be trusted.
+      char resolved[PATH_MAX];
+      if (!::realpath(info.dli_fname, resolved))
+        return "";
+      path = resolved;
+    }
   }
   if (path.empty())
     return "";
@@ -578,32 +585,36 @@ std::string pathFromMapsLine(
   std::string path = line.substr(pathStart);
   if (!path.empty() && path.back() == '\n')
     path.pop_back();
-  // Without a "\012" the pathname is the file's name as written. Its
-  // device and inode are not checked: on overlayfs and btrfs subvolumes
-  // they differ from what stat reports. A removed file's name has
-  // " (deleted)" appended, so it does not exist, and neither does a name
-  // from another mount namespace: the caller falls back. (A deleted
-  // libhermesvm usually means an upgrade, and the plugin now beside it
-  // would be from another build.)
-  if (path.find("\\012") == std::string::npos)
+  // A plain pathname is the file's name as written. Its device and inode
+  // are not checked: on overlayfs and btrfs subvolumes they differ from
+  // what stat reports.
+  constexpr const char kDeleted[] = " (deleted)";
+  constexpr size_t kDeletedLength = sizeof(kDeleted) - 1;
+  bool deleted = path.size() > kDeletedLength &&
+      path.compare(path.size() - kDeletedLength, kDeletedLength, kDeleted) == 0;
+  bool escaped = path.find("\\012") != std::string::npos;
+  if (!deleted && !escaped)
     return lookup(path).exists ? path : "";
-  // "\012" is a newline or those four characters, since a backslash is not
-  // escaped. The reading whose device and inode are the mapping's wins;
-  // where the identity cannot decide (overlayfs), the only reading that
-  // exists; if both exist, neither.
-  std::string readings[] = {unescapeMapsPath(path), path};
-  const std::string *existing = nullptr;
-  unsigned existingCount = 0;
+  // Otherwise the text is ambiguous: "\012" is a newline or those four
+  // characters, since a backslash is not escaped, and " (deleted)" is
+  // either the kernel's mark of a removed file or part of the name. A
+  // reading is accepted only if its device and inode are the mapping's;
+  // else the caller falls back. (A removed file has no name with its
+  // identity; a deleted libhermesvm usually means an upgrade, and the
+  // plugin now beside it would be from another build.)
+  std::vector<std::string> readings{unescapeMapsPath(path), path};
+  if (deleted) {
+    std::string stripped = path.substr(0, path.size() - kDeletedLength);
+    readings.push_back(unescapeMapsPath(stripped));
+    readings.push_back(stripped);
+  }
   for (const std::string &reading : readings) {
     MappedFileId id = lookup(reading);
-    if (!id.exists)
-      continue;
-    if (id.devMajor == devMajor && id.devMinor == devMinor && id.inode == inode)
+    if (id.exists && id.devMajor == devMajor && id.devMinor == devMinor &&
+        id.inode == inode)
       return reading;
-    existing = &reading;
-    ++existingCount;
   }
-  return existingCount == 1 ? *existing : "";
+  return "";
 }
 
 unsigned intlDefaultResolutionsForTests() {

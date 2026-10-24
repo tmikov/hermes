@@ -430,26 +430,31 @@ TEST(IntlMapsLineTest, PlainPathIsUsedAsWritten) {
       literal);
 }
 
-TEST(IntlMapsLineTest, MissingOrDeletedPathFallsBack) {
+TEST(IntlMapsLineTest, MissingPathFallsBack) {
   std::string path = "/usr/lib/libhermesvm.so";
   EXPECT_EQ(pathFromMapsLine(mapsLine(path), fakeStat({})), "");
-  // A removed file: even when a new file is at the old path, fall back.
-  EXPECT_EQ(
-      pathFromMapsLine(
-          mapsLine(path + " (deleted)"), fakeStat({{path, kOther}})),
-      "");
-  // A file whose name really ends in " (deleted)".
-  EXPECT_EQ(
-      pathFromMapsLine(
-          mapsLine(path + " (deleted)"),
-          fakeStat({{path + " (deleted)", kOther}})),
-      path + " (deleted)");
 }
 
-TEST(IntlMapsLineTest, NewlineEscapeIsDecidedByIdentityThenExistence) {
+TEST(IntlMapsLineTest, DeletedPathNeedsAnIdentityMatch) {
+  std::string path = "/usr/lib/libhermesvm.so";
+  std::string marked = path + " (deleted)";
+  // A removed file, and an unrelated file at its old name: fall back.
+  EXPECT_EQ(pathFromMapsLine(mapsLine(marked), fakeStat({{path, kOther}})), "");
+  // An unrelated file whose name really ends in " (deleted)": fall back.
+  EXPECT_EQ(
+      pathFromMapsLine(mapsLine(marked), fakeStat({{marked, kOther}})), "");
+  // The file itself, under either reading.
+  EXPECT_EQ(
+      pathFromMapsLine(mapsLine(marked), fakeStat({{marked, kMapped}})),
+      marked);
+  EXPECT_EQ(
+      pathFromMapsLine(mapsLine(marked), fakeStat({{path, kMapped}})), path);
+}
+
+TEST(IntlMapsLineTest, NewlineEscapeNeedsAnIdentityMatch) {
   std::string raw = "/opt/x\\012y/libhermesvm.so";
   std::string decoded = "/opt/x\ny/libhermesvm.so";
-  // The identity decides when both exist.
+  // The identity decides.
   EXPECT_EQ(
       pathFromMapsLine(
           mapsLine(raw), fakeStat({{raw, kMapped}, {decoded, kOther}})),
@@ -458,16 +463,26 @@ TEST(IntlMapsLineTest, NewlineEscapeIsDecidedByIdentityThenExistence) {
       pathFromMapsLine(
           mapsLine(raw), fakeStat({{raw, kOther}, {decoded, kMapped}})),
       decoded);
-  // Without an identity match (overlayfs), the only reading that exists.
-  EXPECT_EQ(
-      pathFromMapsLine(mapsLine(raw), fakeStat({{decoded, kOther}})), decoded);
-  EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({{raw, kOther}})), raw);
-  // Both exist and the identity cannot decide, or neither exists: fall back.
+  // Without an identity match, a reading that merely exists is not taken.
+  EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({{decoded, kOther}})), "");
+  EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({{raw, kOther}})), "");
   EXPECT_EQ(
       pathFromMapsLine(
           mapsLine(raw), fakeStat({{raw, kOther}, {decoded, kOther}})),
       "");
   EXPECT_EQ(pathFromMapsLine(mapsLine(raw), fakeStat({})), "");
+}
+
+TEST(IntlMapsLineTest, MixedNewlineReadingFallsBack) {
+  // Two "\012"s: the real file is at a mixed reading (one newline, one four
+  // characters), which is never tried, and an unrelated file is at the
+  // reading as written. Fall back.
+  std::string raw = "/opt/a\\012b\\012c/libhermesvm.so";
+  std::string mixed = "/opt/a\nb\\012c/libhermesvm.so";
+  EXPECT_EQ(
+      pathFromMapsLine(
+          mapsLine(raw), fakeStat({{mixed, kMapped}, {raw, kOther}})),
+      "");
 }
 
 TEST(IntlMapsLineTest, LinesWithoutAFileGiveNothing) {
