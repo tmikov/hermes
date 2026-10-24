@@ -41,6 +41,16 @@ inline std::optional<std::string> canonicalizeLocale(std::string_view tag) {
   return callOptional(hi_locale_canonicalize, tag);
 }
 
+/// Add Likely Subtags of a canonical tag; nullopt if it does not parse.
+inline std::optional<std::string> addLikelySubtags(std::string_view tag) {
+  return callOptional(hi_locale_add_likely_subtags, tag);
+}
+
+/// Remove Likely Subtags of a canonical tag; nullopt if it does not parse.
+inline std::optional<std::string> removeLikelySubtags(std::string_view tag) {
+  return callOptional(hi_locale_remove_likely_subtags, tag);
+}
+
 /// Whether \p tag (canonical, no extensions) is an available locale.
 inline bool isAvailableLocale(std::string_view tag) {
   return hi_locale_is_available(

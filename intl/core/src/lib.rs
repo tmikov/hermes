@@ -90,6 +90,37 @@ pub unsafe extern "C" fn hi_locale_canonicalize(
     write_out(out, as_str(tag, len).and_then(locale::canonicalize))
 }
 
+/// Add Likely Subtags: when it returns true, `out` is the maximized form of
+/// the canonical tag. False if `tag` does not parse.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_add_likely_subtags(
+    tag: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(out, as_str(tag, len).and_then(locale::add_likely_subtags))
+}
+
+/// Remove Likely Subtags: when it returns true, `out` is the minimized form
+/// of the canonical tag. False if `tag` does not parse.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_remove_likely_subtags(
+    tag: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(
+        out,
+        as_str(tag, len).and_then(locale::remove_likely_subtags),
+    )
+}
+
 /// Whether `tag` (canonical, without extensions) is an available locale.
 ///
 /// # Safety

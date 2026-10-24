@@ -9,7 +9,7 @@
 //! IsStructurallyValidLanguageTag and CanonicalizeUnicodeLocaleId) and the
 //! available-locale set.
 
-use icu::locale::subtags::Script;
+use icu::locale::subtags::{language, region, script, Script};
 use icu::locale::{LanguageIdentifier, Locale, LocaleCanonicalizer, LocaleExpander};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -129,6 +129,57 @@ fn canonicalize_keyword_values(loc: &mut Locale) {
 fn expander() -> &'static LocaleExpander {
     static E: OnceLock<LocaleExpander> = OnceLock::new();
     E.get_or_init(LocaleExpander::new_extended)
+}
+
+/// Which direction `likely_subtags` goes.
+enum Likely {
+    Add,
+    Remove,
+}
+
+/// Add Likely Subtags and Remove Likely Subtags (ECMA-402 6.2.4 and UTS 35
+/// Likely Subtags) on a language tag. `None` if `tag` is not well-formed.
+/// Only the language, script and region change; variants (already in
+/// canonical order), extensions and private use stay as they are.
+fn likely_subtags(tag: &str, dir: Likely) -> Option<String> {
+    let canonical = canonicalize(tag)?;
+    // ICU4X languages are 2-3 letters. A 5-8 letter language is never "und",
+    // so Lookup has no likely subtags for it: leave the tag alone.
+    let first = canonical.split('-').next().unwrap_or("");
+    if first.len() >= 5 {
+        return Some(canonical);
+    }
+    let mut loc: Locale = canonical.parse().ok()?;
+    match dir {
+        Likely::Add => {
+            expander().maximize(&mut loc.id);
+            // ICU4X leaves a tag whose language is still "und" unchanged when
+            // its tables have no entry for the script or region ("und" and
+            // "und-150" both give en-Latn-150 in CLDR). UTS 35 Lookup then
+            // ends at the "und" entry, en_Latn_US, whose fields fill whatever
+            // is still missing.
+            if loc.id.language.is_unknown() {
+                loc.id.language = language!("en");
+                loc.id.script.get_or_insert(script!("Latn"));
+                loc.id.region.get_or_insert(region!("US"));
+            }
+        }
+        Likely::Remove => {
+            expander().minimize(&mut loc.id);
+        }
+    };
+    canonicalize(&loc.to_string())
+}
+
+/// Add Likely Subtags of a canonical tag, or `None` if it does not parse.
+pub fn add_likely_subtags(tag: &str) -> Option<String> {
+    likely_subtags(tag, Likely::Add)
+}
+
+/// Remove Likely Subtags of a canonical tag, or `None` if it does not parse.
+/// The region is kept in preference to the script, as UTS 35 does.
+pub fn remove_likely_subtags(tag: &str) -> Option<String> {
+    likely_subtags(tag, Likely::Remove)
 }
 
 /// [[AvailableLocales]] (ECMA-402 9.1), canonical and sorted, computed on
@@ -304,6 +355,125 @@ mod tests {
         ];
         for (tag, want) in cases {
             assert_eq!(resolve_default(tag).as_deref(), want, "{tag:?}");
+        }
+    }
+
+    const LIKELY_EXTRAS: [&str; 7] = [
+        "",
+        "-fonipa",
+        "-a-not-assigned",
+        "-u-attr",
+        "-u-co",
+        "-u-co-phonebk",
+        "-x-private",
+    ];
+
+    // test262 intl402/Locale/likely-subtags.js testDataMaximal.
+    const MAXIMAL: [(&str, &str); 15] = [
+        ("en", "en-Latn-US"),
+        ("en-Latn", "en-Latn-US"),
+        ("en-Shaw", "en-Shaw-GB"),
+        ("en-Arab", "en-Arab-US"),
+        ("en-US", "en-Latn-US"),
+        ("en-GB", "en-Latn-GB"),
+        ("en-FR", "en-Latn-FR"),
+        ("it-Kana-CA", "it-Kana-CA"),
+        ("und", "en-Latn-US"),
+        ("und-Thai", "th-Thai-TH"),
+        ("und-419", "es-Latn-419"),
+        ("und-150", "en-Latn-150"),
+        ("und-AT", "de-Latn-AT"),
+        ("und-Cyrl-RO", "bg-Cyrl-RO"),
+        ("und-AQ", "en-Latn-AQ"),
+    ];
+
+    // test262 intl402/Locale/likely-subtags.js testDataMinimal.
+    const MINIMAL: [(&str, &str); 17] = [
+        ("en", "en"),
+        ("en-Latn", "en"),
+        ("ar-Arab", "ar"),
+        ("en-US", "en"),
+        ("en-GB", "en-GB"),
+        ("en-Latn-US", "en"),
+        ("en-Shaw-GB", "en-Shaw"),
+        ("en-Arab-US", "en-Arab"),
+        ("en-Latn-GB", "en-GB"),
+        ("en-Latn-FR", "en-FR"),
+        ("it-Kana-CA", "it-Kana-CA"),
+        ("th-Thai-TH", "th"),
+        ("es-Latn-419", "es-419"),
+        ("ru-Cyrl-RU", "ru"),
+        ("de-Latn-AT", "de-AT"),
+        ("bg-Cyrl-RO", "bg-RO"),
+        ("und-Latn-AQ", "en-AQ"),
+    ];
+
+    #[test]
+    fn adds_likely_subtags() {
+        for (tag, want) in MAXIMAL {
+            assert_eq!(add_likely_subtags(want).as_deref(), Some(want), "{want:?}");
+            for extra in LIKELY_EXTRAS {
+                let (input, want) = (format!("{tag}{extra}"), format!("{want}{extra}"));
+                assert_eq!(
+                    add_likely_subtags(&input).as_deref(),
+                    Some(want.as_str()),
+                    "{input:?}"
+                );
+            }
+        }
+        let cases = [
+            ("posix", "posix"),
+            ("xtg", "xtg"),
+            ("aa-x-private", "aa-Latn-ET-x-private"),
+            ("de-u-kf", "de-Latn-DE-u-kf"),
+            ("sl-rozaj-biske-1994", "sl-Latn-SI-1994-biske-rozaj"),
+            ("en-t-ja-x-a", "en-Latn-US-t-ja-x-a"),
+        ];
+        for (tag, want) in cases {
+            assert_eq!(add_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn removes_likely_subtags() {
+        for (tag, want) in MINIMAL {
+            assert_eq!(
+                remove_likely_subtags(want).as_deref(),
+                Some(want),
+                "{want:?}"
+            );
+            for extra in LIKELY_EXTRAS {
+                let (input, want) = (format!("{tag}{extra}"), format!("{want}{extra}"));
+                assert_eq!(
+                    remove_likely_subtags(&input).as_deref(),
+                    Some(want.as_str()),
+                    "{input:?}"
+                );
+            }
+        }
+        let cases = [
+            ("posix-u-ca-buddhist", "posix-u-ca-buddhist"),
+            ("en-Latn-US-t-ja-x-a", "en-t-ja-x-a"),
+            ("zh-Hant-TW", "zh-TW"),
+        ];
+        for (tag, want) in cases {
+            assert_eq!(remove_likely_subtags(tag).as_deref(), Some(want), "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn likely_subtags_round_trip() {
+        for (_, minimal) in MINIMAL {
+            let max = add_likely_subtags(minimal).unwrap();
+            assert_eq!(remove_likely_subtags(&max).as_deref(), Some(minimal));
+        }
+    }
+
+    #[test]
+    fn likely_subtags_reject_unparsable() {
+        for bad in ["", "en_US"] {
+            assert_eq!(add_likely_subtags(bad), None, "{bad:?}");
+            assert_eq!(remove_likely_subtags(bad), None, "{bad:?}");
         }
     }
 

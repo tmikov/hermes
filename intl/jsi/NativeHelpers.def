@@ -17,6 +17,12 @@
 
 // (tag) The canonicalized tag, or undefined if tag is not well-formed.
 HERMES_INTL_HELPER(canonicalizeLocale, OptUtf8, Utf8)
+// (tag) The Add Likely Subtags result for a canonical tag. Throws if tag does
+// not parse.
+HERMES_INTL_HELPER(addLikelySubtags, Utf8, Utf8)
+// (tag) The Remove Likely Subtags result for a canonical tag. Throws if tag
+// does not parse.
+HERMES_INTL_HELPER(removeLikelySubtags, Utf8, Utf8)
 // (tag) Whether tag (canonical, without extensions) is an available locale.
 HERMES_INTL_HELPER(isAvailableLocale, Bool, Utf8)
 // (key) The values for Intl.supportedValuesOf(key), sorted, space-separated.

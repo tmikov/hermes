@@ -22,6 +22,18 @@ std::optional<std::string> canonicalizeLocale(
   return core::canonicalizeLocale(tag);
 }
 
+std::string addLikelySubtags(jsi::Runtime &, const std::string &tag) {
+  if (auto result = core::addLikelySubtags(tag))
+    return *result;
+  throw std::logic_error("Intl internal error: addLikelySubtags: " + tag);
+}
+
+std::string removeLikelySubtags(jsi::Runtime &, const std::string &tag) {
+  if (auto result = core::removeLikelySubtags(tag))
+    return *result;
+  throw std::logic_error("Intl internal error: removeLikelySubtags: " + tag);
+}
+
 bool isAvailableLocale(jsi::Runtime &, const std::string &tag) {
   return core::isAvailableLocale(tag);
 }
