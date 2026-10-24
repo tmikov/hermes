@@ -49,7 +49,7 @@
 
 // CHECK:scope %VS1 []
 
-// CHECK:function ""(): any
+// CHECK:method ""(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS1: any, %0: environment
@@ -58,7 +58,7 @@
 
 // CHECK:scope %VS2 [val: any]
 
-// CHECK:function " 1#"(val: any): any
+// CHECK:method " 1#"(val: any): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS2: any, %0: environment

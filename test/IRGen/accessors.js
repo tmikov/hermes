@@ -45,7 +45,7 @@ var x = {
 
 // CHECK:scope %VS1 []
 
-// CHECK:function "get a"(): any
+// CHECK:method "get a"(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS1: any, %0: environment
@@ -54,7 +54,7 @@ var x = {
 
 // CHECK:scope %VS2 []
 
-// CHECK:function "get 1"(): any
+// CHECK:method "get 1"(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS2: any, %0: environment
@@ -63,7 +63,7 @@ var x = {
 
 // CHECK:scope %VS3 [x: any]
 
-// CHECK:function "set 1"(x: any): any
+// CHECK:method "set 1"(x: any): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS3: any, %0: environment

@@ -210,7 +210,7 @@ function protoDupAccessor3(func) {
 
 // CHECK:scope %VS9 []
 
-// CHECK:function "get __proto__"(): any
+// CHECK:method "get __proto__"(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS4: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS9: any, %0: environment
@@ -219,7 +219,7 @@ function protoDupAccessor3(func) {
 
 // CHECK:scope %VS10 [_: any]
 
-// CHECK:function "set __proto__"(_: any): any
+// CHECK:method "set __proto__"(_: any): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS5: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS10: any, %0: environment
@@ -230,7 +230,7 @@ function protoDupAccessor3(func) {
 
 // CHECK:scope %VS11 []
 
-// CHECK:function "get __proto__ 1#"(): any
+// CHECK:method "get __proto__ 1#"(): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS6: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS11: any, %0: environment
@@ -239,7 +239,7 @@ function protoDupAccessor3(func) {
 
 // CHECK:scope %VS12 [_: any]
 
-// CHECK:function "set __proto__ 1#"(_: any): any
+// CHECK:method "set __proto__ 1#"(_: any): any
 // CHECK-NEXT:%BB0:
 // CHECK-NEXT:  %0 = GetParentScopeInst (:environment) %VS6: any, %parentScope: environment
 // CHECK-NEXT:  %1 = CreateScopeInst (:environment) %VS12: any, %0: environment
