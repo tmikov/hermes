@@ -84,11 +84,15 @@ pub unsafe extern "C" fn hi_string16_free(s: HiString16) {
 }
 
 mod casemap;
+mod cldr;
 mod collator;
 mod host;
 mod info;
 mod locale;
+mod number;
+mod plurals;
 mod supported;
+mod units;
 
 /// View (data, len) as UTF-8; None if it is not.
 ///
@@ -546,6 +550,322 @@ pub unsafe extern "C" fn hi_collator_locale_defaults(
     write_out(out, as_str(locale, len).and_then(collator::locale_defaults))
 }
 
+/// Plural rules: ICU4X's plural rules and plural ranges for one locale and
+/// type. Opaque to C++, which frees them with hi_plural_rules_free.
+pub struct HiPluralRules(icu::plurals::PluralRulesWithRanges<icu::plurals::PluralRules>);
+
+// A NativeState holding a HiPluralRules can be destroyed on any thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<HiPluralRules>();
+};
+
+/// Make the cardinal (`ordinal` false) or ordinal plural rules for the
+/// language identifier of `locale` (a canonical tag). Null if `locale` is
+/// not UTF-8, does not parse or has no data.
+///
+/// # Safety
+/// `locale` must point to `len` readable bytes, or `len` must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_plural_rules_new(
+    locale: *const u8,
+    len: usize,
+    ordinal: bool,
+) -> *mut HiPluralRules {
+    match as_str(locale, len).and_then(|l| plurals::new_plural_rules(l, ordinal)) {
+        Some(r) => Box::into_raw(Box::new(HiPluralRules(r))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free plural rules from hi_plural_rules_new. Accepts null.
+///
+/// # Safety
+/// `rules` must be null or come from hi_plural_rules_new, and must not be
+/// freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_plural_rules_free(rules: *mut HiPluralRules) {
+    if !rules.is_null() {
+        drop(Box::from_raw(rules));
+    }
+}
+
+/// The plural category of `decimal` × 10^`exponent`: when it returns true,
+/// `out` is "zero", "one", "two", "few", "many" or "other". `decimal` is
+/// ASCII digits with an optional "." between digits; false for anything
+/// else. The operands are exact for any number of digits; `c` is
+/// `exponent` when it is positive, else 0.
+///
+/// # Safety
+/// `rules` must be valid; `decimal` must point to `len` readable bytes, or
+/// `len` must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_plural_rules_select(
+    rules: *const HiPluralRules,
+    decimal: *const u8,
+    len: usize,
+    exponent: i32,
+    out: *mut HiString,
+) -> bool {
+    debug_assert!(!rules.is_null());
+    write_out(
+        out,
+        as_str(decimal, len)
+            .and_then(|d| plurals::select(&(*rules).0, d, exponent))
+            .map(|c| plurals::category_name(c).to_owned()),
+    )
+}
+
+/// The plural category of a range whose ends have the categories `start`
+/// and `end` (CLDR names): when it returns true, `out` is a category name.
+/// False if either is not a category name.
+///
+/// # Safety
+/// `rules` must be valid; each string must point to its length of readable
+/// bytes, or the length must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_plural_rules_select_range(
+    rules: *const HiPluralRules,
+    start: *const u8,
+    start_len: usize,
+    end: *const u8,
+    end_len: usize,
+    out: *mut HiString,
+) -> bool {
+    debug_assert!(!rules.is_null());
+    let (Some(start), Some(end)) = (as_str(start, start_len), as_str(end, end_len)) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_out(
+        out,
+        plurals::select_range(&(*rules).0, start, end)
+            .map(|c| plurals::category_name(c).to_owned()),
+    )
+}
+
+/// The categories of `rules`, in the order zero, one, two, few, many,
+/// other, separated by U+0000 like every list (write_list); "other" is
+/// always last. Always returns true.
+///
+/// # Safety
+/// `rules` must be valid; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_plural_rules_categories(
+    rules: *const HiPluralRules,
+    out: *mut HiString,
+) -> bool {
+    debug_assert!(!rules.is_null());
+    let categories = plurals::categories(&(*rules).0);
+    write_list(
+        out,
+        Some(categories.into_iter().map(str::to_owned).collect()),
+    )
+}
+
+/// Write a list to `out` as its entries separated by U+0000 (an entry may
+/// be empty; none contains U+0000), and say whether there was one.
+///
+/// # Safety
+/// `out` must be valid for writes.
+unsafe fn write_list(out: *mut HiString, result: Option<Vec<String>>) -> bool {
+    debug_assert!(result
+        .as_ref()
+        .is_none_or(|v| !v.is_empty() && v.iter().all(|s| !s.contains('\0'))));
+    write_out(out, result.map(|v| v.join("\0")))
+}
+
+/// NumberFormat's symbols and decimal and percent patterns for the language
+/// identifier of `locale` (a canonical tag) and the numbering system `nu`:
+/// when it returns true, `out` is the 23 entries of number::symbols,
+/// separated by U+0000. False if either string is not UTF-8, `locale` does
+/// not parse or `nu` is not a numbering system type.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_symbols(
+    locale: *const u8,
+    locale_len: usize,
+    nu: *const u8,
+    nu_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(nu)) = (as_str(locale, locale_len), as_str(nu, nu_len)) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, number::symbols(locale, nu))
+}
+
+/// NumberFormat's currency patterns for `locale`, `nu`, the currency
+/// `currency` (three uppercase letters) and the currencyDisplay `display`
+/// ("code", "symbol", "narrowSymbol" or "name"), standard or `accounting`:
+/// when it returns true, `out` is the entries of number::currency_patterns,
+/// separated by U+0000. False for any other value, or as
+/// hi_number_symbols.
+///
+/// # Safety
+/// As hi_number_symbols.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_currency_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    nu: *const u8,
+    nu_len: usize,
+    currency: *const u8,
+    currency_len: usize,
+    display: *const u8,
+    display_len: usize,
+    accounting: bool,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(nu), Some(currency), Some(display)) = (
+        as_str(locale, locale_len),
+        as_str(nu, nu_len),
+        as_str(currency, currency_len),
+        as_str(display, display_len),
+    ) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(
+        out,
+        number::currency_patterns(locale, nu, currency, display, accounting),
+    )
+}
+
+/// NumberFormat's patterns for compact notation with the currency style,
+/// for `locale`, `nu`, the currency `currency` (three uppercase letters)
+/// and the currencyDisplay `display` ("code", "symbol" or "narrowSymbol"),
+/// standard or `accounting`: when it returns true, `out` is the entries of
+/// number::compact_currency_patterns, separated by U+0000. False for any
+/// other value, or as hi_number_symbols.
+///
+/// # Safety
+/// As hi_number_symbols.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_compact_currency_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    nu: *const u8,
+    nu_len: usize,
+    currency: *const u8,
+    currency_len: usize,
+    display: *const u8,
+    display_len: usize,
+    accounting: bool,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(nu), Some(currency), Some(display)) = (
+        as_str(locale, locale_len),
+        as_str(nu, nu_len),
+        as_str(currency, currency_len),
+        as_str(display, display_len),
+    ) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(
+        out,
+        number::compact_currency_patterns(locale, nu, currency, display, accounting),
+    )
+}
+
+/// The currency style's decimal and grouping separators for `locale`, `nu`
+/// and the currency `currency` (three uppercase letters): when it returns
+/// true, `out` is the two entries of number::currency_separators, separated
+/// by U+0000. False for any other currency, or as hi_number_symbols.
+///
+/// # Safety
+/// As hi_number_symbols.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_currency_separators(
+    locale: *const u8,
+    locale_len: usize,
+    nu: *const u8,
+    nu_len: usize,
+    currency: *const u8,
+    currency_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(nu), Some(currency)) = (
+        as_str(locale, locale_len),
+        as_str(nu, nu_len),
+        as_str(currency, currency_len),
+    ) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, number::currency_separators(locale, nu, currency))
+}
+
+/// NumberFormat's compact patterns, short or (`long`) long, for `locale`
+/// and `nu`: when it returns true, `out` is the entries of
+/// number::compact_patterns, separated by U+0000. False as
+/// hi_number_symbols.
+///
+/// # Safety
+/// As hi_number_symbols.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_compact_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    nu: *const u8,
+    nu_len: usize,
+    long: bool,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(nu)) = (as_str(locale, locale_len), as_str(nu, nu_len)) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, number::compact_patterns(locale, nu, long))
+}
+
+/// NumberFormat's unit patterns for the language identifier of `locale`,
+/// `unit` and `width`: when it returns true, `out` is the six entries of
+/// units::unit_patterns, separated by U+0000. False if a string is not UTF-8,
+/// `locale` does not parse, or `unit` or `width` is not one it accepts.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_unit_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    unit: *const u8,
+    unit_len: usize,
+    width: *const u8,
+    width_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(unit), Some(width)) = (
+        as_str(locale, locale_len),
+        as_str(unit, unit_len),
+        as_str(width, width_len),
+    ) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, units::unit_patterns(locale, unit, width))
+}
+
+/// CurrencyDigits: CLDR's number of fraction digits for `currency` (three
+/// uppercase letters), 2 for a currency CLDR does not list; -1 if
+/// `currency` is not three uppercase letters.
+///
+/// # Safety
+/// `currency` must point to `len` readable bytes, or `len` must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_number_currency_digits(currency: *const u8, len: usize) -> i32 {
+    as_str(currency, len)
+        .and_then(number::currency_digits)
+        .map_or(-1, i32::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +958,245 @@ mod tests {
             Some("upper false")
         );
         assert_eq!(call(hi_collator_locale_defaults, "en_US"), None);
+    }
+
+    #[test]
+    fn ffi_plural_rules() {
+        let make = |locale: &str, ordinal| unsafe {
+            hi_plural_rules_new(locale.as_ptr(), locale.len(), ordinal)
+        };
+        let take = |ok: bool, out: HiString| {
+            if !ok {
+                assert!(out.data.is_null());
+                return None;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(s)
+        };
+        let r = make("fr", false);
+        assert!(!r.is_null());
+        let select = |d: &[u8], e| {
+            let mut out = HiString::EMPTY;
+            let ok = unsafe { hi_plural_rules_select(r, d.as_ptr(), d.len(), e, &mut out) };
+            take(ok, out)
+        };
+        assert_eq!(select(b"1", 0).as_deref(), Some("one"));
+        assert_eq!(select(b"1", 6).as_deref(), Some("many"));
+        assert_eq!(select(b"2", 0).as_deref(), Some("other"));
+        assert_eq!(select(b"1e3", 0), None);
+        assert_eq!(select(b"", 0), None);
+        assert_eq!(select(&[0xff], 0), None);
+        let range = |s: &[u8], e: &[u8]| {
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_plural_rules_select_range(r, s.as_ptr(), s.len(), e.as_ptr(), e.len(), &mut out)
+            };
+            take(ok, out)
+        };
+        assert_eq!(range(b"one", b"one").as_deref(), Some("one"));
+        assert_eq!(range(b"one", b"other").as_deref(), Some("other"));
+        assert_eq!(range(b"one", b"lots"), None);
+        assert_eq!(range(&[0xff], b"one"), None);
+        let mut out = HiString::EMPTY;
+        let ok = unsafe { hi_plural_rules_categories(r, &mut out) };
+        assert_eq!(take(ok, out).as_deref(), Some("one\0many\0other"));
+        unsafe { hi_plural_rules_free(r) };
+        unsafe { hi_plural_rules_free(std::ptr::null_mut()) };
+
+        let r = make("en", true);
+        let mut out = HiString::EMPTY;
+        let ok = unsafe { hi_plural_rules_categories(r, &mut out) };
+        assert_eq!(take(ok, out).as_deref(), Some("one\0two\0few\0other"));
+        unsafe { hi_plural_rules_free(r) };
+        assert!(make("en_US", false).is_null());
+        let bad = [0xffu8];
+        assert!(unsafe { hi_plural_rules_new(bad.as_ptr(), bad.len(), false) }.is_null());
+    }
+
+    #[test]
+    fn ffi_number_data() {
+        /// Call a list function and split its result at U+0000.
+        fn take(ok: bool, out: HiString) -> Option<Vec<String>> {
+            if !ok {
+                assert!(out.data.is_null());
+                return None;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(s.split('\0').map(str::to_owned).collect())
+        }
+        let symbols = |l: &[u8], nu: &[u8]| {
+            let mut out = HiString::EMPTY;
+            let ok =
+                unsafe { hi_number_symbols(l.as_ptr(), l.len(), nu.as_ptr(), nu.len(), &mut out) };
+            take(ok, out)
+        };
+        let en = symbols(b"en", b"latn").unwrap();
+        assert_eq!(en.len(), 21);
+        assert_eq!((en[0].as_str(), en[18].as_str()), (".", "{0}–{1}"));
+        assert_eq!(symbols(b"en_US", b"latn"), None);
+        assert_eq!(symbols(&[0xff], b"latn"), None);
+        assert_eq!(symbols(b"en", &[0xff]), None);
+
+        let currency = |c: &[u8], d: &[u8], accounting| {
+            let (l, nu) = (b"en", b"latn");
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_number_currency_patterns(
+                    l.as_ptr(),
+                    l.len(),
+                    nu.as_ptr(),
+                    nu.len(),
+                    c.as_ptr(),
+                    c.len(),
+                    d.as_ptr(),
+                    d.len(),
+                    accounting,
+                    &mut out,
+                )
+            };
+            take(ok, out)
+        };
+        assert_eq!(
+            currency(b"USD", b"symbol", true).unwrap(),
+            [
+                "{currencyPrefix}{number}",
+                "{plusSign}{currencyPrefix}{number}",
+                "({currencyPrefix}{number})",
+                "$",
+                "{currencyPrefix}{number}",
+                "{plusSign}{currencyPrefix}{number}",
+                "({currencyPrefix}{number})",
+            ]
+        );
+        assert_eq!(currency(b"USD", b"name", false).unwrap().len(), 6);
+        assert_eq!(currency(b"usd", b"symbol", false), None);
+        assert_eq!(currency(b"USD", b"long", false), None);
+        assert_eq!(currency(&[0xff], b"symbol", false), None);
+
+        let compact_currency = |c: &[u8], d: &[u8], accounting| {
+            let (l, nu) = (b"en", b"latn");
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_number_compact_currency_patterns(
+                    l.as_ptr(),
+                    l.len(),
+                    nu.as_ptr(),
+                    nu.len(),
+                    c.as_ptr(),
+                    c.len(),
+                    d.as_ptr(),
+                    d.len(),
+                    accounting,
+                    &mut out,
+                )
+            };
+            take(ok, out)
+        };
+        // en's 12 magnitudes, 26 strings each; 10^3's other is "{0}K".
+        let en = compact_currency(b"USD", b"symbol", true).unwrap();
+        assert_eq!(en.len(), 1 + 12 * 26);
+        assert_eq!(en[..3], ["12", "3", "3"]);
+        assert_eq!(
+            en[3 + 5 * 4..3 + 6 * 4],
+            [
+                "{0}K",
+                "{currencyPrefix}{number}",
+                "{plusSign}{currencyPrefix}{number}",
+                "({currencyPrefix}{number})"
+            ]
+        );
+        assert_eq!(compact_currency(b"USD", b"name", false), None);
+
+        let separators = |l: &[u8], c: &[u8]| {
+            let nu = b"latn";
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_number_currency_separators(
+                    l.as_ptr(),
+                    l.len(),
+                    nu.as_ptr(),
+                    nu.len(),
+                    c.as_ptr(),
+                    c.len(),
+                    &mut out,
+                )
+            };
+            take(ok, out)
+        };
+        assert_eq!(separators(b"pt-PT", b"PTE").unwrap(), ["$", ","]);
+        assert_eq!(separators(b"de-AT", b"EUR").unwrap(), [",", "."]);
+        assert_eq!(separators(b"de-AT", b"eur"), None);
+        assert_eq!(separators(&[0xff], b"EUR"), None);
+        assert_eq!(compact_currency(b"usd", b"symbol", false), None);
+        assert_eq!(compact_currency(&[0xff], b"code", false), None);
+
+        let compact = |l: &[u8], long| {
+            let nu = b"latn";
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_number_compact_patterns(
+                    l.as_ptr(),
+                    l.len(),
+                    nu.as_ptr(),
+                    nu.len(),
+                    long,
+                    &mut out,
+                )
+            };
+            take(ok, out)
+        };
+        // Empty entries survive the U+0000 separators: the exact-0 and
+        // exact-1 patterns of en's first entry, and fr long's exact-0.
+        let en = compact(b"en", false).unwrap();
+        assert_eq!(en[..5], ["4", "3", "3", "", ""]);
+        assert_eq!(en.len(), 41);
+        let fr = compact(b"fr", true).unwrap();
+        assert_eq!(fr[1..5], ["3", "3", "", "mille"]);
+        assert_eq!(compact(b"en_US", false), None);
+
+        let unit = |u: &[u8], w: &[u8]| {
+            let l = b"en";
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_unit_patterns(
+                    l.as_ptr(),
+                    l.len(),
+                    u.as_ptr(),
+                    u.len(),
+                    w.as_ptr(),
+                    w.len(),
+                    &mut out,
+                )
+            };
+            take(ok, out)
+        };
+        let mile = unit(b"mile", b"long").unwrap();
+        assert_eq!(
+            mile,
+            [
+                "{0} miles",
+                "{0} mile",
+                "{0} miles",
+                "{0} miles",
+                "{0} miles",
+                "{0} miles"
+            ]
+        );
+        assert_eq!(unit(b"furlong", b"long"), None);
+        assert_eq!(unit(b"mile", b"Long"), None);
+        assert_eq!(unit(&[0xff], b"long"), None);
+
+        let digits = |c: &[u8]| unsafe { hi_number_currency_digits(c.as_ptr(), c.len()) };
+        assert_eq!(digits(b"JPY"), 0);
+        assert_eq!(digits(b"KWD"), 3);
+        assert_eq!(digits(b"ABC"), 2);
+        assert_eq!(digits(b"jpy"), -1);
+        assert_eq!(digits(b""), -1);
+        assert_eq!(digits(&[0xff, 0xfe, 0xfd]), -1);
     }
 
     #[test]

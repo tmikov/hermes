@@ -22,6 +22,8 @@ var TABLE = [
   ['Intl', 'supportedValuesOf', 'method', 'supportedValuesOf', 1],
   ['Intl', 'Collator', 'constructor', 'Collator', 0],
   ['Intl', 'Locale', 'constructor', 'Locale', 1],
+  ['Intl', 'NumberFormat', 'constructor', 'NumberFormat', 0],
+  ['Intl', 'PluralRules', 'constructor', 'PluralRules', 0],
   ['Intl', '@@toStringTag', 'toStringTag', 'Intl'],
   ['Intl.Collator', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
   ['Intl.Collator.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
@@ -51,9 +53,26 @@ var TABLE = [
   ['Intl.Locale.prototype', 'minimize', 'method', 'minimize', 0],
   ['Intl.Locale.prototype', 'toString', 'method', 'toString', 0],
   ['Intl.Locale.prototype', '@@toStringTag', 'toStringTag', 'Intl.Locale'],
+  ['Intl.NumberFormat', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.NumberFormat.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.NumberFormat.prototype', 'format', 'getter', 'get format'],
+  ['Intl.NumberFormat.prototype', 'formatToParts', 'method', 'formatToParts', 1],
+  ['Intl.NumberFormat.prototype', 'formatRange', 'method', 'formatRange', 2],
+  ['Intl.NumberFormat.prototype', 'formatRangeToParts', 'method', 'formatRangeToParts', 2],
+  ['Intl.NumberFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.NumberFormat'],
+  ['new Intl.NumberFormat()', 'format', 'bound', '', 1],
+  ['Intl.PluralRules', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.PluralRules.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.PluralRules.prototype', 'select', 'method', 'select', 1],
+  ['Intl.PluralRules.prototype', 'selectRange', 'method', 'selectRange', 2],
+  ['Intl.PluralRules.prototype', '@@toStringTag', 'toStringTag', 'Intl.PluralRules'],
   ['String.prototype', 'localeCompare', 'method', 'localeCompare', 1],
   ['String.prototype', 'toLocaleLowerCase', 'method', 'toLocaleLowerCase', 0],
   ['String.prototype', 'toLocaleUpperCase', 'method', 'toLocaleUpperCase', 0],
+  ['Number.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
+  ['BigInt.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
+  ['Array.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
+  ['Object.getPrototypeOf(Int8Array.prototype)', 'toLocaleString', 'method', 'toLocaleString', 0],
 ];
 
 function isConstructor(f) {
@@ -137,6 +156,8 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.supportedValuesOf: ok
 // CHECK-NEXT: Intl.Collator: ok
 // CHECK-NEXT: Intl.Locale: ok
+// CHECK-NEXT: Intl.NumberFormat: ok
+// CHECK-NEXT: Intl.PluralRules: ok
 // CHECK-NEXT: Intl.@@toStringTag: ok
 // CHECK-NEXT: Intl.Collator.supportedLocalesOf: ok
 // CHECK-NEXT: Intl.Collator.prototype.resolvedOptions: ok
@@ -166,14 +187,31 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.Locale.prototype.minimize: ok
 // CHECK-NEXT: Intl.Locale.prototype.toString: ok
 // CHECK-NEXT: Intl.Locale.prototype.@@toStringTag: ok
+// CHECK-NEXT: Intl.NumberFormat.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.format: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.formatToParts: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.formatRange: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.formatRangeToParts: ok
+// CHECK-NEXT: Intl.NumberFormat.prototype.@@toStringTag: ok
+// CHECK-NEXT: new Intl.NumberFormat().format: ok
+// CHECK-NEXT: Intl.PluralRules.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.PluralRules.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.PluralRules.prototype.select: ok
+// CHECK-NEXT: Intl.PluralRules.prototype.selectRange: ok
+// CHECK-NEXT: Intl.PluralRules.prototype.@@toStringTag: ok
 // CHECK-NEXT: String.prototype.localeCompare: ok
 // CHECK-NEXT: String.prototype.toLocaleLowerCase: ok
 // CHECK-NEXT: String.prototype.toLocaleUpperCase: ok
+// CHECK-NEXT: Number.prototype.toLocaleString: ok
+// CHECK-NEXT: BigInt.prototype.toLocaleString: ok
+// CHECK-NEXT: Array.prototype.toLocaleString: ok
+// CHECK-NEXT: Object.getPrototypeOf(Int8Array.prototype).toLocaleString: ok
 
 // Intl and each prototype have exactly the table's properties, and a
 // prototype also its constructor.
 print(Reflect.ownKeys(Intl).map(String).join(','));
-// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,Locale,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,Locale,NumberFormat,PluralRules,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(Intl.Collator).map(String).join(','));
 // CHECK-NEXT: length,name,prototype,supportedLocalesOf
 print(Reflect.ownKeys(Intl.Collator.prototype).map(String).join(','));
@@ -183,3 +221,15 @@ print(Reflect.ownKeys(new Intl.Collator()).length);
 // CHECK-NEXT: 0
 print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(Intl.NumberFormat).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.NumberFormat.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,format,formatRange,formatRangeToParts,formatToParts,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.NumberFormat()).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.PluralRules).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.PluralRules.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,select,selectRange,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.PluralRules()).length);
+// CHECK-NEXT: 0

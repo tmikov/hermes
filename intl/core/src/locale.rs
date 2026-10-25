@@ -459,6 +459,16 @@ pub fn resolve_default(tag: &str) -> Option<String> {
     Some(found)
 }
 
+/// The tags of data/locales.txt, without its comments and blank lines, for
+/// the tests that check every locale.
+#[cfg(test)]
+pub(crate) fn test_locales() -> impl Iterator<Item = &'static str> {
+    include_str!("../data/locales.txt")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

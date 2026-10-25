@@ -32,9 +32,10 @@ var native = {
   },
 };
 var hostDefaults = {locales: ['en'], timeZone: 'UTC'};
-// 20-Locale.js and 30-Collator.js are not included, so no object is an
-// Intl.Locale, and installIntl installs neither Intl.Collator nor
-// Intl.Locale.
+// 20-Locale.js, 30-Collator.js, 40-NumberFormat.js and 45-PluralRules.js
+// are not included, so no object is an Intl.Locale, and installIntl
+// installs none of Intl.Collator, Intl.Locale, Intl.NumberFormat and
+// Intl.PluralRules.
 function isLocaleObject(o) {
   return false;
 }
@@ -43,6 +44,8 @@ function localeObjectTag(o) {
 }
 function installCollator(intl) {}
 function installLocale(intl) {}
+function installNumberFormat(intl) {}
+function installPluralRules(intl) {}
 installIntl();
 
 print(JSON.stringify(globalThis.Intl.supportedValuesOf('calendar')));

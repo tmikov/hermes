@@ -37,8 +37,18 @@ function listPush(list, v) {
   CreateDataPropertyOrThrow(list, list.length, v);
 }
 
-/// Whether list contains v. Lists hold strings and integers, so === is the
-/// same as SameValue here.
+/// Replace the element at index i of list with v without consulting
+/// Array.prototype (README rule 3). For an index listPush created, a[i] = v
+/// would find the own data property and run no setter, but defining the
+/// property keeps the rule by letter and does not depend on that.
+function listSet(list, i, v) {
+  // 1. Perform ! CreateDataPropertyOrThrow(list, i, v).
+  CreateDataPropertyOrThrow(list, i, v);
+}
+
+/// Whether list contains v. Lists hold strings, integers or objects, so ===
+/// is the same as SameValue here; it compares objects by identity, which is
+/// what the cycle check of Array.prototype.toLocaleString needs.
 function listContains(list, v) {
   // 1. For each element e of list, if e is v, return true.
   for (var i = 0; i < list.length; i++) {

@@ -88,6 +88,130 @@ function TransformCase(string, locales, targetCase) {
   return native.caseMap(string, locale, targetCase === 'upper');
 }
 
+/// The NumberFormat that Number.prototype.toLocaleString and
+/// BigInt.prototype.toLocaleString use when locales and options are both
+/// undefined, created on first use (design spec "Resistance to tampering").
+var defaultNumberFormat;
+
+/// Construct(%Intl.NumberFormat%, « locales, options ») for the Number and
+/// BigInt toLocaleString overrides. CreateNumberFormat performs every
+/// observable step of the constructor without going through
+/// %Intl.NumberFormat% or any public property. When locales and options are
+/// both undefined, those steps have no observable effect and always give
+/// the same NumberFormat, so one default NumberFormat is created on first
+/// use and reused without them.
+function toLocaleStringNumberFormat(locales, options) {
+  // 1. If locales and options are both undefined, return the default
+  //    NumberFormat, creating it first if there is none.
+  if (locales === undefined && options === undefined) {
+    if (defaultNumberFormat === undefined)
+      defaultNumberFormat = CreateNumberFormat(undefined, undefined);
+    return defaultNumberFormat;
+  }
+  // 2. Return CreateNumberFormat(locales, options).
+  return CreateNumberFormat(locales, options);
+}
+
+// ECMA-262 21.1.3.7.1 ThisNumberValue ( value )
+function ThisNumberValue(value) {
+  // 1. If value is a Number, return value.
+  // 2. If value is an Object and value has a [[NumberData]] internal slot,
+  //    then
+  //    a. Let n be value.[[NumberData]].
+  //    b. Assert: n is a Number.
+  //    c. Return n.
+  // 3. Throw a TypeError exception.
+  //    The captured Number.prototype.valueOf is exactly these steps
+  //    (ECMA-262 21.1.3.7: "Return ? ThisNumberValue(this value)").
+  return ReflectApply(NumberPrototypeValueOf, value, []);
+}
+
+// ECMA-262 21.2.3.4.1 ThisBigIntValue ( value )
+function ThisBigIntValue(value) {
+  // 1. If value is a BigInt, return value.
+  // 2. If value is an Object and value has a [[BigIntData]] internal slot,
+  //    then
+  //    a. Assert: value.[[BigIntData]] is a BigInt.
+  //    b. Return value.[[BigIntData]].
+  // 3. Throw a TypeError exception.
+  //    The captured BigInt.prototype.valueOf is exactly these steps
+  //    (ECMA-262 21.2.3.4: "Return ? ThisBigIntValue(this value)").
+  return ReflectApply(BigIntPrototypeValueOf, value, []);
+}
+
+// ECMA-262 7.3.18 LengthOfArrayLike ( obj )
+function LengthOfArrayLike(obj) {
+  // 1. Return ℝ(? ToLength(? Get(obj, "length"))).
+  return ToLength(obj.length);
+}
+
+// ECMA-262 7.3.20 Invoke ( V, P [ , argumentsList ] ), with argumentsList
+// present.
+function Invoke(V, P, argumentsList) {
+  // 1. If argumentsList is not present, set argumentsList to a new empty
+  //    List. Every caller passes it.
+  // 2. Let func be ? GetV(V, P).
+  //    A property access is GetV (7.3.3): ToObject(V).[[Get]](P, V), with V
+  //    itself as the receiver, and the TypeError for undefined and null.
+  var func = V[P];
+  // 3. Return ? Call(func, V, argumentsList).
+  //    Call (7.3.13): 1. If IsCallable(F) is false, throw a TypeError
+  //    exception. 2. Return ? F.[[Call]](V, argumentsList).
+  if (typeof func !== 'function')
+    throw new _TypeError(ToString(P) + ' is not a function');
+  return ReflectApply(func, V, argumentsList);
+}
+
+// ECMA-262 23.1.3.18.1 JoinIndexedProperties ( obj, length, separator [ ,
+// methodName [ , methodArgs ] ] ), with methodName and methodArgs present:
+// the only form ECMA-402 uses.
+function JoinIndexedProperties(obj, length, separator, methodName, methodArgs) {
+  // 1. If methodName is present and methodArgs is not present, set
+  //    methodArgs to a new empty List. Every caller passes methodArgs.
+  // 2. Let result be the empty String.
+  var result = '';
+  // 3. Let k be 0.
+  // 4. Repeat, while k < length,
+  for (var k = 0; k < length; k++) {
+    // a. If k > 0, set result to the string-concatenation of result and
+    //    separator.
+    if (k > 0) result += separator;
+    // b. NOTE: If obj is a TypedArray, the following invocation of Get will
+    //    return a normal completion.
+    // c. Let element be ? Get(obj, ! ToString(𝔽(k))).
+    //    A Number key is converted to that String.
+    var element = obj[k];
+    // d. If element is neither undefined nor null, then
+    if (element !== undefined && element !== null) {
+      // i. If methodName is present, then
+      //    1. Let elementString be ? ToString(? Invoke(element, methodName,
+      //       methodArgs)).
+      // ii. (Else: methodName is always present.)
+      var elementString = ToString(Invoke(element, methodName, methodArgs));
+      // iii. Set result to the string-concatenation of result and
+      //      elementString.
+      result += elementString;
+    }
+    // e. Set k to k + 1.
+  }
+  // 5. Return result.
+  return result;
+}
+
+/// The objects that calls of the Array.prototype.toLocaleString override
+/// are joining, outermost first: the cycle check Hermes's own method has
+/// (see the override). Compared by identity.
+var arraysBeingJoined = [];
+
+// ECMA-262 23.1.3.32.1 LocalizedListSeparator ( )
+function LocalizedListSeparator() {
+  // 1. Return an implementation-defined String appropriate for use as a
+  //    list separator in the host environment's current locale.
+  //    The plugin uses ",", as Hermes's own Array.prototype.toLocaleString
+  //    does.
+  return ',';
+}
+
 /// Replace the locale-sensitive built-ins with their ECMA-402 versions;
 /// step 3 of setup.
 function installBuiltinOverrides() {
@@ -145,6 +269,110 @@ function installBuiltinOverrides() {
       var string = ToString(thisValue);
       // 3. Return ? TransformCase(string, locales, upper).
       return TransformCase(string, locales, 'upper');
+    },
+  });
+
+  // 2. "Properties of the Number Prototype Object".
+  defineMethods(NumberPrototype, {
+    // Number.prototype.toLocaleString ( [ locales [ , options ] ] )
+    toLocaleString(locales = undefined, options = undefined) {
+      // 1. Let x be ? ThisNumberValue(this value).
+      var x = ThisNumberValue(this);
+      // 2. Let numberFormat be ? Construct(%Intl.NumberFormat%, « locales,
+      //    options »).
+      var numberFormat = toLocaleStringNumberFormat(locales, options);
+      // 3. Return FormatNumeric(numberFormat, ! ToIntlMathematicalValue(x)).
+      //    x is a Number, so ToIntlMathematicalValue is its steps 4.b to
+      //    10, which IntlMVFromNumber performs.
+      return FormatNumeric(numberFormat, IntlMVFromNumber(x));
+    },
+  });
+
+  // 3. "Properties of the BigInt Prototype Object".
+  defineMethods(BigIntPrototype, {
+    // BigInt.prototype.toLocaleString ( [ locales [ , options ] ] )
+    toLocaleString(locales = undefined, options = undefined) {
+      // 1. Let x be ? ThisBigIntValue(this value).
+      var x = ThisBigIntValue(this);
+      // 2. Let numberFormat be ? Construct(%Intl.NumberFormat%, « locales,
+      //    options »).
+      var numberFormat = toLocaleStringNumberFormat(locales, options);
+      // 3. Return FormatNumeric(numberFormat, ℝ(x)).
+      return FormatNumeric(numberFormat, IntlMVFromBigInt(x));
+    },
+  });
+
+  // 4. "Properties of the Array Prototype Object".
+  defineMethods(ArrayPrototype, {
+    // Array.prototype.toLocaleString ( [ locales [ , options ] ] )
+    toLocaleString(locales = undefined, options = undefined) {
+      // 1. Let array be ? ToObject(this value).
+      var array = ToObject(this);
+      //    Not in the spec: an object this method is already joining gives
+      //    the empty string, as in Hermes's own Array.prototype.toLocaleString.
+      //    The spec's steps would recurse on a cyclic array until the stack
+      //    overflows. The check covers only the objects this method is
+      //    joining. Hermes's built-in shares one set with join, which the
+      //    plugin cannot reach, so a cycle through both methods is cut one
+      //    level later: with a = [1] and a.push({toString() { return
+      //    a.toLocaleString(); }}), a.join() is "1,1," here and "1," in
+      //    Hermes and V8. The recursion still ends.
+      if (listContains(arraysBeingJoined, array)) return '';
+      // 2. Let length be ? LengthOfArrayLike(array).
+      //    A length above 2^32 - 1 is joined like any other, where Hermes's
+      //    own method throws a RangeError before reading an element. The
+      //    loop still ends early: each element adds at least the separator
+      //    to the result, so Hermes's string length limit throws a
+      //    RangeError within 2^28 elements.
+      var length = LengthOfArrayLike(array);
+      //    Mark array as being joined until JoinIndexedProperties returns
+      //    or throws, so a throw cannot leave it marked.
+      var depth = arraysBeingJoined.length;
+      listPush(arraysBeingJoined, array);
+      try {
+        // 3. Return ? JoinIndexedProperties(array, length,
+        //    LocalizedListSeparator(), "toLocaleString",
+        //    « locales, options »).
+        return JoinIndexedProperties(
+          array,
+          length,
+          LocalizedListSeparator(),
+          'toLocaleString',
+          [locales, options],
+        );
+      } finally {
+        // Unmark it. arraysBeingJoined is the plugin's own array, so
+        // setting its length consults nothing on Array.prototype.
+        arraysBeingJoined.length = depth;
+      }
+    },
+  });
+
+  // 5. "Properties of the %TypedArray% Prototype Object".
+  defineMethods(TypedArrayPrototype, {
+    // %TypedArray%.prototype.toLocaleString ( [ locales [ , options ] ] )
+    toLocaleString(locales = undefined, options = undefined) {
+      // 1. Let obj be the this value.
+      var obj = this;
+      // 2. Let taRecord be ? ValidateTypedArray(obj, seq-cst).
+      //    The captured %TypedArray%.prototype.at performs ValidateTypedArray
+      //    (obj, seq-cst) first (ECMA-262 23.2.3.1 step 2); with index 0 the
+      //    rest of it has no observable effect.
+      ReflectApply(TypedArrayPrototypeAt, obj, [0]);
+      // 3. Let length be TypedArrayLength(taRecord).
+      //    obj is valid and in bounds, so the captured length getter
+      //    returns TypedArrayLength (ECMA-262 23.2.3.21 step 6), never a
+      //    "length" property of obj.
+      var length = ReflectApply(TypedArrayPrototypeGetLength, obj, []);
+      // 4. Return ? JoinIndexedProperties(obj, length,
+      //    LocalizedListSeparator(), "toLocaleString", « locales, options »).
+      return JoinIndexedProperties(
+        obj,
+        length,
+        LocalizedListSeparator(),
+        'toLocaleString',
+        [locales, options],
+      );
     },
   });
 }

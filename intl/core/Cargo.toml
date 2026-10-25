@@ -21,6 +21,18 @@ icu_provider = "~2.3"
 # Not used directly. icu 2.3 asks for it with a caret requirement, which a
 # plain `cargo update` would satisfy with 2.4; this keeps it at 2.3.
 icu_locale_core = "~2.3"
+# Plural ranges (PluralRulesWithRanges, RawPluralOperands) and the compact
+# decimal data need the `unstable` feature.
+icu_plurals = { version = "~2.3", features = ["unstable"] }
+icu_decimal = { version = "~2.3", features = ["unstable"] }
+# The currency data structs (decision 4 of the Phase 3 plan), and the
+# decimals the number data APIs take.
+icu_experimental = "~0.6"
+fixed_decimal = "~0.7"
+# The items of ICU4X's currency and compact patterns, and the VarULE trait
+# of the plural data that holds them.
+icu_pattern = "~0.5"
+zerovec = "~0.11"
 
 [build-dependencies]
 cbindgen = { version = "0.29", default-features = false }

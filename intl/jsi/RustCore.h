@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hermes_intl::core {
 
@@ -217,6 +218,197 @@ caseMap(std::u16string_view text, std::string_view language, bool upper) {
           &out))
     return std::nullopt;
   return takeString16(out);
+}
+
+/// The cardinal (\p ordinal false) or ordinal plural rules for the language
+/// identifier of \p locale (canonical); null if \p locale does not parse or
+/// has no data. The caller frees them with hi_plural_rules_free.
+inline HiPluralRules *pluralRulesNew(std::string_view locale, bool ordinal) {
+  return hi_plural_rules_new(bytes(locale), locale.size(), ordinal);
+}
+
+/// The plural category of \p decimal x 10^\p exponent with \p rules;
+/// nullopt unless \p decimal is ASCII digits with an optional "." between
+/// digits.
+inline std::optional<std::string> pluralRulesSelect(
+    const HiPluralRules *rules,
+    std::string_view decimal,
+    int32_t exponent) {
+  HiString out;
+  if (!hi_plural_rules_select(
+          rules, bytes(decimal), decimal.size(), exponent, &out))
+    return std::nullopt;
+  return takeString(out);
+}
+
+/// The plural category of a range whose ends have the categories \p start
+/// and \p end, with \p rules; nullopt if either is not a category name.
+inline std::optional<std::string> pluralRulesSelectRange(
+    const HiPluralRules *rules,
+    std::string_view start,
+    std::string_view end) {
+  HiString out;
+  if (!hi_plural_rules_select_range(
+          rules, bytes(start), start.size(), bytes(end), end.size(), &out))
+    return std::nullopt;
+  return takeString(out);
+}
+
+/// Take ownership of a list the Rust core returned as one string, its
+/// entries separated by U+0000. An entry may be empty; there is always at
+/// least one.
+inline std::vector<std::string> takeList(HiString s) {
+  std::string joined = takeString(s);
+  std::vector<std::string> result;
+  size_t start = 0;
+  for (;;) {
+    size_t end = joined.find('\0', start);
+    if (end == std::string::npos) {
+      result.emplace_back(joined, start);
+      return result;
+    }
+    result.emplace_back(joined, start, end - start);
+    start = end + 1;
+  }
+}
+
+/// The categories of \p rules in the order zero, one, two, few, many,
+/// other.
+inline std::vector<std::string> pluralRulesCategories(
+    const HiPluralRules *rules) {
+  HiString out;
+  hi_plural_rules_categories(rules, &out);
+  return takeList(out);
+}
+
+/// NumberFormat's symbols and decimal and percent patterns for the language
+/// identifier of \p locale (canonical) and the numbering system \p nu: the
+/// 23 entries hi_number_symbols documents. nullopt if \p locale does not
+/// parse or \p nu is not a numbering system type.
+inline std::optional<std::vector<std::string>> numberSymbols(
+    std::string_view locale,
+    std::string_view nu) {
+  HiString out;
+  if (!hi_number_symbols(
+          bytes(locale), locale.size(), bytes(nu), nu.size(), &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// NumberFormat's currency patterns for \p locale, \p nu, \p currency
+/// (three uppercase letters) and the currencyDisplay \p display, standard
+/// or \p accounting: the entries hi_number_currency_patterns documents.
+/// nullopt for any other currency or display, or as numberSymbols.
+inline std::optional<std::vector<std::string>> currencyPatterns(
+    std::string_view locale,
+    std::string_view nu,
+    std::string_view currency,
+    std::string_view display,
+    bool accounting) {
+  HiString out;
+  if (!hi_number_currency_patterns(
+          bytes(locale),
+          locale.size(),
+          bytes(nu),
+          nu.size(),
+          bytes(currency),
+          currency.size(),
+          bytes(display),
+          display.size(),
+          accounting,
+          &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// NumberFormat's patterns for compact notation with the currency style for
+/// \p locale, \p nu, \p currency (three uppercase letters) and the
+/// currencyDisplay \p display ("code", "symbol" or "narrowSymbol"),
+/// standard or \p accounting: the entries
+/// hi_number_compact_currency_patterns documents. nullopt for any other
+/// currency or display, or as numberSymbols.
+inline std::optional<std::vector<std::string>> compactCurrencyPatterns(
+    std::string_view locale,
+    std::string_view nu,
+    std::string_view currency,
+    std::string_view display,
+    bool accounting) {
+  HiString out;
+  if (!hi_number_compact_currency_patterns(
+          bytes(locale),
+          locale.size(),
+          bytes(nu),
+          nu.size(),
+          bytes(currency),
+          currency.size(),
+          bytes(display),
+          display.size(),
+          accounting,
+          &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// The currency style's decimal and grouping separators for \p locale,
+/// \p nu and \p currency (three uppercase letters): the two entries
+/// hi_number_currency_separators documents. nullopt for any other currency,
+/// or as numberSymbols.
+inline std::optional<std::vector<std::string>> currencySeparators(
+    std::string_view locale,
+    std::string_view nu,
+    std::string_view currency) {
+  HiString out;
+  if (!hi_number_currency_separators(
+          bytes(locale),
+          locale.size(),
+          bytes(nu),
+          nu.size(),
+          bytes(currency),
+          currency.size(),
+          &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// NumberFormat's short or (\p long_) long compact patterns for \p locale
+/// and \p nu: the entries hi_number_compact_patterns documents. nullopt as
+/// numberSymbols.
+inline std::optional<std::vector<std::string>>
+compactPatterns(std::string_view locale, std::string_view nu, bool long_) {
+  HiString out;
+  if (!hi_number_compact_patterns(
+          bytes(locale), locale.size(), bytes(nu), nu.size(), long_, &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// The six unit patterns (zero, one, two, few, many, other; CLDR form) of
+/// \p unit at \p width for \p locale. nullopt for a unit or width the
+/// patterns are not defined for.
+inline std::optional<std::vector<std::string>> unitPatterns(
+    std::string_view locale,
+    std::string_view unit,
+    std::string_view width) {
+  HiString out;
+  if (!hi_unit_patterns(
+          bytes(locale),
+          locale.size(),
+          bytes(unit),
+          unit.size(),
+          bytes(width),
+          width.size(),
+          &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// CurrencyDigits of \p currency (three uppercase letters): CLDR's fraction
+/// digits, 2 for a currency CLDR does not list. nullopt for anything else.
+inline std::optional<int> currencyDigits(std::string_view currency) {
+  int32_t digits = hi_number_currency_digits(bytes(currency), currency.size());
+  if (digits < 0)
+    return std::nullopt;
+  return digits;
 }
 
 /// The values of \p kind for Intl.supportedValuesOf, space-separated.

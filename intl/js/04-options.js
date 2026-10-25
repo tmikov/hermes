@@ -142,8 +142,8 @@ var ROUNDING_MODES = [
   'halfEven',
 ];
 
-// 16.1.2 SetNumberFormatDigitOptions ( intlObj, options, mnfdDefault,
-//                                      mxfdDefault, notation )
+// 16.1.2 SetNumberFormatDigitOptions ( intlObj, options, minFDDefault,
+//                                      maxFDDefault, notation )
 // intlObj is a null-prototype record; its slots are lowerCamelCase fields.
 // The [[RoundingType]] enums more-precision, less-precision,
 // significant-digits and fraction-digits are the strings "morePrecision",
@@ -151,24 +151,28 @@ var ROUNDING_MODES = [
 function SetNumberFormatDigitOptions(
   intlObj,
   options,
-  mnfdDefault,
-  mxfdDefault,
+  minFDDefault,
+  maxFDDefault,
   notation,
 ) {
-  // 1. Let mnid be ? GetNumberOption(options, "minimumIntegerDigits", 1, 21,
-  //    1).
-  var mnid = GetNumberOption(options, 'minimumIntegerDigits', 1, 21, 1);
-  // 2. Let mnfd be ? Get(options, "minimumFractionDigits").
-  var mnfd = options.minimumFractionDigits;
-  // 3. Let mxfd be ? Get(options, "maximumFractionDigits").
-  var mxfd = options.maximumFractionDigits;
-  // 4. Let mnsd be ? Get(options, "minimumSignificantDigits").
-  var mnsd = options.minimumSignificantDigits;
-  // 5. Let mxsd be ? Get(options, "maximumSignificantDigits").
-  var mxsd = options.maximumSignificantDigits;
-  // 6. Set intlObj.[[MinimumIntegerDigits]] to mnid.
-  intlObj.minimumIntegerDigits = mnid;
-  // 7. Let roundingIncrement be ? GetNumberOption(options,
+  // 1. Let minIntegerDigits be ? GetNumberOption(options,
+  //    "minimumIntegerDigits", 1, 21, 1).
+  var minIntegerDigits = GetNumberOption(
+    options,
+    'minimumIntegerDigits',
+    1,
+    21,
+    1,
+  );
+  // 2. Let minFD be ? Get(options, "minimumFractionDigits").
+  var minFD = options.minimumFractionDigits;
+  // 3. Let maxFD be ? Get(options, "maximumFractionDigits").
+  var maxFD = options.maximumFractionDigits;
+  // 4. Let minSD be ? Get(options, "minimumSignificantDigits").
+  var minSD = options.minimumSignificantDigits;
+  // 5. Let maxSD be ? Get(options, "maximumSignificantDigits").
+  var maxSD = options.maximumSignificantDigits;
+  // 6. Let roundingIncrement be ? GetNumberOption(options,
   //    "roundingIncrement", 1, 5000, 1).
   var roundingIncrement = GetNumberOption(
     options,
@@ -177,11 +181,11 @@ function SetNumberFormatDigitOptions(
     5000,
     1,
   );
-  // 8. If roundingIncrement is not in « 1, 2, 5, 10, 20, 25, 50, 100, 200,
+  // 7. If roundingIncrement is not in « 1, 2, 5, 10, 20, 25, 50, 100, 200,
   //    250, 500, 1000, 2000, 2500, 5000 », throw a RangeError exception.
   if (!listContains(ROUNDING_INCREMENTS, roundingIncrement))
     throw new _RangeError('roundingIncrement value is out of range');
-  // 9. Let roundingMode be ? GetOption(options, "roundingMode", string,
+  // 8. Let roundingMode be ? GetOption(options, "roundingMode", string,
   //    « "ceil", "floor", "expand", "trunc", "halfCeil", "halfFloor",
   //    "halfExpand", "halfTrunc", "halfEven" », "halfExpand").
   var roundingMode = GetOption(
@@ -191,8 +195,8 @@ function SetNumberFormatDigitOptions(
     ROUNDING_MODES,
     'halfExpand',
   );
-  // 10. Let roundingPriority be ? GetOption(options, "roundingPriority",
-  //     string, « "auto", "morePrecision", "lessPrecision" », "auto").
+  // 9. Let roundingPriority be ? GetOption(options, "roundingPriority",
+  //    string, « "auto", "morePrecision", "lessPrecision" », "auto").
   var roundingPriority = GetOption(
     options,
     'roundingPriority',
@@ -200,7 +204,7 @@ function SetNumberFormatDigitOptions(
     ['auto', 'morePrecision', 'lessPrecision'],
     'auto',
   );
-  // 11. Let trailingZeroDisplay be ? GetOption(options,
+  // 10. Let trailingZeroDisplay be ? GetOption(options,
   //     "trailingZeroDisplay", string, « "auto", "stripIfInteger" »,
   //     "auto").
   var trailingZeroDisplay = GetOption(
@@ -210,59 +214,66 @@ function SetNumberFormatDigitOptions(
     ['auto', 'stripIfInteger'],
     'auto',
   );
-  // 12. NOTE: All fields required by SetNumberFormatDigitOptions have now
-  //     been read from options. The remainder of this AO interprets the
-  //     options and may throw exceptions.
-  // 13. If roundingIncrement is not 1, set mxfdDefault to mnfdDefault.
-  if (roundingIncrement !== 1) mxfdDefault = mnfdDefault;
+  // 11. NOTE: The remaining steps perform no further interaction with
+  //     options.
+  // 12. If roundingIncrement is not 1, set maxFDDefault to minFDDefault.
+  if (roundingIncrement !== 1) maxFDDefault = minFDDefault;
+  // 13. Set intlObj.[[MinimumIntegerDigits]] to minIntegerDigits.
+  intlObj.minimumIntegerDigits = minIntegerDigits;
   // 14. Set intlObj.[[RoundingIncrement]] to roundingIncrement.
   intlObj.roundingIncrement = roundingIncrement;
   // 15. Set intlObj.[[RoundingMode]] to roundingMode.
   intlObj.roundingMode = roundingMode;
   // 16. Set intlObj.[[TrailingZeroDisplay]] to trailingZeroDisplay.
   intlObj.trailingZeroDisplay = trailingZeroDisplay;
-  // 17. If mnsd is undefined and mxsd is undefined, let hasSd be false.
-  //     Otherwise, let hasSd be true.
-  var hasSd = !(mnsd === undefined && mxsd === undefined);
-  // 18. If mnfd is undefined and mxfd is undefined, let hasFd be false.
-  //     Otherwise, let hasFd be true.
-  var hasFd = !(mnfd === undefined && mxfd === undefined);
-  // 19. Let needSd be true.
-  var needSd = true;
-  // 20. Let needFd be true.
-  var needFd = true;
-  // 21. If roundingPriority is "auto", then
+  // 17. If minSD is undefined and maxSD is undefined, let hasSD be false.
+  //     Otherwise, let hasSD be true.
+  var hasSD = !(minSD === undefined && maxSD === undefined);
+  // 18. If minFD is undefined and maxFD is undefined, let hasFD be false.
+  //     Otherwise, let hasFD be true.
+  var hasFD = !(minFD === undefined && maxFD === undefined);
+  var needSD, needFD;
   if (roundingPriority === 'auto') {
-    // a. Set needSd to hasSd.
-    needSd = hasSd;
-    // b. If needSd is true, or hasFd is false and notation is "compact",
-    //    then
-    //    i. Set needFd to false.
-    if (needSd || (!hasFd && notation === 'compact')) needFd = false;
+    // 19. If roundingPriority is "auto", then
+    //     a. Let needSD be hasSD.
+    needSD = hasSD;
+    //     b. If needSD is true, let needFD be false.
+    //     c. Else if hasFD is false and notation is "compact", let needFD
+    //        be false.
+    //     d. Else, let needFD be true.
+    needFD = !(needSD || (!hasFD && notation === 'compact'));
+  } else {
+    // 20. Else,
+    //     a. Let needSD be true.
+    needSD = true;
+    //     b. Let needFD be true.
+    needFD = true;
   }
-  // 22. If needSd is true, then
-  if (needSd) {
-    if (hasSd) {
-      // a. If hasSd is true, then
-      //    i. Set intlObj.[[MinimumSignificantDigits]] to
-      //       ? DefaultNumberOption(mnsd, 1, 21, 1).
-      intlObj.minimumSignificantDigits = DefaultNumberOption(
-        mnsd,
+  // 21. If needSD is true, then
+  if (needSD) {
+    if (hasSD) {
+      // a. If hasSD is true, then
+      //    i. Let resolvedMinSD be ? DefaultNumberOption(minSD, 1, 21, 1).
+      var resolvedMinSD = DefaultNumberOption(
+        minSD,
         1,
         21,
         1,
         'minimumSignificantDigits',
       );
-      //    ii. Set intlObj.[[MaximumSignificantDigits]] to
-      //        ? DefaultNumberOption(mxsd,
-      //        intlObj.[[MinimumSignificantDigits]], 21, 21).
-      intlObj.maximumSignificantDigits = DefaultNumberOption(
-        mxsd,
-        intlObj.minimumSignificantDigits,
+      //    ii. Let resolvedMaxSD be ? DefaultNumberOption(maxSD,
+      //        resolvedMinSD, 21, 21).
+      var resolvedMaxSD = DefaultNumberOption(
+        maxSD,
+        resolvedMinSD,
         21,
         21,
         'maximumSignificantDigits',
       );
+      //    iii. Set intlObj.[[MinimumSignificantDigits]] to resolvedMinSD.
+      intlObj.minimumSignificantDigits = resolvedMinSD;
+      //    iv. Set intlObj.[[MaximumSignificantDigits]] to resolvedMaxSD.
+      intlObj.maximumSignificantDigits = resolvedMaxSD;
     } else {
       // b. Else,
       //    i. Set intlObj.[[MinimumSignificantDigits]] to 1.
@@ -271,54 +282,57 @@ function SetNumberFormatDigitOptions(
       intlObj.maximumSignificantDigits = 21;
     }
   }
-  // 23. If needFd is true, then
-  if (needFd) {
-    if (hasFd) {
-      // a. If hasFd is true, then
-      //    i. Set mnfd to ? DefaultNumberOption(mnfd, 0, 100, undefined).
-      mnfd = DefaultNumberOption(
-        mnfd,
+  // 22. If needFD is true, then
+  if (needFD) {
+    if (hasFD) {
+      // a. If hasFD is true, then
+      //    i. Let resolvedMinFD be ? DefaultNumberOption(minFD, 0, 100,
+      //       undefined).
+      var resolvedMinFD = DefaultNumberOption(
+        minFD,
         0,
         100,
         undefined,
         'minimumFractionDigits',
       );
-      //    ii. Set mxfd to ? DefaultNumberOption(mxfd, 0, 100, undefined).
-      mxfd = DefaultNumberOption(
-        mxfd,
+      //    ii. Let resolvedMaxFD be ? DefaultNumberOption(maxFD, 0, 100,
+      //        undefined).
+      var resolvedMaxFD = DefaultNumberOption(
+        maxFD,
         0,
         100,
         undefined,
         'maximumFractionDigits',
       );
-      if (mnfd === undefined) {
-        //  iii. If mnfd is undefined, set mnfd to min(mnfdDefault, mxfd).
-        mnfd = MathMin(mnfdDefault, mxfd);
-      } else if (mxfd === undefined) {
-        //  iv. Else if mxfd is undefined, set mxfd to max(mxfdDefault,
-        //      mnfd).
-        mxfd = MathMax(mxfdDefault, mnfd);
-      } else if (mnfd > mxfd) {
-        //  v. Else if mnfd is greater than mxfd, throw a RangeError
+      if (resolvedMinFD === undefined) {
+        //  iii. If resolvedMinFD is undefined, set resolvedMinFD to
+        //       min(minFDDefault, resolvedMaxFD).
+        resolvedMinFD = MathMin(minFDDefault, resolvedMaxFD);
+      } else if (resolvedMaxFD === undefined) {
+        //  iv. Else if resolvedMaxFD is undefined, set resolvedMaxFD to
+        //      max(maxFDDefault, resolvedMinFD).
+        resolvedMaxFD = MathMax(maxFDDefault, resolvedMinFD);
+      } else if (resolvedMinFD > resolvedMaxFD) {
+        //  v. Else if resolvedMinFD > resolvedMaxFD, throw a RangeError
         //     exception.
         throw new _RangeError(
           'minimumFractionDigits is greater than maximumFractionDigits',
         );
       }
-      //    vi. Set intlObj.[[MinimumFractionDigits]] to mnfd.
-      intlObj.minimumFractionDigits = mnfd;
-      //    vii. Set intlObj.[[MaximumFractionDigits]] to mxfd.
-      intlObj.maximumFractionDigits = mxfd;
+      //    vi. Set intlObj.[[MinimumFractionDigits]] to resolvedMinFD.
+      intlObj.minimumFractionDigits = resolvedMinFD;
+      //    vii. Set intlObj.[[MaximumFractionDigits]] to resolvedMaxFD.
+      intlObj.maximumFractionDigits = resolvedMaxFD;
     } else {
       // b. Else,
-      //    i. Set intlObj.[[MinimumFractionDigits]] to mnfdDefault.
-      intlObj.minimumFractionDigits = mnfdDefault;
-      //    ii. Set intlObj.[[MaximumFractionDigits]] to mxfdDefault.
-      intlObj.maximumFractionDigits = mxfdDefault;
+      //    i. Set intlObj.[[MinimumFractionDigits]] to minFDDefault.
+      intlObj.minimumFractionDigits = minFDDefault;
+      //    ii. Set intlObj.[[MaximumFractionDigits]] to maxFDDefault.
+      intlObj.maximumFractionDigits = maxFDDefault;
     }
   }
-  if (!needSd && !needFd) {
-    // 24. If needSd is false and needFd is false, then
+  if (!needSD && !needFD) {
+    // 23. If needSD is false and needFD is false, then
     //     a. Set intlObj.[[MinimumFractionDigits]] to 0.
     intlObj.minimumFractionDigits = 0;
     //     b. Set intlObj.[[MaximumFractionDigits]] to 0.
@@ -332,31 +346,31 @@ function SetNumberFormatDigitOptions(
     //     f. Set intlObj.[[ComputedRoundingPriority]] to "morePrecision".
     intlObj.computedRoundingPriority = 'morePrecision';
   } else if (roundingPriority === 'morePrecision') {
-    // 25. Else if roundingPriority is "morePrecision", then
+    // 24. Else if roundingPriority is "morePrecision", then
     //     a. Set intlObj.[[RoundingType]] to more-precision.
     intlObj.roundingType = 'morePrecision';
     //     b. Set intlObj.[[ComputedRoundingPriority]] to "morePrecision".
     intlObj.computedRoundingPriority = 'morePrecision';
   } else if (roundingPriority === 'lessPrecision') {
-    // 26. Else if roundingPriority is "lessPrecision", then
+    // 25. Else if roundingPriority is "lessPrecision", then
     //     a. Set intlObj.[[RoundingType]] to less-precision.
     intlObj.roundingType = 'lessPrecision';
     //     b. Set intlObj.[[ComputedRoundingPriority]] to "lessPrecision".
     intlObj.computedRoundingPriority = 'lessPrecision';
-  } else if (hasSd) {
-    // 27. Else if hasSd is true, then
+  } else if (hasSD) {
+    // 26. Else if hasSD is true, then
     //     a. Set intlObj.[[RoundingType]] to significant-digits.
     intlObj.roundingType = 'significantDigits';
     //     b. Set intlObj.[[ComputedRoundingPriority]] to "auto".
     intlObj.computedRoundingPriority = 'auto';
   } else {
-    // 28. Else,
+    // 27. Else,
     //     a. Set intlObj.[[RoundingType]] to fraction-digits.
     intlObj.roundingType = 'fractionDigits';
     //     b. Set intlObj.[[ComputedRoundingPriority]] to "auto".
     intlObj.computedRoundingPriority = 'auto';
   }
-  // 29. If roundingIncrement is not 1, then
+  // 28. If roundingIncrement is not 1, then
   if (roundingIncrement !== 1) {
     // a. If intlObj.[[RoundingType]] is not fraction-digits, throw a
     //    TypeError exception.
@@ -371,5 +385,5 @@ function SetNumberFormatDigitOptions(
         'roundingIncrement requires equal minimum and maximum fraction digits',
       );
   }
-  // 30. Return unused.
+  // 29. Return unused.
 }

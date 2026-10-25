@@ -7,13 +7,18 @@
  * @format
  */
 
-// RUN: %hermes %s | %FileCheck --match-full-lines %s
-// RUN: %shermes -exec %s | %FileCheck --match-full-lines %s
+// RUN: %hermes -Xintl-plugin=false %s | %FileCheck --match-full-lines %s
+// RUN: %shermes -exec %s -Wx,-Xintl-plugin=false | %FileCheck --match-full-lines %s
 
 // Regression test: toLocaleString must use ToLength (not ToUint32) for the
 // length property.  ToUint32(2^32) == 0, which incorrectly produces "".
 // ToLength(2^32) == 2^32, which must throw RangeError because it exceeds
 // the JSArray element limit.
+//
+// This tests Hermes's own Array.prototype.toLocaleString, so it runs with
+// the Intl plugin off. The plugin's ECMA-402 version reads the elements
+// of such a length as the spec says, until Hermes's string length limit
+// throws; intl/test/lit/to-locale-string.js tests it.
 
 print('toLocaleString ToLength');
 // CHECK-LABEL: toLocaleString ToLength

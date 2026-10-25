@@ -18,7 +18,9 @@ add_unittest(HermesIntlUnitTests IntlPluginUnitTests
   ${PROJECT_SOURCE_DIR}/intl/jsi/StringHelpers.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/Defaults.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/LocaleHelpers.cpp
-  ${PROJECT_SOURCE_DIR}/intl/jsi/NativeHelpers.cpp)
+  ${PROJECT_SOURCE_DIR}/intl/jsi/NativeHelpers.cpp
+  ${PROJECT_SOURCE_DIR}/intl/jsi/NumberHelpers.cpp
+  ${PROJECT_SOURCE_DIR}/intl/jsi/PluralRulesHelpers.cpp)
 target_include_directories(IntlPluginUnitTests PRIVATE
   ${PROJECT_SOURCE_DIR}/intl/jsi ${PROJECT_SOURCE_DIR}/public
   ${HERMES_JSI_DIR})

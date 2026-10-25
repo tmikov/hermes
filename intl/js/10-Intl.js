@@ -12,6 +12,11 @@
 // %Object.prototype%.
 var IntlObject = {};
 
+/// %Intl%.[[FallbackSymbol]] (ECMA-402 8, "The Intl Object"):
+/// the one Symbol("IntlLegacyConstructedSymbol") that ChainNumberFormat and
+/// UnwrapNumberFormat use (decision 18); created by installIntl.
+var IntlFallbackSymbol;
+
 /// The unit identifiers of ECMA-402 "Table 2: Single units sanctioned for
 /// use in ECMAScript", sorted by code unit, without duplicates.
 var SANCTIONED_UNITS = [
@@ -64,7 +69,10 @@ function splitSpaces(s) {
 
 /// Install Intl on the global object; called once by setup.
 function installIntl() {
-  // 1. ECMA-402 8.3: the function properties of Intl, with the shape the
+  // 1. Let %Intl%.[[FallbackSymbol]] be a new Symbol whose [[Description]]
+  //    is "IntlLegacyConstructedSymbol".
+  IntlFallbackSymbol = _Symbol('IntlLegacyConstructedSymbol');
+  // 2. ECMA-402 8.3: the function properties of Intl, with the shape the
   //    design spec "Function shapes" gives static methods.
   defineMethods(IntlObject, {
     // 8.3.1 Intl.getCanonicalLocales ( locales )
@@ -122,14 +130,17 @@ function installIntl() {
       return CreateArrayFromList(list);
     },
   });
-  // 2. ECMA-402 8.2: the constructor properties of Intl.
+  // 3. ECMA-402 8.2: the constructor properties of Intl, in the draft's
+  //    order.
   installCollator(IntlObject);
   installLocale(IntlObject);
-  // 3. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
+  installNumberFormat(IntlObject);
+  installPluralRules(IntlObject);
+  // 4. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
   //    "Intl", { [[Writable]]: false, [[Enumerable]]: false,
   //    [[Configurable]]: true }.
   setToStringTag(IntlObject, 'Intl');
-  // 4. ECMA-402 8: Intl is the initial value of the "Intl" property of the
+  // 5. ECMA-402 8: Intl is the initial value of the "Intl" property of the
   //    global object. ECMA-262 18 gives such data properties the attributes
   //    { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }.
   ObjectDefineProperty(global, 'Intl', {

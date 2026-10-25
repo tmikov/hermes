@@ -135,9 +135,15 @@ name = "hermes_intl_core"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "fixed_decimal",
  "icu",
+ "icu_decimal",
+ "icu_experimental",
  "icu_locale_core",
+ "icu_pattern",
+ "icu_plurals",
  "icu_provider",
+ "zerovec",
 ]
 
 [[package]]

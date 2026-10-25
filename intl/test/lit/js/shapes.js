@@ -119,3 +119,21 @@ var px = new Proxy({}, {});
 new FooSlots(px, 9);
 print(FooSlots.has(px), FooSlots.get(px));
 // CHECK-NEXT: true 9
+
+// listSet replaces an element in place, as a data property, so no setter on
+// Array.prototype runs, even for an index the list does not have as its own.
+var setterCalls = 0;
+Object.defineProperty(Array.prototype, '0', {
+  set(v) { setterCalls++; },
+  configurable: true,
+});
+var sl = [];
+listPush(sl, 'a');
+listPush(sl, 'b');
+listSet(sl, 1, 'c');
+var holey = [];
+holey.length = 1;
+listSet(holey, 0, 'h');
+delete Array.prototype[0];
+print(sl.join(), sl.length, holey[0], Object.hasOwn(holey, 0), setterCalls);
+// CHECK-NEXT: a,c 2 h true 0

@@ -6,7 +6,13 @@
 
 """Regenerate the CLDR-derived data files from CLDR: currencies.txt,
 numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt,
-time-zones-by-region.txt and extension-value-aliases.txt.
+time-zones-by-region.txt, extension-value-aliases.txt, number-symbols.txt,
+units.txt, currency-symbols.txt, explicit-number-systems.txt and
+compact-currency.txt. The number data files come from the CLDR JSON npm
+packages cldr-core, cldr-numbers-full and cldr-units-full, which hold
+resolved locale data, and explicit-number-systems.txt from
+common/main/*.xml, for the explicit data of numbering systems that cldr-json
+leaves out; compact-currency.txt from both.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
 the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
@@ -16,6 +22,8 @@ import json
 import os
 import re
 import sys
+import tarfile
+import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -23,6 +31,8 @@ BASE = "https://raw.githubusercontent.com/unicode-org/cldr/{tag}/common/{path}"
 LISTING = (
     "https://api.github.com/repos/unicode-org/cldr/contents/common/{path}?ref={tag}"
 )
+NPM_TARBALL = "https://registry.npmjs.org/{package}/-/{package}-{version}.tgz"
+PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-units-full"]
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -222,6 +232,1199 @@ def write_value_aliases(name, tag, table):
             f.write(f"{ext} {key} {alias} {value}\n")
 
 
+def npm_version(tag):
+    """The npm version of the CLDR JSON packages for a release tag:
+    release-48-2 is 48.2.0."""
+    m = re.fullmatch(r"release-(\d+)(?:-(\d+))?(?:-(\d+))?", tag)
+    if not m:
+        sys.exit(f"cannot derive an npm version from the tag {tag!r}")
+    return ".".join(g or "0" for g in m.groups())
+
+
+def download_packages(version, dest):
+    """Download and unpack the CLDR JSON packages at `version` under `dest`,
+    each in `<dest>/<package>/package`."""
+    for package in PACKAGES:
+        url = NPM_TARBALL.format(package=package, version=version)
+        out = os.path.join(dest, package)
+        os.makedirs(out)
+        with urllib.request.urlopen(url) as r, tempfile.TemporaryFile() as tmp:
+            tmp.write(r.read())
+            tmp.seek(0)
+            with tarfile.open(fileobj=tmp, mode="r:gz") as tar:
+                if hasattr(tarfile, "data_filter"):
+                    tar.extractall(out, filter="data")
+                else:
+                    tar.extractall(out)
+
+
+class Tree:
+    """Unpacked CLDR JSON packages, as download_packages lays them out."""
+
+    def __init__(self, root):
+        self.root = root
+
+    def load(self, package, *parts):
+        """The parsed JSON file `parts` of `package`, or None if missing."""
+        path = os.path.join(self.root, package, "package", *parts)
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def locale_dirs(self, package):
+        path = os.path.join(self.root, package, "package", "main")
+        return set(os.listdir(path)) if os.path.isdir(path) else set()
+
+    def parent_locales(self):
+        j = self.load("cldr-core", "supplemental", "parentLocales.json")
+        return j["supplemental"]["parentLocales"]["parentLocale"]
+
+    def likely_subtags(self):
+        j = self.load("cldr-core", "supplemental", "likelySubtags.json")
+        return j["supplemental"]["likelySubtags"]
+
+
+def sanctioned_units(js):
+    """The unit names of `var SANCTIONED_UNITS = [...]` in the source of
+    intl/js/10-Intl.js, the one list of the sanctioned units."""
+    m = re.search(r"var SANCTIONED_UNITS = \[(.*?)\];", js, re.S)
+    if not m:
+        sys.exit("SANCTIONED_UNITS not found")
+    return re.findall(r"'([a-z-]+)'", m.group(1))
+
+
+def check_value(value, what):
+    """Exit unless `value` is a string with no tab and no newline: the data
+    files are split on both."""
+    if not isinstance(value, str):
+        sys.exit(f"{what}: not a string: {value!r}")
+    if "\t" in value:
+        sys.exit(f"{what}: value contains a tab: {value!r}")
+    if "\n" in value or "\r" in value:
+        sys.exit(f"{what}: value contains a newline: {value!r}")
+    return value
+
+
+def resolve_locale_dirs(tree, tags):
+    """Map each tag to the directory of cldr-*-full/main that holds its
+    data. A tag with no directory is looked up with the script that
+    likelySubtags gives inserted (zh-HK is zh-Hant-HK; for a tag with no
+    entry, the script of its language); exit if that is missing too."""
+    have = tree.locale_dirs("cldr-numbers-full") & tree.locale_dirs(
+        "cldr-units-full"
+    )
+    likely = tree.likely_subtags()
+    dirs = {}
+    for tag in tags:
+        if tag in have:
+            dirs[tag] = tag
+            continue
+        subtags = tag.split("-")
+        # The tag's own entry (zh-HK), else its language's (zh-MY gets the
+        # script of zh).
+        full = likely.get(tag, likely.get(subtags[0], "")).split("-")
+        script = next(
+            (t for t in full[1:] if len(t) == 4 and t.isalpha()), None
+        )
+        if script is None or (len(subtags) > 1 and len(subtags[1]) == 4):
+            sys.exit(f"no CLDR data for locale {tag}")
+        resolved = "-".join([subtags[0], script] + subtags[1:])
+        if resolved not in have:
+            sys.exit(f"no CLDR data for locale {tag} (tried {resolved})")
+        dirs[tag] = resolved
+    return dirs
+
+
+def number_symbols_lines(tree, tags):
+    """The data lines of number-symbols.txt, one per locale of `tags` (and
+    und) and numbering system with symbols:
+    <locale> <nu> <percentSign> <exponential> <infinity> <nan>
+    <approximatelySign> <percentPattern> <rangePattern> <currencyDecimal>
+    <currencyGroup>, tab-separated; the last two are empty where the locale
+    has no currency separators of its own."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    lines = []
+    for tag in tags:
+        d = dirs[tag]
+        j = tree.load("cldr-numbers-full", "main", d, "numbers.json")
+        n = j["main"][d]["numbers"]
+        for key in sorted(n):
+            if not key.startswith("symbols-numberSystem-"):
+                continue
+            nu = key[len("symbols-numberSystem-") :]
+            sym = n[key]
+            try:
+                fields = [
+                    tag,
+                    nu,
+                    sym["percentSign"],
+                    sym["exponential"],
+                    sym["infinity"],
+                    sym["nan"],
+                    sym["approximatelySign"],
+                    n[f"percentFormats-numberSystem-{nu}"]["standard"],
+                    n[f"miscPatterns-numberSystem-{nu}"]["range"],
+                    # The separators of currency formats, where they differ
+                    # from the decimal and group ones (de-AT, fr-CH).
+                    sym.get("currencyDecimal", ""),
+                    sym.get("currencyGroup", ""),
+                ]
+            except KeyError as e:
+                sys.exit(f"{tag} {nu}: missing {e}")
+            for f in fields:
+                check_value(f, f"number-symbols {tag} {nu}")
+            lines.append("\t".join(fields))
+    return lines
+
+
+WIDTHS = ["long", "short", "narrow"]
+PLURAL_KEYS = ["zero", "one", "two", "few", "many", "other"]
+UNIT_KEYS = PLURAL_KEYS + ["per"]
+
+
+def keep_unit(name, sanctioned):
+    """Whether a unit (a CLDR key without its category) is a sanctioned unit
+    or a dedicated compound unit of two sanctioned halves."""
+    if name in sanctioned:
+        return True
+    halves = name.split("-per-")
+    return len(halves) == 2 and all(h in sanctioned for h in halves)
+
+
+def locale_unit_entries(units, sanctioned, tag):
+    """The kept patterns of one locale's `units` object as a dict from
+    (width, unit, key) to the pattern; unit is "-" for the width's compound
+    pattern."""
+    out = {}
+
+    def put(width, unit, key, value):
+        value = check_value(value, f"units {tag} {width} {unit} {key}")
+        if (width, unit, key) in out:
+            sys.exit(f"units {tag}: duplicate {width} {unit} {key}")
+        out[(width, unit, key)] = value
+
+    for width in WIDTHS:
+        for ckey, body in units[width].items():
+            if ckey == "per":
+                put(width, "-", "per", body["compoundUnitPattern"])
+                continue
+            if "-" not in ckey:
+                continue
+            # The key is <category>-<unit>.
+            name = ckey.split("-", 1)[1]
+            if not keep_unit(name, sanctioned):
+                continue
+            for k, v in body.items():
+                if k == "perUnitPattern":
+                    put(width, name, "per", v)
+                elif k.startswith("unitPattern-count-"):
+                    cat = k[len("unitPattern-count-") :]
+                    if cat in PLURAL_KEYS:
+                        put(width, name, cat, v)
+    return out
+
+
+def cldr_parent(parent_entries, c):
+    """The CLDR parent of the locale id `c`: its parentLocales entry, else
+    `c` truncated, else und; None for und."""
+    if c == "und":
+        return None
+    p = parent_entries.get(c)
+    if p == "root":
+        return "und"
+    if p is not None:
+        return p
+    return c.rsplit("-", 1)[0] if "-" in c else "und"
+
+
+def file_parents(tree, tags, dirs):
+    """The parent of each tag of `tags` (with und) in a file that lists each
+    locale's entries that differ from its parent's: the nearest tag on its
+    CLDR parent chain (parentLocales, else truncation) that is also in the
+    file, and "-" for und. Returns (parents, the tags sorted so that each
+    comes after its parent). `dirs` is resolve_locale_dirs's map."""
+    by_dir = {d: t for t, d in dirs.items()}
+    parent_entries = tree.parent_locales()
+
+    def next_candidate(c):
+        return cldr_parent(parent_entries, c)
+
+    def file_parent(tag):
+        if tag == "und":
+            return "-"
+        c = next_candidate(dirs[tag])
+        while c is not None:
+            if c in by_dir and by_dir[c] != tag:
+                return by_dir[c]
+            c = next_candidate(c)
+        sys.exit(f"no parent for {tag}")
+
+    parents = {t: file_parent(t) for t in dirs}
+
+    def depth(t):
+        return 0 if parents[t] == "-" else 1 + depth(parents[t])
+
+    return parents, sorted(dirs, key=lambda t: (depth(t), t))
+
+
+def units_lines(tree, tags, sanctioned):
+    """The lines of units.txt after the comments: the string table, then
+    each locale with only the entries that differ from its parent chain.
+    `sanctioned` is a collection of unit names."""
+    sanctioned = set(sanctioned)
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    parents, ordered = file_parents(tree, tags, dirs)
+    resolved = {}
+    own = {}
+    effective = {}
+    for tag in ordered:
+        d = dirs[tag]
+        j = tree.load("cldr-units-full", "main", d, "units.json")
+        resolved[tag] = locale_unit_entries(
+            j["main"][d]["units"], sanctioned, tag
+        )
+        base = {} if parents[tag] == "-" else effective[parents[tag]]
+        own[tag] = {k: v for k, v in resolved[tag].items() if base.get(k) != v}
+        effective[tag] = {**base, **own[tag]}
+        if effective[tag] != resolved[tag]:
+            missing = sorted(set(effective[tag]) - set(resolved[tag]))
+            sys.exit(
+                f"units {tag}: parent chain has entries it lacks: {missing[:3]}"
+            )
+
+    strings = sorted({v for t in tags for v in own[t].values()})
+    index = {s: i for i, s in enumerate(strings)}
+    lines = [f"strings {len(strings)}"] + strings
+    for tag in ordered:
+        lines.append(f"locale {tag} {parents[tag]}")
+        grouped = {}
+        for (width, unit, key), v in own[tag].items():
+            grouped.setdefault((width, unit), {})[key] = index[v]
+        for width, unit in sorted(
+            grouped, key=lambda wu: (WIDTHS.index(wu[0]), wu[1] != "-", wu[1])
+        ):
+            keys = grouped[(width, unit)]
+            kv = " ".join(f"{k}={keys[k]}" for k in UNIT_KEYS if k in keys)
+            lines.append(f"{width} {unit} {kv}")
+    return lines
+
+
+# The currency spacing that intl/core/src/number.rs implements: U+00A0
+# between a digit and a currency string whose character next to it is
+# neither a symbol (S) nor a separator (Z). CLDR 48.2's root has it, and no
+# locale overrides it; check_currency_spacing checks that it stays so.
+CURRENCY_SPACING_SIDE = {
+    "currencyMatch": "[[:^S:]&[:^Z:]]",
+    "surroundingMatch": "[:digit:]",
+    "insertBetween": "\u00a0",
+}
+CURRENCY_SPACING = {
+    "beforeCurrency": CURRENCY_SPACING_SIDE,
+    "afterCurrency": CURRENCY_SPACING_SIDE,
+}
+
+
+def check_currency_spacing(tree, tags):
+    """Exit unless root's currency spacing is CURRENCY_SPACING and every
+    locale of `tags`, in every numbering system, has root's."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    for tag in tags:
+        d = dirs[tag]
+        n = tree.load("cldr-numbers-full", "main", d, "numbers.json")
+        for key, formats in n["main"][d]["numbers"].items():
+            if not key.startswith("currencyFormats-numberSystem-"):
+                continue
+            if formats.get("currencySpacing") != CURRENCY_SPACING:
+                sys.exit(
+                    f"{tag} {key}: currencySpacing differs from root's "
+                    "rule, which number.rs implements"
+                )
+
+
+# The number part a per-currency pattern may have: number.rs takes the
+# grouping and fraction digits from the locale and the currency, and the
+# pattern only for the currency's place and its spacing.
+CURRENCY_PATTERN_NUMBER = "#,##0.00"
+
+
+def check_currency_pattern(pattern, what):
+    """Exit unless `pattern`, a per-currency pattern (<currency><pattern>),
+    is CURRENCY_PATTERN_NUMBER with one currency sign before or after it and
+    only white space between them, and no negative subpattern."""
+    check_value(pattern, what)
+    for p in ("¤" + CURRENCY_PATTERN_NUMBER, CURRENCY_PATTERN_NUMBER + "¤"):
+        core = pattern.replace("\u00a0", "").replace(" ", "")
+        if core == p:
+            return pattern
+    sys.exit(f"{what}: unhandled per-currency pattern {pattern!r}")
+
+
+def locale_currency_symbols(currencies, tag):
+    """A locale's resolved currency data from its currencies.json, as
+    {code: (symbol, narrow, pattern, decimal, group)}: the symbols with
+    CLDR's fallbacks applied (a currency with no symbol uses its code, and
+    one with no narrow symbol its symbol), and the currency's own pattern
+    and decimal and grouping separators (<currency><pattern>, <decimal> and
+    <group>), "" where it has none."""
+    out = {}
+    for code, body in currencies.items():
+        if not re.fullmatch(r"[A-Z]{3}", code):
+            sys.exit(f"currencies {tag}: bad currency code {code!r}")
+        what = f"currencies {tag} {code}"
+        symbol = body.get("symbol", code)
+        narrow = body.get("symbol-alt-narrow", symbol)
+        for v in (symbol, narrow):
+            check_value(v, what)
+            if not v:
+                sys.exit(f"{what}: empty symbol")
+        pattern = body.get("pattern", "")
+        if pattern:
+            check_currency_pattern(pattern, what)
+        decimal = check_value(body.get("decimal", ""), what)
+        group = check_value(body.get("group", ""), what)
+        out[code] = (symbol, narrow, pattern, decimal, group)
+    return out
+
+
+def xml_currency_formats(root, what):
+    """The per-currency formats a locale's XML has explicitly: {code:
+    (pattern, decimal, group)}, "" for a field it does not have (absent,
+    inherited or of an excluded draft level)."""
+    out = {}
+    numbers = root.find("numbers") if root is not None else None
+    for c in numbers.findall("currencies/currency") if numbers is not None else []:
+        code = c.get("type")
+        fields = []
+        for k in ("pattern", "decimal", "group"):
+            el = next(
+                (e for e in c.findall(k) if e.get("alt") is None and e.get("count") is None),
+                None,
+            )
+            fields.append(xml_value(el, f"{what} {code} {k}"))
+        if fields[0]:
+            check_currency_pattern(fields[0], f"{what} {code}")
+        if any(fields):
+            out[code] = tuple(fields)
+    return out
+
+
+def xml_lateral_sources(root, what):
+    """The values of a locale's XML that per-currency formats inherit
+    laterally from (tr35.md, "Lateral Inheritance"): ("pattern", nu, type)
+    for a currencyFormat pattern of type "standard" or "accounting" (its
+    plain pattern, or an alias), and ("decimal", nu, "-") and ("group", nu,
+    "-") for symbols, where the locale has them explicitly."""
+    out = set()
+    numbers = root.find("numbers") if root is not None else None
+    if numbers is None:
+        return out
+    for el in numbers.findall("symbols"):
+        nu = el.get("numberSystem")
+        for k in ("decimal", "group"):
+            e = next((x for x in el.findall(k) if x.get("alt") is None), None)
+            if xml_value(e, what):
+                out.add((k, nu, "-"))
+    for el in numbers.findall("currencyFormats"):
+        nu = el.get("numberSystem")
+        for length in el.findall("currencyFormatLength"):
+            if length.get("type") is not None:
+                continue
+            for fmt in length.findall("currencyFormat"):
+                kind = fmt.get("type")
+                if kind not in ("standard", "accounting"):
+                    continue
+                if fmt.find("alias") is not None or xml_pattern(fmt, None, what):
+                    out.add(("pattern", nu, kind))
+    return out
+
+
+# The fields of a per-currency format, in the order of currency-symbols.txt.
+CURRENCY_FORMAT_FIELDS = ["pattern", "decimal", "group"]
+
+
+def currency_symbols_lines(tree, tags, load_xml):
+    """The lines of currency-symbols.txt after the comments: for each
+    locale of `tags` (and und), in the order of file_parents, a line
+    'locale\t<tag>\t<parent>', then one line '<code>\t<symbol>\t<narrow>'
+    per currency whose symbol or narrow symbol differs from what the parent
+    chain gives (cldr-json, resolved), with an empty field for one that does
+    not, followed by '\t<pattern>\t<decimal>\t<group>' where the locale's
+    XML (`load_xml` returns common/main files by name) has its own format
+    for the currency, and then 'lateral\t<field>\t<nu>\t<type>' for each
+    value of the locale's XML that a per-currency field inherits laterally
+    from (xml_lateral_sources), where a parent of the locale has
+    per-currency formats. A currency no locale of the chain lists uses its
+    code for both symbols.
+
+    A per-currency field is resolved as UTS 35's lateral inheritance says
+    (tr35.md, "Lateral Inheritance"; tr35-numbers.md, "Currencies"): at each
+    locale of the chain, the currency's own value, else the locale's own
+    lateral source for the numbering system (and for a pattern, standard or
+    accounting) ends the search with none; then the parent. cldr-json
+    resolves these fields vertically only, so the XML is read. Exit unless
+    reading the file back gives every locale's symbols and, for latn, deva,
+    arab, arabext and the numbering systems of the lateral sources, its
+    per-currency fields; and exit if a locale of a chain that is not in
+    `tags` has per-currency formats or lateral sources, which the file
+    could not hold."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    parents, ordered = file_parents(tree, tags, dirs)
+    parent_entries = tree.parent_locales()
+    by_dir = {d: t for t, d in dirs.items()}
+    resolved = {}
+    formats = {}
+    laterals = {}
+    xml_of = {}
+
+    def xml_data(cid):
+        if cid not in xml_of:
+            root = load_xml(xml_file_name(cid))
+            xml_of[cid] = (
+                xml_currency_formats(root, cid),
+                xml_lateral_sources(root, cid),
+            )
+        return xml_of[cid]
+
+    for tag in ordered:
+        d = dirs[tag]
+        j = tree.load("cldr-numbers-full", "main", d, "currencies.json")
+        resolved[tag] = {
+            code: v[:2]
+            for code, v in locale_currency_symbols(
+                j["main"][d]["numbers"]["currencies"], tag
+            ).items()
+        }
+        formats[tag], laterals[tag] = xml_data(d)
+
+    # The CLDR chain of each locale, which the file must hold.
+    def cldr_chain(tag):
+        out = []
+        c = dirs[tag]
+        while c is not None:
+            out.append(c)
+            c = cldr_parent(parent_entries, c)
+        return out
+
+    for tag in ordered:
+        for cid in cldr_chain(tag):
+            if cid not in by_dir and any(xml_data(cid)):
+                sys.exit(
+                    f"currencies {tag}: {cid} has per-currency formats or "
+                    "their lateral sources, and is not in locales.txt"
+                )
+
+    def lookup(tag, code, field):
+        while tag != "-":
+            v = own[tag].get(code, ("", ""))[field]
+            if v:
+                return v
+            tag = parents[tag]
+        return code
+
+    def ancestors_have_formats(tag):
+        t = parents[tag]
+        while t != "-":
+            if formats[t]:
+                return True
+            t = parents[t]
+        return False
+
+    own = {}
+    written_lateral = {}
+    lines = []
+    for tag in ordered:
+        p = parents[tag]
+        own[tag] = {}
+        written_lateral[tag] = set()
+        for code, values in sorted(resolved[tag].items()):
+            fields = tuple(
+                "" if values[i] == lookup(p, code, i) else values[i] for i in range(2)
+            )
+            if any(fields):
+                own[tag][code] = fields
+        lines.append(f"locale\t{tag}\t{p}")
+        for code in sorted(set(own[tag]) | set(formats[tag])):
+            symbols = own[tag].get(code, ("", ""))
+            if code in formats[tag]:
+                lines.append("\t".join((code,) + symbols + formats[tag][code]))
+            else:
+                lines.append("\t".join((code,) + symbols))
+        if ancestors_have_formats(tag):
+            for field, nu, kind in sorted(laterals[tag]):
+                lines.append(f"lateral\t{field}\t{nu}\t{kind}")
+                written_lateral[tag].add((field, nu, kind))
+        # The file must give back the locale's resolved symbols, and the code
+        # for every currency the locale does not list.
+        codes = {c for t in own for c in own[t]} | set(resolved[tag])
+        for code in codes:
+            want = resolved[tag].get(code, (code, code))
+            got = tuple(lookup(tag, code, i) for i in range(2))
+            if got != want:
+                sys.exit(
+                    f"currencies {tag} {code}: the parent chain gives {got}, "
+                    f"CLDR has {want}"
+                )
+
+    # The per-currency fields read back as number.rs reads them, against
+    # lateral inheritance over the XML of the CLDR chain.
+    def from_file(tag, code, f, nu, kind):
+        t = tag
+        while t != "-":
+            v = formats[t].get(code, ("", "", ""))[f]
+            if v:
+                return v
+            if (CURRENCY_FORMAT_FIELDS[f], nu, kind) in written_lateral[t]:
+                return ""
+            t = parents[t]
+        return ""
+
+    def from_xml(tag, code, f, nu, kind):
+        for cid in cldr_chain(tag):
+            fmts, lat = xml_data(cid)
+            v = fmts.get(code, ("", "", ""))[f]
+            if v:
+                return v
+            if (CURRENCY_FORMAT_FIELDS[f], nu, kind) in lat:
+                return ""
+        return ""
+
+    all_codes = {c for t in formats.values() for c in t}
+    nus = {"latn", "deva", "arab", "arabext"} | {
+        nu for lat in laterals.values() for _, nu, _ in lat
+    }
+    for tag in ordered:
+        for code in all_codes:
+            for f, field in enumerate(CURRENCY_FORMAT_FIELDS):
+                kinds = ("standard", "accounting") if field == "pattern" else ("-",)
+                for nu in nus:
+                    for kind in kinds:
+                        want = from_xml(tag, code, f, nu, kind)
+                        if from_file(tag, code, f, nu, kind) != want:
+                            sys.exit(
+                                f"currencies {tag} {code} {field} {nu} {kind}: "
+                                f"the file does not give {want!r}"
+                            )
+    return lines
+
+
+def write_lines(name, tag, comment, lines):
+    with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+        f.write(f"# {comment}\n")
+        f.write(f"# Generated by update-cldr-lists.py from CLDR {tag}.\n")
+        for line in lines:
+            f.write(line + "\n")
+
+
+# The symbols of explicit-number-systems.txt, in the order of its lines.
+EXPLICIT_SYMBOLS = [
+    "decimal",
+    "group",
+    "minusSign",
+    "plusSign",
+    "percentSign",
+    "exponential",
+    "infinity",
+    "nan",
+    "approximatelySign",
+]
+# CLDR's marker for a value inherited from the parent locale.
+INHERITANCE_MARKER = "\u2191\u2191\u2191"
+# Draft levels that neither cldr-json nor ICU include.
+EXCLUDED_DRAFTS = ("unconfirmed", "provisional")
+# The accounting field of a currency line whose accounting pattern aliases
+# to the standard one, which is then the resolved standard pattern.
+ACCOUNTING_IS_STANDARD = "=standard"
+
+
+def xml_value(el, what):
+    """The text of the XML element `el`, or "" if it is missing, the
+    inheritance marker, or of a draft level that neither cldr-json nor ICU
+    includes."""
+    if el is None or el.get("draft") in EXCLUDED_DRAFTS:
+        return ""
+    text = el.text or ""
+    if text == INHERITANCE_MARKER:
+        return ""
+    return check_value(text, what)
+
+
+def xml_pattern(fmt, alt, what):
+    """The pattern of the percentFormat or currencyFormat element `fmt`
+    with the attribute alt=`alt` (None for none), or ""."""
+    if fmt is None:
+        return ""
+    for p in fmt.findall("pattern"):
+        if p.get("alt") == alt and p.get("count") is None:
+            return xml_value(p, what)
+    return ""
+
+
+def explicit_entries(numbers, provided, is_root, where):
+    """The explicit entries of one locale's <numbers> element, for the
+    numbering systems other than latn that are not in `provided` (the ones
+    cldr-json has for the locale): lines 'symbols <nu> <the EXPLICIT_SYMBOLS
+    values>', 'percent <nu> <pattern>', 'range <nu> <pattern>' and
+    'currency <nu> <standard> <standardAlpha> <accounting> <accountingAlpha>'
+    (the alternates are the alphaNextToNumber patterns), with an empty field
+    for a value the locale does not have. A symbol's alt variants are
+    skipped. Exit on an alias outside root, on root's explicit
+    decimalFormats, and on currencyDecimal or currencyGroup. The other kinds
+    (a locale's decimalFormats, scientificFormats, rationalFormats, and
+    miscPatterns other than range) are not read: number.rs takes the
+    grouping and compact patterns of such numbering systems from latn. The
+    short currency formats are compact-currency.txt's
+    (compact_currency_lines)."""
+    lines = []
+    for el in numbers if numbers is not None else []:
+        nu = el.get("numberSystem")
+        if nu is None or nu == "latn" or nu in provided:
+            continue
+        what = f"{where} {el.tag} {nu}"
+        alias = el.find("alias")
+        if alias is not None:
+            if not is_root:
+                sys.exit(f"{what}: an alias outside root")
+            continue
+        if el.tag == "decimalFormats" and is_root:
+            sys.exit(f"{what}: root's grouping comes from latn in number.rs")
+        if el.tag == "symbols":
+            for k in ("currencyDecimal", "currencyGroup"):
+                if xml_value(el.find(k), what):
+                    sys.exit(f"{what}: {k} of such a numbering system is not handled")
+            # A symbol's alt variants (en_ZA's latn decimal alt="us") are not
+            # the symbol.
+            values = [
+                xml_value(
+                    next((e for e in el.findall(k) if e.get("alt") is None), None),
+                    f"{what} {k}",
+                )
+                for k in EXPLICIT_SYMBOLS
+            ]
+            if any(values):
+                lines.append("\t".join(["symbols", nu] + values))
+        elif el.tag == "percentFormats":
+            fmt = el.find("percentFormatLength/percentFormat")
+            pattern = xml_pattern(fmt, None, what)
+            if pattern:
+                lines.append(f"percent\t{nu}\t{pattern}")
+        elif el.tag == "miscPatterns":
+            ranges = [p for p in el.findall("pattern") if p.get("type") == "range"]
+            pattern = xml_value(ranges[0], what) if ranges else ""
+            if pattern:
+                lines.append(f"range\t{nu}\t{pattern}")
+        elif el.tag == "currencyFormats":
+            lengths = el.findall("currencyFormatLength")
+            main = [l for l in lengths if l.get("type") is None]
+            fmts = {}
+            for l in main:
+                for fmt in l.findall("currencyFormat"):
+                    fmts[fmt.get("type")] = fmt
+            standard = fmts.get("standard")
+            accounting = fmts.get("accounting")
+            fields = [
+                xml_pattern(standard, None, what),
+                xml_pattern(standard, "alphaNextToNumber", what),
+            ]
+            acc_alias = accounting.find("alias") if accounting is not None else None
+            if acc_alias is not None:
+                if acc_alias.get("path") != "../currencyFormat[@type='standard']":
+                    sys.exit(f"{what}: unexpected accounting alias")
+                fields += [ACCOUNTING_IS_STANDARD, ""]
+            else:
+                fields += [
+                    xml_pattern(accounting, None, what),
+                    xml_pattern(accounting, "alphaNextToNumber", what),
+                ]
+            if any(fields):
+                lines.append("\t".join(["currency", nu] + fields))
+    return lines
+
+
+def xml_file_name(locale_id):
+    """The common/main file name of a CLDR locale id: root for und, and
+    underscores, with variants uppercase (be-tarask is be_TARASK)."""
+    if locale_id == "und":
+        return "root"
+    parts = locale_id.split("-")
+    out = [parts[0]]
+    for p in parts[1:]:
+        variant = len(p) >= 5 or (len(p) == 4 and p[0].isdigit())
+        out.append(p.upper() if variant else p)
+    return "_".join(out)
+
+
+def explicit_number_systems_lines(tree, tags, load_xml):
+    """The lines of explicit-number-systems.txt after the comments: for
+    every locale of `tags` (and und) and every locale of their CLDR parent
+    chains, a line 'locale <tag> <parent>' (a tag of `tags` for a locale
+    that has one, else the CLDR id; the parent "-" for und), then
+    explicit_entries for its common/main XML file, which `load_xml` returns
+    as an element tree given the file's name. These are the explicit data
+    for numbering systems that cldr-json (and ICU4X) leave out: the ones
+    outside a locale's default and other numbering systems."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    by_dir = {d: t for t, d in dirs.items()}
+    parent_entries = tree.parent_locales()
+    ids = set()
+    for d in dirs.values():
+        while d is not None:
+            ids.add(d)
+            d = cldr_parent(parent_entries, d)
+
+    def key(i):
+        return by_dir.get(i, i)
+
+    def depth(i):
+        p = cldr_parent(parent_entries, i)
+        return 0 if p is None else 1 + depth(p)
+
+    lines = []
+    for i in sorted(ids, key=lambda i: (depth(i), key(i))):
+        parent = cldr_parent(parent_entries, i)
+        lines.append(f"locale\t{key(i)}\t{'-' if parent is None else key(parent)}")
+        j = tree.load("cldr-numbers-full", "main", i, "numbers.json")
+        provided = set()
+        if j is not None:
+            provided = {
+                k[len("symbols-numberSystem-") :]
+                for k in j["main"][i]["numbers"]
+                if k.startswith("symbols-numberSystem-")
+            }
+        if i == "und":
+            # cldr-json's und has latn only; root's explicit data for the
+            # other numbering systems is what this file is for.
+            provided = set()
+        root = load_xml(xml_file_name(i))
+        lines += explicit_entries(root.find("numbers"), provided, i == "und", i)
+    return lines
+
+
+# A key of cldr-json's short currency formats: the magnitude 10^n as "1"
+# and n zeros, the plural count, and the alphaNextToNumber alternate.
+SHORT_CURRENCY_KEY = re.compile(
+    r"1(0+)-count-(zero|one|two|few|many|other)(-alt-alphaNextToNumber)?"
+)
+
+
+def short_currency_shape(pattern, what):
+    """The pattern `pattern` of a short currency format, checked and
+    normalized: (text, zeros), where text is the positive subpattern with its
+    run of `0` digits replaced by one `0`, and zeros the length of the run;
+    ("0", 0) for the pattern "0", which has no compact form. Exit unless the
+    positive subpattern has one run of `0`, no other number pattern syntax
+    outside quotes (#, @, %, ‰, a sign, or a separator next to the digits;
+    other letters are text, as hu's "0 E ¤" is), and one currency sign at
+    either end, with only
+    bidi marks and white space beyond it (number.rs splits the pattern
+    there). An explicit negative subpattern (sw's "¤ elfu -0") is dropped:
+    the sign goes outside the compact text (Task 8's ruling)."""
+    check_value(pattern, what)
+    if pattern == "0":
+        return "0", 0
+    quoted = False
+    end = len(pattern)
+    runs = []
+    signs = []
+    for i, c in enumerate(pattern):
+        if c == "'":
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif c == ";":
+            end = i
+            break
+        elif c == "0":
+            if runs and runs[-1][1] == i:
+                runs[-1][1] = i + 1
+            else:
+                runs.append([i, i + 1])
+        elif c == "¤":
+            signs.append(i)
+        elif c in "#@%‰+-":
+            sys.exit(f"{what}: number pattern syntax {c!r} in {pattern!r}")
+        elif c in ".," and (pattern[i - 1 : i] == "0" or pattern[i + 1 : i + 2] == "0"):
+            sys.exit(f"{what}: a separator next to the digits in {pattern!r}")
+    if len(runs) != 1 or len(signs) != 1:
+        sys.exit(f"{what}: not one digit run and one currency sign: {pattern!r}")
+    (start, stop), sign = runs[0], signs[0]
+    beyond = pattern[:sign] if sign < start else pattern[sign + 1 : end]
+    if beyond.strip(" \u00a0\u202f\u200e\u200f\u061c") != "":
+        sys.exit(f"{what}: text beyond the currency sign: {pattern!r}")
+    return pattern[:start] + "0" + pattern[stop:end], stop - start
+
+
+def json_short_currency(formats, what):
+    """The short currency formats of one numbering system's cldr-json
+    currencyFormats, as {(n, count): (pattern, alternate)} for the magnitude
+    10^n; the alternate is "" where cldr-json has none, which it leaves out
+    when it is the pattern. None if there are none."""
+    short = formats.get("short")
+    if short is None:
+        return None
+    if set(short) != {"standard"}:
+        sys.exit(f"{what}: short currency formats other than standard")
+    out = {}
+    for key, value in short["standard"].items():
+        m = SHORT_CURRENCY_KEY.fullmatch(key)
+        if not m:
+            sys.exit(f"{what}: unexpected short currency key {key!r}")
+        k = (len(m.group(1)), m.group(2))
+        plain, alt = out.get(k, ("", ""))
+        if m.group(3):
+            alt = check_value(value, what)
+        else:
+            plain = check_value(value, what)
+        out[k] = (plain, alt)
+    for k, (plain, alt) in out.items():
+        if not plain:
+            sys.exit(f"{what}: an alternate without its pattern at {k}")
+        if alt == plain:
+            out[k] = (plain, "")
+    return out
+
+
+def xml_short_currency(numbers, nu, what):
+    """The explicit short currency formats of `nu` in one locale's XML
+    <numbers> element, as {(n, count, alt): pattern}, alt True for the
+    alphaNextToNumber alternate; values xml_value drops are left out."""
+    out = {}
+    for el in numbers.findall("currencyFormats") if numbers is not None else []:
+        if el.get("numberSystem") != nu:
+            continue
+        for length in el.findall("currencyFormatLength"):
+            if length.get("type") != "short":
+                continue
+            for fmt in length.findall("currencyFormat"):
+                if fmt.get("type") != "standard":
+                    sys.exit(f"{what}: short currency format {fmt.get('type')}")
+                for p in fmt.findall("pattern"):
+                    t, count, alt = p.get("type"), p.get("count"), p.get("alt")
+                    if not re.fullmatch(r"10+", t or "") or count not in PLURAL_KEYS:
+                        sys.exit(f"{what}: unexpected short pattern {p.attrib}")
+                    if alt not in (None, "alphaNextToNumber"):
+                        sys.exit(f"{what}: unexpected alternate {alt!r}")
+                    value = xml_value(p, what)
+                    if value:
+                        out[(len(t) - 1, count, alt is not None)] = value
+    return out
+
+
+def compact_currency_lines(tree, tags, load_xml):
+    """The lines of compact-currency.txt after the comments: the short
+    (compact) currency formats, CLDR's currencyFormatLength short, of every
+    locale of `tags` (and und). A string table (`strings <count>`, then one
+    pattern per line, each with its run of digits as one `0`, as
+    short_currency_shape normalizes it), then for each locale, in the order
+    of file_parents, 'locale <tag> <parent>' and the entries that differ
+    from its parent chain: '<nu> <n>[-<m>] <zeros> <count>=<index>[,<alt>
+    [<delta>]] ...' for the magnitudes 10^n to 10^m, whose digit runs are
+    zeros long at 10^n and one longer at each next magnitude (0 for the
+    pattern "0", the same at each), with the pattern and alphaNextToNumber
+    alternate (left out where it is the pattern) of each count that
+    differs; delta (+2) is how much longer the alternate's digit run is,
+    when it is not the pattern's. Every count of a magnitude has the same
+    digits.
+
+    A locale's own numbering systems (those cldr-json has currency formats
+    for) have cldr-json's resolved data. Another numbering system whose
+    patterns some locale of the XML chain (`load_xml` returns common/main
+    files by name) has explicitly (ba's and kok's in CLDR 48.2) has, pattern
+    by pattern, the nearest explicit one, else the locale's latn one, which
+    root's aliases point to; an alternate is the explicit one, else latn's,
+    else the pattern. Any other numbering system has the locale's latn
+    ones, as for a numbering system root has explicit currency formats
+    without short ones for (arab); exit if root has short currency formats
+    for a numbering system other than latn. A numbering system other than
+    latn lists only the entries that differ from what its parent chain
+    gives for it, or where that has none, from the locale's latn ones.
+    Exit unless reading the file back as number.rs does gives every
+    locale's patterns for each of its numbering systems and for deva."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags)
+    parents, ordered = file_parents(tree, tags, dirs)
+    parent_entries = tree.parent_locales()
+    root_numbers = load_xml("root").find("numbers")
+    root_formats = []
+    if root_numbers is not None:
+        root_formats = root_numbers.findall("currencyFormats")
+    for el in root_formats:
+        nu = el.get("numberSystem")
+        if nu != "latn" and xml_short_currency(root_numbers, nu, "root"):
+            sys.exit(f"root currencyFormats {nu}: short currency formats unhandled")
+    resolved = {}
+    for tag in ordered:
+        d = dirs[tag]
+        n = tree.load("cldr-numbers-full", "main", d, "numbers.json")
+        n = n["main"][d]["numbers"]
+        prefix = "currencyFormats-numberSystem-"
+        own_nus = {k[len(prefix) :] for k in n if k.startswith(prefix)}
+        tables = {}
+        for nu in sorted(own_nus):
+            t = json_short_currency(n[prefix + nu], f"{tag} short currency {nu}")
+            if t is not None:
+                tables[nu] = t
+        if tag != "und":
+            chain = []
+            c = d
+            while c is not None:
+                if c != "und":
+                    root = load_xml(xml_file_name(c))
+                    chain.append((c, root.find("numbers")))
+                c = cldr_parent(parent_entries, c)
+            nus = set()
+            for c, numbers in chain:
+                if numbers is not None:
+                    for el in numbers.findall("currencyFormats"):
+                        nus.add(el.get("numberSystem"))
+            latn = tables.get("latn", {})
+            for nu in sorted(nus - own_nus - {None, "latn"}):
+                explicit = {}
+                for c, numbers in reversed(chain):
+                    explicit.update(xml_short_currency(numbers, nu, f"{c} {nu}"))
+                if not explicit:
+                    continue
+                t = {}
+                keys = {(k[0], k[1]) for k in explicit} | set(latn)
+                for k in sorted(keys):
+                    of_latn = latn.get(k, ("", ""))
+                    plain = explicit.get((k[0], k[1], False)) or of_latn[0]
+                    alt = explicit.get((k[0], k[1], True)) or of_latn[1]
+                    if not plain:
+                        sys.exit(f"{tag} {nu} {k}: no short currency pattern")
+                    t[k] = (plain, "" if alt == plain else alt)
+                tables[nu] = t
+        shaped = {}
+        for nu, t in tables.items():
+            for (power, count), (plain, alt) in t.items():
+                what = f"{tag} short currency {nu} 10^{power} {count}"
+                p = short_currency_shape(plain, what)
+                a = short_currency_shape(alt, what) if alt else None
+                if a is not None and (a[1] == 0) != (p[1] == 0):
+                    sys.exit(f"{what}: only one of the pattern and alternate is 0")
+                # An alternate's digit run may differ from the pattern's (kok
+                # deva's 10^14 "¤0हज'.'निख'.'" and "¤000LCr").
+                delta = a[1] - p[1] if a else 0
+                shaped.setdefault(nu, {})[(power, count)] = (
+                    p[1],
+                    p[0],
+                    a[0] if a else "",
+                    delta,
+                )
+        # A count's pattern may be "0" where the others are not (vec's 10^3
+        # "one"); the others must have the same digits.
+        for nu, t in shaped.items():
+            for power in {k[0] for k in t}:
+                at = [v for k, v in t.items() if k[0] == power and v[1] != "0"]
+                if len({v[0] for v in at}) > 1 or len({v[3] for v in at}) > 1:
+                    sys.exit(
+                        f"{tag} short currency {nu} 10^{power}: "
+                        "the counts' digits differ"
+                    )
+        resolved[tag] = shaped
+
+    # Each locale's entries that differ from its parent chain's.
+    own = {}
+
+    def chain_value(tag, nu, key):
+        while tag != "-":
+            v = own[tag].get(nu, {}).get(key)
+            if v is not None:
+                return v
+            tag = parents[tag]
+        return None
+
+    # Reading the file back: latn's entries are the chain's, nearest
+    # first; another numbering system's are the chain's for it, and latn's
+    # where the chain has none.
+    def read_back(tag, nu):
+        merged = {}
+        t = tag
+        while t != "-":
+            for key, v in own[t].get(nu, {}).items():
+                merged.setdefault(key, v)
+            t = parents[t]
+        if nu != "latn":
+            merged = {**read_back(tag, "latn"), **merged}
+        return merged
+
+    for tag in ordered:
+        own[tag] = {}
+        if "latn" not in resolved[tag]:
+            sys.exit(f"{tag}: no latn short currency formats")
+        for key, v in resolved[tag]["latn"].items():
+            if chain_value(parents[tag], "latn", key) != v:
+                own[tag].setdefault("latn", {})[key] = v
+        latn = read_back(tag, "latn")
+        for nu, t in resolved[tag].items():
+            if nu == "latn":
+                continue
+            for key, v in t.items():
+                base = chain_value(parents[tag], nu, key)
+                if (latn.get(key) if base is None else base) != v:
+                    own[tag].setdefault(nu, {})[key] = v
+
+    for tag in ordered:
+        for nu in set(resolved[tag]) | {"deva"}:
+            want = resolved[tag].get(nu, resolved[tag]["latn"])
+            if read_back(tag, nu) != want:
+                sys.exit(f"{tag} short currency {nu}: the file does not give it back")
+
+    strings = sorted(
+        {
+            v[i]
+            for t in own.values()
+            for tt in t.values()
+            for v in tt.values()
+            for i in (1, 2)
+            if v[i]
+        }
+    )
+    index = {s: i for i, s in enumerate(strings)}
+    lines = [f"strings {len(strings)}"] + strings
+    for tag in ordered:
+        lines.append(f"locale\t{tag}\t{parents[tag]}")
+        rows = []
+        for nu in sorted(own[tag]):
+            by_power = {}
+            for (power, count), v in own[tag][nu].items():
+                by_power.setdefault(power, {})[count] = v
+            for power in sorted(by_power):
+                counts = by_power[power]
+                zeros = max(v[0] for v in counts.values())
+                items = " ".join(
+                    f"{c}={index[counts[c][1]]}"
+                    + (f",{index[counts[c][2]]}" if counts[c][2] else "")
+                    + (f"{counts[c][3]:+d}" if counts[c][3] else "")
+                    for c in PLURAL_KEYS
+                    if c in counts
+                )
+                rows.append([nu, power, power, zeros, items])
+        # Fold consecutive magnitudes with the same patterns whose digit
+        # runs grow by one each.
+        folded = []
+        for r in rows:
+            last = folded[-1] if folded else None
+            if (
+                last is not None
+                and last[0] == r[0]
+                and last[2] + 1 == r[1]
+                and last[4] == r[4]
+                and (
+                    (last[3] == 0 and r[3] == 0)
+                    or (last[3] != 0 and last[3] + r[1] - last[1] == r[3])
+                )
+            ):
+                last[2] = r[1]
+            else:
+                folded.append(r)
+        for nu, n, m, zeros, items in folded:
+            span = str(n) if n == m else f"{n}-{m}"
+            lines.append(f"{nu}\t{span}\t{zeros}\t{items}")
+    return lines
+
+
+def write_number_files(tree, tag, load_xml):
+    """Write number-symbols.txt, units.txt, currency-symbols.txt,
+    explicit-number-systems.txt and compact-currency.txt from the unpacked
+    CLDR JSON packages `tree` of the release `tag`, and the common/main XML
+    files `load_xml` returns by name (each is loaded once)."""
+    loaded = {}
+
+    def load_once(name):
+        if name not in loaded:
+            loaded[name] = load_xml(name)
+        return loaded[name]
+
+    with open(os.path.join(HERE, "locales.txt"), encoding="utf-8") as f:
+        locales = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    intl_js = os.path.join(HERE, "..", "..", "js", "10-Intl.js")
+    with open(intl_js, encoding="utf-8") as f:
+        sanctioned = sanctioned_units(f.read())
+    check_currency_spacing(tree, locales)
+    symbols = number_symbols_lines(tree, locales)
+    units = units_lines(tree, locales, sanctioned)
+    currencies = currency_symbols_lines(tree, locales, load_once)
+    explicit = explicit_number_systems_lines(tree, locales, load_once)
+    compact_currency = compact_currency_lines(tree, locales, load_once)
+    write_lines(
+        "number-symbols.txt",
+        tag,
+        "Number symbols and patterns per locale and numbering system "
+        "(cldr-numbers-full, numbers.json):\n"
+        "# <locale>\\t<nu>\\t<percentSign>\\t<exponential>\\t<infinity>"
+        "\\t<nan>\\t<approximatelySign>\\t<percentPattern>\\t<rangePattern>"
+        "\\t<currencyDecimal>\\t<currencyGroup>\n# (the last two empty where "
+        "the locale has no separators of its own for currency formats)",
+        symbols,
+    )
+    write_lines(
+        "units.txt",
+        tag,
+        "Unit patterns (cldr-units-full, units.json): a string table, then "
+        "per locale\n# 'locale <tag> <parent>' and the entries that differ "
+        "from its parents: '<width> <unit> <key>=<index>...'.",
+        units,
+    )
+    write_lines(
+        "currency-symbols.txt",
+        tag,
+        "Currency symbols (cldr-numbers-full, currencies.json) and "
+        "per-currency formats (common/main/*.xml),\n# tab-separated: per "
+        "locale 'locale <tag> <parent>', then '<code> <symbol> <narrow>"
+        "[ <pattern>\n# <decimal> <group>]' for each currency whose symbols "
+        "differ from its parents (a field that\n# does not differ empty) or "
+        "that has a format of its own here, and 'lateral <field> <nu> <type>'"
+        "\n# for the locale's own values that per-currency fields inherit "
+        "laterally from (UTS 35).\n# A currency no locale lists uses its "
+        "code.",
+        currencies,
+    )
+    write_lines(
+        "explicit-number-systems.txt",
+        tag,
+        "Explicit number data for numbering systems outside a locale's "
+        "default and other\n# numbering systems (common/main/*.xml), which "
+        "cldr-json and ICU4X leave out; tab-separated:\n# per locale "
+        "'locale <tag> <parent>' (its CLDR parent), then 'symbols <nu> "
+        "<decimal> <group>\n# <minusSign> <plusSign> <percentSign> "
+        "<exponential> <infinity> <nan> <approximatelySign>',\n# 'percent "
+        "<nu> <pattern>', 'range <nu> <pattern>' and 'currency <nu> "
+        "<standard> <standardAlpha>\n# <accounting> <accountingAlpha>', an "
+        "empty field for a value the locale does not have. '=standard' is\n# "
+        "an accounting pattern that aliases to the standard one.",
+        explicit,
+    )
+    write_lines(
+        "compact-currency.txt",
+        tag,
+        "Short (compact) currency patterns, CLDR's currencyFormatLength "
+        "short (cldr-numbers-full\n# numbers.json, and common/main/*.xml for "
+        "numbering systems cldr-json leaves out): a\n# string table "
+        "(`strings <count>`, each pattern with its digits as one 0), then per "
+        "locale\n# 'locale <tag> <parent>' and tab-separated lines '<nu> "
+        "<n>[-<m>] <zeros> <count>=<index>[,<alt>[<delta>]]...'\n# for the "
+        "magnitudes 10^n to 10^m (zeros digits at 10^n, one more at each next; "
+        "0 for the\n# pattern \"0\"), with the alphaNextToNumber alternate "
+        "where it differs and delta more digits.\n# Entries that differ from "
+        "the parent chain's, or for nu other than latn, from latn's.",
+        compact_currency,
+    )
+
+
+def write_number_data(tag):
+    """Generate number-symbols.txt, units.txt, currency-symbols.txt,
+    explicit-number-systems.txt and compact-currency.txt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        download_packages(npm_version(tag), tmp)
+        write_number_files(Tree(tmp), tag, lambda name: fetch(tag, f"main/{name}.xml"))
+
+
 def main():
     tag = sys.argv[1]
     # currency.xml also holds key cf (currency format), whose types
@@ -275,6 +1478,7 @@ def main():
         [fetch(tag, "bcp47/" + f) for f in bcp47_files(tag)]
     )
     write_value_aliases("extension-value-aliases.txt", tag, table)
+    write_number_data(tag)
 
 
 if __name__ == "__main__":

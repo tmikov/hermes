@@ -15,7 +15,10 @@
 //   Utf16      a JS string as UTF-16, lossless for unpaired surrogates: text
 //              to compare or transform
 //   OptUtf8    a JS string or undefined (results only)
-//   Int        a JS number from an int (results only)
+//   Int        a JS number that is an integer in int range; as an
+//              argument, anything else is an internal error
+//   Utf8List   a new JS array of strings, from a std::vector<std::string>
+//              of UTF-8 (results only)
 //   Undefined  undefined (results only)
 // JS validates every argument first; a wrong count or type is a plugin bug,
 // an internal error naming the helper.
@@ -79,3 +82,97 @@ HERMES_INTL_HELPER(collatorCompare, Int, Object, Utf16, Utf16)
 // language subtag may be az, el, hy, lt or tr). Unpaired surrogates stay where
 // they are. Throws if language does not parse.
 HERMES_INTL_HELPER(caseMap, Utf16, Utf16, Utf8, Bool)
+// (pluralRules, locale, ordinal) Attach the native cardinal (ordinal false)
+// or ordinal plural rules, with plural ranges, for the language identifier of
+// locale to the Intl.PluralRules or internal object pluralRules. Throws if
+// locale does not parse, if there is no data, or if pluralRules already has
+// native state.
+HERMES_INTL_HELPER(pluralRulesInit, Undefined, Object, Utf8, Bool)
+// (pluralRules, decimal, exponent) The plural category ("zero", "one",
+// "two", "few", "many" or "other") of decimal x 10^exponent. decimal is ASCII
+// digits with an optional "." between digits ("1.50"); the operands keep
+// every digit and trailing zero, and c is exponent when it is positive, else
+// 0. Throws for any other decimal, or if pluralRulesInit did not initialize
+// pluralRules.
+HERMES_INTL_HELPER(pluralSelect, Utf8, Object, Utf8, Int)
+// (pluralRules, startCategory, endCategory) The plural category of a range
+// whose ends have these categories. Throws if either is not a category name,
+// or if pluralRulesInit did not initialize pluralRules.
+HERMES_INTL_HELPER(pluralSelectRange, Utf8, Object, Utf8, Utf8)
+// (pluralRules) The categories of pluralRules in the order zero, one, two,
+// few, many, other; "other" is always last. Throws if pluralRulesInit did not
+// initialize pluralRules.
+HERMES_INTL_HELPER(pluralCategories, Utf8List, Object)
+// (locale, nu) The number symbols and patterns of the language identifier of
+// locale and the numbering system nu, resolved as CLDR's inheritance does
+// (the nearest locale of the chain that defines nu, else root's explicit data
+// for nu, else the locale's latn data): 0 decimal separator, 1 group
+// separator, 2 minus sign, 3 plus sign, 4 percent sign, 5 exponent
+// symbol, 6 infinity, 7 NaN, 8 approximately sign; 9 primary group size,
+// 10 secondary group size, 11 minimum grouping digits, as decimal strings;
+// 12-14 the decimal zero, positive and negative patterns and 15-17 the
+// percent ones ("{minusSign}{number}{percentSign}"); 18 the range pattern
+// ("{0}–{1}"); 19 and 20 the primary and secondary group sizes of percents,
+// from their own CLDR pattern (bn: 3 and 3, against 3 and 2 for decimals),
+// with entry 11 as their minimum grouping too. Bidi controls of the signs are
+// literal text of the patterns, and entries 2-4 are the bare signs.
+// Throws if locale does not parse or nu is not a numbering system type.
+HERMES_INTL_HELPER(numberSymbols, Utf8List, Utf8, Utf8)
+// (locale, nu, currency, display, accounting) The currency patterns for an
+// uppercase ISO currency code and currencyDisplay display, the standard or
+// accounting ones; compact notation uses them for a number it does not
+// compact. A currency's own pattern (CLDR's <currency type="X"><pattern>,
+// en-150's EUR), resolved by UTS 35's lateral inheritance for nu and for the
+// standard or accounting pattern, replaces the locale's. For "code", "symbol"
+// and "narrowSymbol": 0-2 the zero, positive
+// and negative patterns (accounting ones if accounting) with
+// {currencyPrefix} or {currencySuffix}, with CLDR's currency spacing; 3 the
+// currency string;
+// 4-6 the zero, positive and negative patterns for a number whose character
+// next to the currency is not a digit (NaN, infinity), which get no
+// currency spacing ("USDNaN"). For "name": 0-5 the name pattern for zero,
+// one, two, few, many and other, in CLDR form with the plural name
+// substituted ("{0} US dollars"); a category the locale lacks gets
+// other's. Throws for any other currency or display, or as numberSymbols.
+HERMES_INTL_HELPER(currencyPatterns, Utf8List, Utf8, Utf8, Utf8, Utf8, Bool)
+// (locale, nu, currency) The decimal and grouping separators of the currency
+// style for an uppercase ISO currency code, in every display and notation:
+// the currency's own (CLDR's <currency type="X"><decimal> and <group>, pt-CV's
+// CVE "$"), resolved by UTS 35's lateral inheritance, in every numbering
+// system; else CLDR's currencyDecimal and currencyGroup (fr-CH's ".", de-AT's
+// "."), the locale's latn ones where root aliases nu's symbols to latn and
+// none where root's symbols for nu are explicit (arab, arabext); else
+// entries 0 and 1 of numberSymbols. Throws for any other currency, or as
+// numberSymbols.
+HERMES_INTL_HELPER(currencySeparators, Utf8List, Utf8, Utf8, Utf8)
+// (locale, nu, currency, display, accounting) The patterns of compact
+// notation with the currency style, from CLDR's short currency formats, for
+// an uppercase ISO currency code and the currencyDisplay "code", "symbol" or
+// "narrowSymbol" (the name display uses compactPatterns), standard or
+// accounting: 0 the number N of entries, then for each entry in increasing
+// magnitude 26 strings: the magnitude it starts at, its exponent (0 for a
+// magnitude CLDR does not compact, whose other strings are empty), and for
+// each of zero, one, two, few, many and other (a category the locale lacks
+// gets other's) the compact pattern in CLDR form ("{0}K") and the zero,
+// positive and negative patterns with {currencyPrefix} or {currencySuffix},
+// whose {number} is the compact pattern. Throws as currencyPatterns.
+HERMES_INTL_HELPER(
+    compactCurrencyPatterns, Utf8List, Utf8, Utf8, Utf8, Utf8, Bool)
+// (locale, nu, long) The short or long compact patterns: 0 the number N of
+// entries, then for each entry in increasing magnitude 10 strings: the
+// magnitude it starts at, its exponent, the exact-0 and exact-1 patterns
+// (empty when it has none, or when it is the same as the pattern of the
+// category of 0 or 1, which then gives the same result), and the zero, one,
+// two, few, many and other patterns in CLDR form ("{0}K"; a pattern may lack
+// {0}). A category the locale lacks gets other's. Throws as numberSymbols.
+HERMES_INTL_HELPER(compactPatterns, Utf8List, Utf8, Utf8, Bool)
+// (locale, unit, width) The unit patterns of a sanctioned unit, or X-per-Y
+// of two, at width "long", "short" or "narrow": 0-5 the zero, one, two,
+// few, many and other patterns in CLDR form ("{0} miles"). A category the
+// locale lacks gets other's. A pattern may lack {0}, but other's has it.
+// Throws for any other unit or width, or as numberSymbols.
+HERMES_INTL_HELPER(unitPatterns, Utf8List, Utf8, Utf8, Utf8)
+// (currency) CurrencyDigits of an uppercase ISO currency code: CLDR's
+// fraction digits, 2 for a currency CLDR does not list. Throws for anything
+// else.
+HERMES_INTL_HELPER(currencyDigits, Int, Utf8)

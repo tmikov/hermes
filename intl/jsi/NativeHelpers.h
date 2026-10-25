@@ -9,6 +9,8 @@
 
 #include <jsi/jsi.h>
 
+#include <climits>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
@@ -30,9 +32,12 @@ struct Utf8 {};
 struct Utf16 {};
 /// Conversion tag for NativeHelpers.def: a JS string or undefined.
 struct OptUtf8 {};
-/// Conversion tag for NativeHelpers.def: a JS number from an int (results
-/// only).
+/// Conversion tag for NativeHelpers.def: a JS number that is an integer in
+/// int range.
 struct Int {};
+/// Conversion tag for NativeHelpers.def: a new JS array of strings from
+/// UTF-8 (results only).
+struct Utf8List {};
 /// Conversion tag for NativeHelpers.def: undefined (results only).
 struct Undefined {};
 
@@ -68,6 +73,11 @@ struct TagType<OptUtf8> {
 template <>
 struct TagType<Int> {
   using type = int;
+};
+/// Utf8List is a std::vector<std::string>.
+template <>
+struct TagType<Utf8List> {
+  using type = std::vector<std::string>;
 };
 /// Undefined is a std::monostate.
 template <>
@@ -167,12 +177,68 @@ struct Convert<Object> {
   }
 };
 
-/// Int: a JS number (results only).
+/// Int: a JS number that is an integer in int range, both ways.
 template <>
 struct Convert<Int> {
+  /// \p v, which must be a number that is an integer in int range; \p helper
+  /// names the caller. -0 is 0.
+  static int fromJS(
+      facebook::jsi::Runtime &,
+      const facebook::jsi::Value &v,
+      const char *helper) {
+    // A non-number is NaN here, which fails the range test.
+    double d = v.isNumber() ? v.getNumber() : NAN;
+    if (!(d >= INT_MIN && d <= INT_MAX) || std::trunc(d) != d)
+      internalError(std::string(helper) + ": expected an integer in int range");
+    return static_cast<int>(d);
+  }
   /// The JS number \p i.
   static facebook::jsi::Value toJS(facebook::jsi::Runtime &, int i) {
     return facebook::jsi::Value(i);
+  }
+};
+
+/// Utf8List: a new JS array of strings (results only).
+template <>
+struct Convert<Utf8List> {
+  /// A new JS array with a string from each of \p list's UTF-8 strings.
+  /// The array is parsed from JSON text: JSI's setValueAtIndex and push
+  /// perform an ordinary [[Set]], which runs a setter that user code put on
+  /// Array.prototype for an index. This relies on Hermes's override of
+  /// createValueFromJsonUtf8 (HermesRuntimeImpl, API/hermes/hermes.cpp),
+  /// which uses the VM's internal JSON parser; that parser writes the
+  /// elements to the array's storage directly. JSI's default
+  /// implementation (jsi.cpp) calls the global JSON.parse instead, which
+  /// user code can replace, so a runtime without the override would not be
+  /// tamper-proof here.
+  static facebook::jsi::Value toJS(
+      facebook::jsi::Runtime &rt,
+      const std::vector<std::string> &list) {
+    static const char kHex[] = "0123456789abcdef";
+    std::string json = "[";
+    for (size_t i = 0; i < list.size(); ++i) {
+      if (i != 0)
+        json += ',';
+      json += '"';
+      for (unsigned char c : list[i]) {
+        // JSON escapes the quote, the backslash and the control characters;
+        // every other UTF-8 byte stands for itself.
+        if (c == '"' || c == '\\') {
+          json += '\\';
+          json += static_cast<char>(c);
+        } else if (c < 0x20) {
+          json += "\\u00";
+          json += kHex[c >> 4];
+          json += kHex[c & 0xf];
+        } else {
+          json += static_cast<char>(c);
+        }
+      }
+      json += '"';
+    }
+    json += ']';
+    return facebook::jsi::Value::createFromJsonUtf8(
+        rt, reinterpret_cast<const uint8_t *>(json.data()), json.size());
   }
 };
 

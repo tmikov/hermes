@@ -11,11 +11,14 @@ The design, and the reasons behind it, are in
 Phase 0 plan is
 [doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md](../doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md).
 
-Phase 0 was infrastructure, Phase 1 added `Intl.Locale`, and Phase 2 added
+Phase 0 was infrastructure, Phase 1 added `Intl.Locale`, Phase 2 added
 `Intl.Collator` and the ECMA-402 versions of `localeCompare`,
-`toLocaleLowerCase` and `toLocaleUpperCase`. `Intl` has
-`getCanonicalLocales`, `supportedValuesOf`, `Locale` and `Collator`. The
-other constructors arrive in later phases (see "Phasing" in the spec).
+`toLocaleLowerCase` and `toLocaleUpperCase`, and Phase 3 added
+`Intl.NumberFormat`, `Intl.PluralRules` and the ECMA-402 `toLocaleString`
+of Number, BigInt, Array and TypedArray. `Intl` has `getCanonicalLocales`,
+`supportedValuesOf`, `Locale`, `Collator`, `NumberFormat` and
+`PluralRules`. The other constructors arrive in later phases (see
+"Phasing" in the spec).
 
 ## Layout
 
@@ -29,14 +32,24 @@ other constructors arrive in later phases (see "Phasing" in the spec).
 | `core/src/supported.rs` | The lists behind `Intl.supportedValuesOf`. |
 | `core/src/collator.rs` | The ICU4X collator for a set of resolved Collator options, and the locale defaults. |
 | `core/src/casemap.rs` | Upper and lower case mapping of UTF-16 text, split at unpaired surrogates. |
-| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, `update-cldr-lists.py` and its tests. |
+| `core/src/plurals.rs` | ICU4X's plural rules and ranges for a locale, and selection from exact operands. |
+| `core/src/number.rs` | The number data NumberFormat formats with: symbols, decimal, percent and range patterns, currency patterns and digits, compact patterns and compact currency patterns, as lists of strings, with CLDR's resolution of numbering systems. |
+| `core/src/units.rs` | Unit patterns, including the `X-per-Y` compounds. |
+| `core/src/cldr.rs` | The parsers and lookups of the generated CLDR number files. |
+| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, the number data files `number-symbols.txt`, `units.txt`, `currency-symbols.txt` and `explicit-number-systems.txt`, `LICENSE` (the Unicode License of the CLDR-derived files), `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
 | `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
+| `js/07-number.js` | Intl mathematical values, ToIntlMathematicalValue, and the exact rounding (FormatNumericToString, ToRawPrecision, ToRawFixed, ComputeExponent) that NumberFormat, PluralRules and later constructors share. |
 | `js/20-Locale.js` | `Intl.Locale`: the constructor, the getters, the information methods, `maximize` and `minimize`. |
 | `js/30-Collator.js` | `Intl.Collator`: the constructor, `supportedLocalesOf`, `resolvedOptions` and the `compare` getter. |
-| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase` and `toLocaleUpperCase`, and TransformCase. Later phases add theirs. |
+| `js/40-NumberFormat.js` | `Intl.NumberFormat`: the constructor and its options, the legacy constructor behavior, `supportedLocalesOf`, `resolvedOptions`, the `format` getter and the other prototype methods. |
+| `js/41-number-patterns.js` | Formatting: PartitionNumberPattern and the operations it uses, the parts, the ranges, grouping, the digits of the numbering systems, and the caches of the native data. |
+| `js/45-PluralRules.js` | `Intl.PluralRules`: the constructor, `supportedLocalesOf`, `resolvedOptions`, `select` and `selectRange`. |
+| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase`, `toLocaleUpperCase` and the `toLocaleString` of Number, BigInt, Array and TypedArray, and TransformCase. Later phases add theirs. |
 | `jsi/` | C++: the entry point (`Plugin.cpp`), the embedded bytecode, the native helpers JS calls, and default detection (`Defaults.cpp`). |
 | `jsi/CollatorHelpers.cpp` | The collator helpers and `CollatorState`, the native state that owns the Rust collator. |
+| `jsi/PluralRulesHelpers.cpp` | The plural rules helpers and `PluralRulesState`, the native state that owns the Rust plural rules. |
+| `jsi/NumberHelpers.cpp` | The number data helpers (`numberSymbols`, `currencyPatterns`, `compactCurrencyPatterns`, `compactPatterns`, `unitPatterns`, `currencyDigits`). |
 | `jsi/StringHelpers.cpp` | The `caseMap` helper. |
 | `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
@@ -236,9 +249,9 @@ them:
    array destructuring or array patterns, no tagged templates, no
    `Array.prototype` methods, no `String.prototype.split` (it looks up
    `@@split`).
-3. Append to arrays with `listPush`, never `a[i] = v`, which runs setters on
-   `Array.prototype`. Build every property descriptor and internal record
-   with `__proto__: null`.
+3. Append to arrays with `listPush` and replace an element with `listSet`,
+   never `a[i] = v`, which runs setters on `Array.prototype`. Build every
+   property descriptor and internal record with `__proto__: null`.
 4. `ToString(v)` is `` `${v}` ``, `ToNumber(v)` is `+v`, and `ToObject`
    throws on `null`/`undefined` and then calls the captured `Object`.
 5. Every function cites the spec section and numbers its steps in comments.
@@ -266,7 +279,10 @@ prototype (`jsi/NativeHelpers.cpp`), so a property they lack reads as
    a `TagType` and a `Convert` in `NativeHelpers.h`. The tags are `Bool`
    (an argument or a result), `Object` (an argument), `Utf8`, `Utf16`
    (UTF-16 text, lossless for unpaired surrogates, for text to compare or
-   transform), `OptUtf8`, `Int` (a result) and `Undefined` (a result).
+   transform), `OptUtf8`, `Int` (an integer in `int` range, as an argument
+   or a result; an argument that is anything else is an internal error),
+   `Utf8List` (a result: a new array of strings, built from JSON so that no
+   setter on `Array.prototype` runs) and `Undefined` (a result).
 3. JS calls it as `native.name(...)`. JS validates every argument first.
 
 Internal errors are C++ exceptions; Hermes turns them into an `Error`.
@@ -275,14 +291,113 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 
 `core/data/currencies.txt`, `core/data/numbering-systems.txt`,
 `core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt`,
-`core/data/time-zones-by-region.txt` and
-`core/data/extension-value-aliases.txt` come from CLDR. When ICU4X is upgraded,
+`core/data/time-zones-by-region.txt`, `core/data/extension-value-aliases.txt`,
+`core/data/number-symbols.txt`, `core/data/units.txt`,
+`core/data/currency-symbols.txt`, `core/data/explicit-number-systems.txt` and
+`core/data/compact-currency.txt` come from CLDR. When ICU4X is upgraded,
 regenerate them from the CLDR release that ICU4X version uses, and commit the
 result:
 
 ```
 python3 intl/core/data/update-cldr-lists.py release-48-2
 ```
+
+`number-symbols.txt`, `units.txt` and `currency-symbols.txt` come from the CLDR
+JSON npm packages `cldr-core`, `cldr-numbers-full` and `cldr-units-full` (the
+generator downloads version 48.2.0 for the tag `release-48-2` from the npm
+registry), whose locale data is already resolved. `number-symbols.txt` has one
+tab-separated line per locale and numbering system: `<locale> <nu>
+<percentSign> <exponential> <infinity> <nan> <approximatelySign>
+<percentPattern> <rangePattern> <currencyDecimal> <currencyGroup>`, the last
+two empty where the locale has no separators of its own for currency formats
+(de-AT's `currencyGroup` ".", fr-CH's `currencyDecimal` "."), which the
+currency style uses. `units.txt` has a string table (`strings <count>`, then
+one pattern per line), then for each locale a `locale <tag> <parent>` line and
+the entries `<width> <unit> <key>=<index>...` that differ from its parent chain
+(`<unit>` is `-` for the width's compound pattern). `currency-symbols.txt` (35
+KB) is tab-separated: for each locale a `locale <tag> <parent>` line, with the
+same parents as `units.txt`, then `<code> <symbol> <narrow>` for each currency
+whose symbol or narrow symbol differs from what its parent chain gives, with an
+empty field for the one that does not, followed by `<pattern> <decimal>
+<group>` where the locale's XML has a format of its own for the currency
+(CLDR's `<currency type="X">` `<pattern>`, `<decimal>` and `<group>`: en-150's
+EUR `¤#,##0.00`, pt-CV's CVE decimal `$`), and `lateral <field> <nu> <type>`
+lines for the locale's own currencyFormat patterns (`<type>` standard or
+accounting) and symbols decimal and group (`<type>` `-`), where a parent has
+per-currency formats: UTS 35's lateral inheritance ends the search for a
+per-currency field at them (tr35.md, "Lateral Inheritance"). The per-currency
+fields come from the XML because cldr-json resolves them vertically only. The
+generator reads them back as `core/src/cldr.rs` does and compares the result
+with lateral inheritance over the XML for latn, deva, arab and arabext; it
+also checks that a per-currency pattern is `#,##0.00` with the currency sign
+before or after it, which is all CLDR 48.2 has. CLDR's fallbacks are applied first (no
+narrow symbol means the symbol; no symbol means the code), and a currency no
+locale of the chain lists uses its code. ICU4X's own currency symbol data
+leaves out symbols equal to the code, so its locale fallback finds a parent's
+(`af` USD would be `US$`, not `USD`). For units and currency symbols the
+generator checks that reading the file back along the parent chain gives each
+locale's resolved data. It also checks that every locale's `currencySpacing` is
+root's, the one rule `core/src/number.rs` implements. A locale with no
+directory in the JSON packages (`zh-HK`, `sr-ME`) is read from the directory
+with the script of `likelySubtags` inserted (`zh-Hant-HK`). The sanctioned
+units come from `SANCTIONED_UNITS` in `js/10-Intl.js`. Every value is checked
+to contain no tab or newline. Each file starts with `#` comment lines, which a
+parser skips. `core/data/LICENSE` is the Unicode License V3 for these files.
+
+`explicit-number-systems.txt` (55 KB) comes from CLDR's `common/main/*.xml`
+instead (the generator fetches root's and those of every locale of
+`locales.txt` and its CLDR parent chain from GitHub at the release tag): the
+explicit values the XML has for numbering systems outside a locale's default
+and other numbering systems, which cldr-json and ICU4X leave out. For each
+locale of the chains it has a `locale <tag> <parent>` line (the CLDR parent),
+then tab-separated lines `symbols <nu> <decimal> <group> <minusSign> <plusSign>
+<percentSign> <exponential> <infinity> <nan> <approximatelySign>`, `percent
+<nu> <pattern>`, `range <nu> <pattern>` and `currency <nu> <standard>
+<standardAlpha> <accounting> <accountingAlpha>`, with an empty field for a
+value the locale does not have; `=standard` is an accounting pattern that
+aliases to the standard one. Values marked as inherited (`↑↑↑`) or of draft level unconfirmed or
+provisional, which cldr-json and ICU leave out, are skipped. Root has such data
+for arab (symbols, percent and currency patterns) and arabext (symbols) in CLDR
+48.2, and so do many locales (fr's arab plus sign, cv's NaN for every numbering
+system). Symbols' alt variants (en_ZA's latn `decimal alt="us"`) are not the
+symbols and are skipped. The generator fails on an alias outside root, on
+root's explicit decimal formats, and on currency separators (`currencyDecimal`, `currencyGroup`) of such a numbering system. The
+other kinds of data for such numbering systems are not read, and a locale's
+explicit ones are dropped without notice: decimal formats (the grouping and
+compact patterns; az's arab and arabext ones in CLDR 48.2), scientific and
+rational formats, and miscPatterns other than the range pattern.
+`core/src/number.rs` takes a numbering system that is one of the locale's own
+from ICU4X and `number-symbols.txt`; for any other it takes each symbol and the
+percent, range and currency patterns from the nearest locale of the chain in
+this file, else the locale's latn value, which root's aliases point to, and the
+grouping and compact patterns from the locale's latn data. Its currency
+separators are the locale's latn ones where root aliases its symbols to latn
+(de-AT deva groups currencies with "."), and the plain separators where root's
+symbols for it are explicit (arab, arabext), which have none.
+
+`compact-currency.txt` (39 KB) holds CLDR's short currency patterns
+(`currencyFormatLength type="short"`), which compact notation uses with the
+currency style and which ICU4X does not have. It has a string table
+(`strings <count>`, then one pattern per line, with the pattern's run of digits
+written as one `0`), then for each locale a `locale <tag> <parent>` line, with
+the same parents as `units.txt`, and tab-separated lines `<nu> <n>[-<m>]
+<zeros> <count>=<index>[,<alt>[<delta>]] ...` for the magnitudes 10^n to 10^m:
+the patterns of each plural count that differ, by index, with the
+alphaNextToNumber alternate where it differs from the pattern, whose digit run
+is zeros long at 10^n and one longer at each next magnitude (0 for the pattern
+"0", which does not compact), and delta (`+2`) more for the alternate where its
+run differs (kok's 10^14 `¤000LCr`). A locale's own numbering systems have
+cldr-json's patterns. Another numbering system has, pattern by pattern, the
+explicit one of the nearest locale of its XML chain (only ba and kok have any in
+CLDR 48.2), else the locale's latn one, which root's aliases point to; root has
+short currency formats for latn only, which the generator checks, so root's
+arab currency formats give latn's. A numbering system other than latn lists
+only the patterns that differ from what the chain gives for it, or where that
+has none, from latn's. The generator checks that reading the file back as
+`core/src/cldr.rs` does gives each locale's patterns, that each pattern has one
+currency sign at an end with only bidi marks and white space beyond it and one
+run of digits, and that the counts of a magnitude have the same digits; a
+negative subpattern (sw's) is dropped.
 
 `calendar-preferences.txt`, `hour-cycles.txt` and `time-zones-by-region.txt`
 feed the `Intl.Locale` information methods and are read by

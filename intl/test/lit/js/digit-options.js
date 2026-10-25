@@ -75,20 +75,22 @@ print(digits({minimumIntegerDigits: 4.9, roundingMode: 'trunc', trailingZeroDisp
 // CHECK-NEXT: 4|0|3|||fractionDigits|auto|1|trunc|stripIfInteger
 print(thrown(() => digits({minimumFractionDigits: 3, maximumFractionDigits: 1})));
 // CHECK-NEXT: RangeError
-// Step 13: a roundingIncrement other than 1 makes mxfdDefault mnfdDefault.
+// Step 12: a roundingIncrement other than 1 makes maxFDDefault minFDDefault.
 print(digits({roundingIncrement: 5}));
 // CHECK-NEXT: 1|0|0|||fractionDigits|auto|5|halfExpand|auto
-// Step 25.
+// Step 24.
 print(digits({roundingPriority: 'morePrecision', maximumSignificantDigits: 2}));
 // CHECK-NEXT: 1|0|3|1|2|morePrecision|morePrecision|1|halfExpand|auto
-// Step 22.a.ii: the minimum of maximumSignificantDigits is mnsd.
+// Step 21.a.ii: the minimum of maximumSignificantDigits is resolvedMinSD.
 print(thrown(() => digits({minimumSignificantDigits: 3, maximumSignificantDigits: 2})));
 // CHECK-NEXT: RangeError
-// Step 23.a.iii: mnfd is min(mnfdDefault, mxfd); here 1, not 2.
+// Step 22.a.iii: resolvedMinFD is min(minFDDefault, resolvedMaxFD); here 1,
+// not 2.
 print(digits({maximumFractionDigits: 1}, 'standard', 2, 3));
 // CHECK-NEXT: 1|1|1|||fractionDigits|auto|1|halfExpand|auto
-// Step 23.a.iv: mxfd is max(mxfdDefault, mnfd): mxfdDefault when mnfd is
-// smaller (3, not 1), mnfd when it is larger (5, not 3).
+// Step 22.a.iv: resolvedMaxFD is max(maxFDDefault, resolvedMinFD):
+// maxFDDefault when resolvedMinFD is smaller (3, not 1), resolvedMinFD when
+// it is larger (5, not 3).
 print(digits({minimumFractionDigits: 1}, 'standard', 2, 3));
 // CHECK-NEXT: 1|1|3|||fractionDigits|auto|1|halfExpand|auto
 print(digits({minimumFractionDigits: 5}));

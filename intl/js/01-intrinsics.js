@@ -16,21 +16,36 @@ var _Object = Object;
 var ObjectCreate = Object.create;
 var ObjectDefineProperty = Object.defineProperty;
 var ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+var ObjectGetPrototypeOf = Object.getPrototypeOf;
 var ReflectApply = Reflect.apply;
 var ReflectOwnKeys = Reflect.ownKeys;
 var _TypeError = TypeError;
 var _RangeError = RangeError;
+var _Symbol = Symbol;
+var SymbolToPrimitive = Symbol.toPrimitive;
 var SymbolToStringTag = Symbol.toStringTag;
+var _BigInt = BigInt;
+var BigIntPrototypeValueOf = BigInt.prototype.valueOf;
 var MathFloor = Math.floor;
 var MathMax = Math.max;
 var MathMin = Math.min;
 var MathTrunc = Math.trunc;
 var NumberIsFinite = Number.isFinite;
+var NumberPrototypeValueOf = Number.prototype.valueOf;
 var StringFromCharCode = String.fromCharCode;
 var StringPrototype = String.prototype;
 var StringPrototypeCharCodeAt = String.prototype.charCodeAt;
 var StringPrototypeIndexOf = String.prototype.indexOf;
 var StringPrototypeSlice = String.prototype.slice;
+var NumberPrototype = Number.prototype;
+var BigIntPrototype = BigInt.prototype;
+var ArrayPrototype = Array.prototype;
+var TypedArrayPrototype = ObjectGetPrototypeOf(Int8Array.prototype);
+var TypedArrayPrototypeAt = TypedArrayPrototype.at;
+var TypedArrayPrototypeGetLength = ObjectGetOwnPropertyDescriptor(
+  TypedArrayPrototype,
+  'length',
+).get;
 
 /// s.indexOf(search, from) through the captured method. This is ECMA-262
 /// 6.1.4.1 StringIndexOf, with -1 for not-found.
@@ -121,6 +136,18 @@ function asciiLowercase(s) {
   for (var i = 0; i < s.length; i++) {
     var c = charCodeAt(s, i);
     out += StringFromCharCode(c >= 0x41 && c <= 0x5a ? c + 0x20 : c);
+  }
+  return out;
+}
+
+/// The ASCII-uppercase of s (ECMA-402 6.1): only the code units a-z change.
+function asciiUppercase(s) {
+  // 1. Replace each code unit from 0x61 to 0x7A with the one 0x20 below it,
+  //    and keep every other code unit.
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = charCodeAt(s, i);
+    out += StringFromCharCode(c >= 0x61 && c <= 0x7a ? c - 0x20 : c);
   }
   return out;
 }
