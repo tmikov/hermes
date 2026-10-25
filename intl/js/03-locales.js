@@ -18,6 +18,42 @@ function isAvailableLocale(tag) {
   return native.isAvailableLocale(tag);
 }
 
+/// How many tags canonicalizeTag remembers. When it holds this many and
+/// another is added, the cache is emptied first. 64 is far more than the
+/// handful of tags a program usually passes.
+var CANONICAL_TAG_CACHE_SIZE = 64;
+
+/// The canonical forms canonicalizeTag has computed, keyed by the tag it
+/// was given, and how many there are. Only well-formed tags are kept.
+var canonicalTagCache = {__proto__: null};
+var canonicalTagCount = 0;
+
+/// IsWellFormedLanguageTag(tag) and CanonicalizeUnicodeLocaleId(tag) of
+/// CanonicalizeLocaleList: the canonical form of the String tag, or
+/// undefined if tag is not well-formed. A tag's canonical form is fixed
+/// for the runtime (the alias data is compiled in), so each one is asked
+/// of native code once while it stays in a bounded cache.
+function canonicalizeTag(tag) {
+  // 1. If the cache has tag, return its canonical form.
+  var canonical = canonicalTagCache[tag];
+  if (canonical !== undefined) return canonical;
+  // 2. Let canonical be the native canonical form of tag; undefined means
+  //    that tag is ill-formed.
+  canonical = native.canonicalizeLocale(tag);
+  // 3. If tag is well-formed, add it to the cache, emptying a full cache
+  //    first.
+  if (canonical !== undefined) {
+    if (canonicalTagCount >= CANONICAL_TAG_CACHE_SIZE) {
+      canonicalTagCache = {__proto__: null};
+      canonicalTagCount = 0;
+    }
+    canonicalTagCache[tag] = canonical;
+    canonicalTagCount++;
+  }
+  // 4. Return canonical.
+  return canonical;
+}
+
 // 9.2.1 CanonicalizeLocaleList ( locales )
 function CanonicalizeLocaleList(locales) {
   // 1. If locales is undefined, then
@@ -71,8 +107,8 @@ function CanonicalizeLocaleList(locales) {
       // v. If IsWellFormedLanguageTag(tag) is false, throw a RangeError
       //    exception.
       // vi. Let canonicalizedTag be CanonicalizeUnicodeLocaleId(tag).
-      //     The native canonicalizer does both: undefined means ill-formed.
-      var canonicalizedTag = native.canonicalizeLocale(tag);
+      //     canonicalizeTag does both: undefined means ill-formed.
+      var canonicalizedTag = canonicalizeTag(tag);
       if (canonicalizedTag === undefined)
         throw new _RangeError('Incorrect locale information provided');
       // vii. If seen does not contain canonicalizedTag, append
@@ -495,4 +531,145 @@ function FilterLocales(isAvailable, requestedLocales, options) {
   }
   // 5. Return CreateArrayFromList(subset).
   return CreateArrayFromList(subset);
+}
+
+// 9.2.8 ResolveOptions ( ctor, localeData, locales, options
+//                        [ , specialBehaviours
+//                        [ , modifyResolutionOptions ] ] )
+// ctor is the null-prototype record { availableLocales (a membership
+// predicate, as ResolveLocale takes it), relevantExtensionKeys, and
+// resolutionOptionDescriptors: a list of null-prototype records { property,
+// key, type ('string' when absent), values (undefined when absent) } }.
+// localeData is a function, as for ResolveLocale. specialBehaviours is
+// undefined or a list of 'require-options' and 'coerce-options'.
+// modifyResolutionOptions is undefined or a function of opt. Returns the
+// null-prototype record { options, resolvedLocale, resolutionOptions }.
+function ResolveOptions(
+  ctor,
+  localeData,
+  locales,
+  options,
+  specialBehaviours,
+  modifyResolutionOptions,
+) {
+  // 1-7. Read the locales and options (readResolveOptions).
+  var inputs = readResolveOptions(
+    ctor,
+    locales,
+    options,
+    specialBehaviours,
+    modifyResolutionOptions,
+  );
+  // 8-10. Resolve the locale from them (resolveFromOptions).
+  return resolveFromOptions(ctor, localeData, inputs);
+}
+
+/// Steps 1 to 7 of ResolveOptions, with its arguments but localeData: every
+/// step of it that user code can observe. Returns the null-prototype record
+/// { requestedLocales, options, opt } of the values those steps compute.
+/// resolveFromOptions does the rest, which depends only on that record,
+/// localeData and DefaultLocale(); callers that reuse a resolution split
+/// the two (30-Collator.js).
+function readResolveOptions(
+  ctor,
+  locales,
+  options,
+  specialBehaviours,
+  modifyResolutionOptions,
+) {
+  // 1. Let requestedLocales be ? CanonicalizeLocaleList(locales).
+  var requestedLocales = CanonicalizeLocaleList(locales);
+  // 2. If specialBehaviours is present and contains require-options and
+  //    options is undefined, throw a TypeError exception.
+  if (
+    specialBehaviours !== undefined &&
+    listContains(specialBehaviours, 'require-options') &&
+    options === undefined
+  )
+    throw new _TypeError('Intl: options argument is required');
+  if (
+    specialBehaviours !== undefined &&
+    listContains(specialBehaviours, 'coerce-options')
+  ) {
+    // 3. If specialBehaviours is present and contains coerce-options, set
+    //    options to ? CoerceOptionsToObject(options).
+    options = CoerceOptionsToObject(options);
+  } else {
+    //    Otherwise, set options to ? GetOptionsObject(options).
+    options = GetOptionsObject(options);
+  }
+  // 4. Let matcher be ? GetOption(options, "localeMatcher", string,
+  //    « "lookup", "best fit" », "best fit").
+  var matcher = GetOption(
+    options,
+    'localeMatcher',
+    'string',
+    ['lookup', 'best fit'],
+    'best fit',
+  );
+  // 5. Let opt be the Record { [[localeMatcher]]: matcher }.
+  var opt = {__proto__: null, localeMatcher: matcher};
+  // 6. For each Resolution Option Descriptor desc of
+  //    ctor.[[ResolutionOptionDescriptors]], do
+  var descriptors = ctor.resolutionOptionDescriptors;
+  for (var i = 0; i < descriptors.length; i++) {
+    var desc = descriptors[i];
+    // a. If desc has a [[Type]] field, let type be desc.[[Type]]. Otherwise,
+    //    let type be string.
+    var type = desc.type === undefined ? 'string' : desc.type;
+    // b. If desc has a [[Values]] field, let values be desc.[[Values]].
+    //    Otherwise, let values be empty (undefined here).
+    var values = desc.values;
+    // c. Let value be ? GetOption(options, desc.[[Property]], type, values,
+    //    undefined).
+    var value = GetOption(options, desc.property, type, values, undefined);
+    // d. If value is not undefined, then
+    if (value !== undefined) {
+      // i. Set value to ! ToString(value).
+      value = ToString(value);
+      // ii. If value cannot be matched by the type Unicode locale
+      //     nonterminal, throw a RangeError exception.
+      if (!isUnicodeType(value))
+        throw new _RangeError(
+          'Value ' + value + ' out of range for ' + desc.property,
+        );
+    }
+    // e. Let key be desc.[[Key]].
+    // f. Set opt.[[<key>]] to value.
+    opt[desc.key] = value;
+  }
+  // 7. If modifyResolutionOptions is present, perform
+  //    ! modifyResolutionOptions(opt).
+  if (modifyResolutionOptions !== undefined) modifyResolutionOptions(opt);
+  //    Return the values steps 8 to 10 use.
+  return {
+    __proto__: null,
+    requestedLocales: requestedLocales,
+    options: options,
+    opt: opt,
+  };
+}
+
+/// Steps 8 to 10 of ResolveOptions, from the record inputs that
+/// readResolveOptions returned. Nothing here is observable.
+function resolveFromOptions(ctor, localeData, inputs) {
+  var opt = inputs.opt;
+  // 8. Let resolution be ResolveLocale(ctor.[[AvailableLocales]],
+  //    requestedLocales, opt, ctor.[[RelevantExtensionKeys]], localeData).
+  var resolution = ResolveLocale(
+    ctor.availableLocales,
+    inputs.requestedLocales,
+    opt,
+    ctor.relevantExtensionKeys,
+    localeData,
+  );
+  // 9. Assert: resolution.[[LocaleData]] is a Record.
+  // 10. Return the Record { [[Options]]: options, [[ResolvedLocale]]:
+  //     resolution, [[ResolutionOptions]]: opt }.
+  return {
+    __proto__: null,
+    options: inputs.options,
+    resolvedLocale: resolution,
+    resolutionOptions: opt,
+  };
 }

@@ -500,12 +500,24 @@ Concatenated and compiled to bytecode, as the extensions are:
   `SetNumberFormatDigitOptions`, `ResolveLocale`, `LookupMatcher`,
   `FilterLocales` (ECMA-402 9.2.9; the draft renamed `SupportedLocales` and
   `LookupSupportedLocales` to it), Unicode extension parsing and insertion;
-- one file per constructor;
-- one file for the overridden built-ins.
+- `ResolveOptions` (9.2.8), in `03-locales.js` so that every constructor
+  shares it. It takes the service constructor as a JS record,
+  `{__proto__: null, availableLocales, relevantExtensionKeys,
+  resolutionOptionDescriptors}`, and returns the resolved options, the
+  resolved locale and the resolution options;
+- one file per constructor (`20-Locale.js`, `30-Collator.js`);
+- one file for the overridden built-ins, `80-builtins.js`. Each phase adds
+  its overrides to it. Phase 2 put `localeCompare`, `toLocaleLowerCase`,
+  `toLocaleUpperCase` and TransformCase there.
 
 Code is commented step by step against the spec. Setup receives an object of
 native helper functions plus the config; the native helpers are never
 reachable from user code.
+
+The draft's String overrides begin with "Let thisValue be ?
+RequireObjectCoercible(this value)". ECMA-262's RequireObjectCoercible now
+returns unused instead of its argument, so the code checks the this value
+and then uses it.
 
 ### Constructors
 
@@ -530,6 +542,8 @@ falls back to `Object.prototype`; ECMA-402 requires the constructor's own
 intrinsic prototype (for example `%Intl.NumberFormat.prototype%`). Only
 subclassing with a non-object `prototype` can observe this. It can be fixed
 later with a Hermes primitive that lets a JS function create its own `this`.
+This applies to `Intl.Collator` as well, and `intl/test/lit/collator-objects.js`
+pins it.
 
 ### Legacy constructor behavior
 
@@ -571,8 +585,16 @@ When a constructor has resolved its options, it calls a native helper such as
 `native.numberFormatInit(obj, ...resolvedFields)`. The helper builds the Rust
 formatter and attaches it to the instance with `setNativeState`. Methods pass
 the instance to native helpers, which fetch the formatter with
-`getNativeState<T>`. Native state holds only Rust and C++ data, never JS
-values.
+`hasNativeState` and `getNativeState` and check its type with
+`std::dynamic_pointer_cast`. Hermes asserts that native state is present
+when `getNativeState` is called, so the check comes first, and the typed
+`hasNativeState<T>` would add a third lookup. Native state holds only Rust
+and C++ data, never JS values.
+
+`Intl.Collator` is the first constructor to do this. It calls
+`native.collatorInit(obj, ...)`, which attaches a `CollatorState` that owns
+the Rust collator. `native.collatorCompare(obj, x, y)` looks the state up and
+compares.
 
 ### Resistance to tampering
 
@@ -592,7 +614,20 @@ lookups remain only where the spec itself requires them, such as
 `Array.prototype.toLocaleString` calling each element's `toLocaleString`.
 
 When both `locales` and `options` are `undefined`, the overrides reuse one
-cached default-locale formatter.
+cached default-locale formatter. With other arguments, `localeCompare`
+still performs every observable step of the `Intl.Collator` constructor
+(CanonicalizeLocaleList, each `Get` of an option and its conversion, in
+the draft's order, and each error they raise). It keys a cache on the
+values those steps read: the canonical requested locales and each option
+value. The rest of the constructor, locale resolution included, depends
+only on those values and `DefaultLocale()`, so a hit skips it and reuses
+the collator made for the same values. ECMA-402 never exposes such a
+collator to user code. The shared collators are kept in a JS object with a
+null prototype, at most 32 of them; the object is emptied when it is full.
+The same kind of object keeps the locale data of each locale
+`Intl.Collator` resolves to (one entry per available locale) and the
+canonical form of up to 64 language tags that CanonicalizeLocaleList has
+canonicalized.
 
 ### Locale matching
 
@@ -630,8 +665,8 @@ objects on a separate finalizer thread (`finalizerExecutor_` in
 `public/hermes/Public/RuntimeConfig.h`). Therefore:
 
 - every Rust type held in a `NativeState` must be `Send`, enforced by a
-  compile-time assertion in the crate, added with the first such type in
-  Phase 2 (ICU4X's `sync` feature is already enabled);
+  compile-time assertion in the crate (`HiCollator`, the first such type,
+  has one; ICU4X's `sync` feature is enabled);
 - a `NativeState` destructor frees only its own Rust object and touches no
   per-runtime cache;
 - per-runtime caches (such as the default formatters for the built-in
@@ -650,11 +685,17 @@ Two kinds of string cross the boundary, handled differently:
   input, ListFormat elements, Segmenter input): copied out as UTF-16 with
   `String::utf16` and never converted to UTF-8 in a way that could lose
   unpaired surrogates.
-  - Collator uses ICU4X's UTF-16 comparison.
+  - Collator uses ICU4X's UTF-16 comparison (`compare_utf16`), which reads
+    an unpaired surrogate as U+FFFD. Two different unpaired surrogates
+    therefore compare equal, and `compare(x, x)` is 0.
   - Segmenter uses ICU4X's UTF-16 segmentation, and all indices are UTF-16
     code-unit indices into the original string.
   - Case mapping splits the input at unpaired surrogates, maps each
-    well-formed run, and passes unpaired surrogates through unchanged.
+    well-formed run, and passes unpaired surrogates through unchanged. Each
+    run is mapped on its own, so a context rule such as the final sigma does
+    not look across an unpaired surrogate. The result comes back as a
+    `HiString16` (a UTF-16 buffer that C++ copies and then frees with
+    `hi_string16_free`).
   - ListFormat sends the element texts to native code, because CLDR list
     patterns depend on them (Spanish `y` becomes `e` before a word starting
     with an "i" sound; Spanish disjunctions and Hebrew conjunctions have
@@ -708,7 +749,16 @@ builds the part objects.
   `[[nu]]` from `defaultNumberingSystem`, so `getCollations` and
   `getNumberingSystems` agree with the constructors.
 - Each formatter type is a `jsi::NativeState` subclass that owns its Rust
-  pointer and frees it in its destructor.
+  pointer and frees it in its destructor. `CollatorState`
+  (`CollatorHelpers.cpp`) is the first. The destructor may run on Hermes'
+  finalizer thread, which is why `HiCollator` must be `Send`.
+- The conversion tags are `Bool` (results and arguments), `Object`
+  (arguments), `Utf8`, `Utf16`, `OptUtf8`, `Int` (results) and `Undefined`
+  (results). `Utf16` is lossless for unpaired surrogates.
+- The Collator and case-mapping helpers are `collatorLocaleDefaults`,
+  `collatorInit`, `collatorCompare` and `caseMap`. `collatorLocaleDefaults`
+  returns ICU4X's default `caseFirst` and `ignorePunctuation` for a locale,
+  which is where the Collator's locale data gets them.
 - Native code reports only internal errors, as C++ exceptions. Hermes turns a
   C++ exception thrown from a host function into an `Error` made from its own
   intrinsic, with the message `Exception in HostFunction: ...`
@@ -755,6 +805,56 @@ builds the part objects.
     tailorings in ICU4X's data, time zones from ICU4X's IANA data, and units
     from ECMA-402's table, in JS. `intl/core/data/update-cldr-lists.py`
     regenerates the CLDR lists when ICU4X is upgraded.
+- **Collator** (Phase 2). How `Intl.Collator` gets its locale data and
+  reaches ICU4X:
+  - `[[RelevantExtensionKeys]]` is « "co", "kf", "kn" ». The
+    `[[ResolutionOptionDescriptors]]` are the draft's: `co`/`collation`,
+    `kn`/`numeric` (boolean) and `kf`/`caseFirst` with the values « "upper",
+    "lower", "false" ».
+  - For each available locale, `[[co]]` is « null » followed by the
+    collations `collationsOfLocale` gives (so `getCollations` and the
+    constructor agree), and `[[kn]]` is « "false", "true" ». `[[kf]]` starts
+    with ICU4X's default case-first for the locale ("upper" for `da` and
+    `mt`, "false" for the others) followed by the other two values.
+    `[[ignorePunctuation]]` is true where ICU4X's default alternate handling
+    is shifted (`th`). `[[sensitivity]]` is "variant" for search only. The
+    sort and search locale data are otherwise the same. The defaults come
+    from `collatorLocaleDefaults`.
+  - The constructor uses the plugin's one `[[AvailableLocales]]`
+    (`isAvailableLocale`), as `getCollations` does.
+  - ICU4X's compiled data has no "search" tailorings (checked in
+    `icu_collator_data` 2.3.0), and the design rules out a datagen step. So
+    `usage: "search"` uses the sort tailoring, with its own default
+    sensitivity, and `intl402/Collator/usage-de.js` keeps failing.
+  - The resolved options reach ICU4X explicitly, not through `-u-` keywords
+    in the tag:
+
+    | ECMA-402 | ICU4X |
+    |---|---|
+    | sensitivity `"base"` | strength `Primary` |
+    | sensitivity `"accent"` | strength `Secondary` |
+    | sensitivity `"case"` | strength `Primary`, case level `On` |
+    | sensitivity `"variant"` | strength `Tertiary` |
+    | ignorePunctuation `true` / `false` | alternate handling `Shifted` / `NonIgnorable`, always set, because `th` defaults to shifted |
+    | numeric | `numeric_ordering` |
+    | caseFirst | `case_first` |
+    | collation other than `"default"` | `collation_type` |
+
+    Only the language identifier of `[[Locale]]` picks the tailoring.
+  - The String overrides create their collator through the internal
+    creation function, never through `Intl.Collator`. When `locales` and
+    `options` are both `undefined`, `localeCompare` reuses one default
+    collator kept in a JS variable; otherwise it shares a collator among
+    the calls that read the same locales and option values (see
+    "Resistance to tampering").
+- **Case mapping** (Phase 2). TransformCase's available locales are « "az",
+  "el", "hy", "lt", "tr" »: the languages ICU4X's `CaseMapper` tailors for
+  upper and lower case. `nl` is left out because it tailors only titlecase.
+  A tag matches by prefix (`tr-TR` gives `tr`), and no match gives `"und"`,
+  the default mapping. The `hy` uppercase tailoring differs from engines
+  built on ICU4C: here `"և".toLocaleUpperCase("hy")` is `"ԵՎ"`, there it is
+  `"ԵՒ"`, the default mapping. When `locales` is `undefined`, the locale
+  matched for `DefaultLocale()` is kept in a JS variable.
 - **Locale information** (Phase 1, the `Intl.Locale` information methods and
   Add / Remove Likely Subtags) comes from these sources:
 
@@ -942,8 +1042,12 @@ components completely: the whole public surface, including `formatToParts`,
    and `minimize`, and the information methods `getCalendars`,
    `getCollations`, `getHourCycles`, `getNumberingSystems`,
    `getTimeZones`, `getTextInfo` and `getWeekInfo`, with `firstDayOfWeek`.
-2. **Collator and case mapping.** `Intl.Collator`, and the `localeCompare`,
-   `toLocaleUpperCase` and `toLocaleLowerCase` overrides.
+2. **Collator and case mapping.** `Intl.Collator` with its whole surface
+   (the constructor and its options, `supportedLocalesOf`, `resolvedOptions`
+   and the `compare` getter with its bound function), and the
+   `localeCompare`, `toLocaleUpperCase` and `toLocaleLowerCase` overrides.
+   `ResolveOptions` is shared with the later phases. Phase 2 built all of
+   it; `usage: "search"` uses the sort tailoring (see Data).
 3. **NumberFormat and PluralRules.** All notations, styles and ranges, and
    parts; legacy constructor behavior; PluralRules shares the digit options.
    Digits for the numbering systems ICU4X has no data for (see Data). Also

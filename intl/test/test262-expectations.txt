@@ -20,69 +20,8 @@ test/intl402/BigInt/prototype/toLocaleString/en-US.js both Phase 3: BigInt.proto
 test/intl402/BigInt/prototype/toLocaleString/length.js both Phase 3: BigInt.prototype.toLocaleString
 test/intl402/BigInt/prototype/toLocaleString/returns-same-results-as-NumberFormat.js both Phase 3: BigInt.prototype.toLocaleString
 test/intl402/BigInt/prototype/toLocaleString/throws-same-exceptions-as-NumberFormat.js both Phase 3: BigInt.prototype.toLocaleString
-test/intl402/Collator/builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/constructor-options-throwing-getters.js both Phase 2: Intl.Collator
-test/intl402/Collator/default-options-object-prototype.js both Phase 2: Intl.Collator
-test/intl402/Collator/ignore-invalid-unicode-ext-values.js both Phase 2: Intl.Collator
-test/intl402/Collator/instance-proto-and-extensible.js both Phase 2: Intl.Collator
-test/intl402/Collator/legacy-regexp-statics-not-modified.js both Phase 2: Intl.Collator
-test/intl402/Collator/length.js both Phase 2: Intl.Collator
-test/intl402/Collator/missing-unicode-ext-value-defaults-to-true.js both Phase 2: Intl.Collator
-test/intl402/Collator/name.js both Phase 2: Intl.Collator
-test/intl402/Collator/numeric-and-caseFirst.js both Phase 2: Intl.Collator
-test/intl402/Collator/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/bound-to-collator-instance.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/canonically-equivalent-strings.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/compare-function-builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/compare-function-length.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/compare-function-name.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/compare-function-property-order.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/ignorePunctuation.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/length.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/name.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/non-normative-basic.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/non-normative-phonebook.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/non-normative-sensitivity.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/compare/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/constructor/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/constructor/value.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/basic.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/ignorePunctuation-default.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/ignorePunctuation-not-default.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/length.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/name.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/order.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/resolved-case-first-unicode-extensions-and-options.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/resolved-collation-unicode-extensions-and-options.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/resolvedOptions/resolved-numeric-unicode-extensions-and-options.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/this-value-not-collator.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/toStringTag/toString-changed-tag.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/toStringTag/toString-removed-tag.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/toStringTag/toString.js both Phase 2: Intl.Collator
-test/intl402/Collator/prototype/toStringTag/toStringTag.js both Phase 2: Intl.Collator
-test/intl402/Collator/subclassing.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/basic.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/builtin.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/length.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/name.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/prop-desc.js both Phase 2: Intl.Collator
-test/intl402/Collator/supportedLocalesOf/taint-Object-prototype.js both Phase 2: Intl.Collator
-test/intl402/Collator/taint-Object-prototype.js both Phase 2: Intl.Collator
-test/intl402/Collator/test-option-ignorePunctuation.js both Phase 2: Intl.Collator
-test/intl402/Collator/test-option-localeMatcher.js both Phase 2: Intl.Collator
-test/intl402/Collator/test-option-numeric-and-caseFirst.js both Phase 2: Intl.Collator
-test/intl402/Collator/test-option-sensitivity.js both Phase 2: Intl.Collator
-test/intl402/Collator/test-option-usage.js both Phase 2: Intl.Collator
-test/intl402/Collator/this-value-ignored.js both Phase 2: Intl.Collator
-test/intl402/Collator/unicode-ext-seq-in-private-tag.js both Phase 2: Intl.Collator
-test/intl402/Collator/unicode-ext-seq-with-attribute.js both Phase 2: Intl.Collator
-test/intl402/Collator/unicode-ext-value-collation.js both Phase 2: Intl.Collator
-test/intl402/Collator/usage-de.js both Phase 2: Intl.Collator
+test/intl402/Collator/this-value-ignored.js both Phase 4: testWithIntlConstructors needs Intl.Collator, Intl.NumberFormat and Intl.DateTimeFormat
+test/intl402/Collator/usage-de.js both ICU4X's compiled data has no search collations, so usage "search" sorts as "sort"
 test/intl402/Date/prototype/returns-same-results-as-DateTimeFormat.js both Phase 4: Date.prototype.toLocale*String
 test/intl402/Date/prototype/throws-same-exceptions-as-DateTimeFormat.js both Phase 4: Date.prototype.toLocale*String
 test/intl402/Date/prototype/toLocaleString/default-options-object-prototype.js both Phase 4: Date.prototype.toLocale*String
@@ -259,6 +198,7 @@ test/intl402/DateTimeFormat/test-option-date-time-components.js both Phase 4: In
 test/intl402/DateTimeFormat/test-option-formatMatcher.js both Phase 4: Intl.DateTimeFormat
 test/intl402/DateTimeFormat/test-option-hour12.js both Phase 4: Intl.DateTimeFormat
 test/intl402/DateTimeFormat/test-option-localeMatcher.js both Phase 4: Intl.DateTimeFormat
+test/intl402/DateTimeFormat/this-value-ignored.js both Phase 4: Intl.DateTimeFormat
 test/intl402/DateTimeFormat/timezone-case-insensitive.js both Phase 4: Intl.DateTimeFormat
 test/intl402/DateTimeFormat/timezone-invalid.js both Phase 4: Intl.DateTimeFormat
 test/intl402/DateTimeFormat/timezone-legacy-non-iana.js both Phase 4: Intl.DateTimeFormat
@@ -423,7 +363,6 @@ test/intl402/DurationFormat/supportedLocalesOf/name.js both Phase 5: Intl.Durati
 test/intl402/DurationFormat/supportedLocalesOf/prop-desc.js both Phase 5: Intl.DurationFormat
 test/intl402/Intl/supportedValuesOf/calendars-accepted-by-DateTimeFormat.js both Phase 4: checks the values against Intl.DateTimeFormat
 test/intl402/Intl/supportedValuesOf/calendars-accepted-by-DisplayNames.js both Phase 5: checks the values against Intl.DisplayNames
-test/intl402/Intl/supportedValuesOf/collations-accepted-by-Collator.js both Phase 2: checks the values against Intl.Collator
 test/intl402/Intl/supportedValuesOf/currencies-accepted-by-DisplayNames.js both Phase 5: checks the values against Intl.DisplayNames
 test/intl402/Intl/supportedValuesOf/currencies-accepted-by-NumberFormat.js both Phase 3: checks the values against Intl.NumberFormat
 test/intl402/Intl/supportedValuesOf/numberingSystems-accepted-by-DateTimeFormat.js both Phase 4: checks the values against Intl.DateTimeFormat
@@ -758,6 +697,7 @@ test/intl402/NumberFormat/test-option-roundingPriority.js both Phase 3: Intl.Num
 test/intl402/NumberFormat/test-option-style.js both Phase 3: Intl.NumberFormat
 test/intl402/NumberFormat/test-option-useGrouping-extended.js both Phase 3: Intl.NumberFormat
 test/intl402/NumberFormat/test-option-useGrouping.js both Phase 3: Intl.NumberFormat
+test/intl402/NumberFormat/this-value-ignored.js both Phase 3: Intl.NumberFormat
 test/intl402/NumberFormat/throws-for-currency-style-without-currency-option.js both Phase 3: Intl.NumberFormat
 test/intl402/NumberFormat/throws-for-maximumFractionDigits-over-limit.js both Phase 3: Intl.NumberFormat
 test/intl402/NumberFormat/throws-for-maximumFractionDigits-under-limit.js both Phase 3: Intl.NumberFormat
@@ -967,17 +907,6 @@ test/intl402/Segmenter/prototype/segment/segment-tostring.js both Phase 5: Intl.
 test/intl402/Segmenter/prototype/segment/segment-word-iterable.js both Phase 5: Intl.Segmenter
 test/intl402/Segmenter/prototype/toStringTag/toString.js both Phase 5: Intl.Segmenter
 test/intl402/Segmenter/prototype/toStringTag/toStringTag.js both Phase 5: Intl.Segmenter
-test/intl402/String/prototype/localeCompare/default-options-object-prototype.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/localeCompare/returns-same-results-as-Collator.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/localeCompare/throws-same-exceptions-as-Collator.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleLowerCase/special_casing_Azeri.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleLowerCase/special_casing_Lithuanian.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleLowerCase/special_casing_Turkish.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleLowerCase/validates-all-locale-identifiers.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleUpperCase/special_casing_Azeri.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleUpperCase/special_casing_Lithuanian.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleUpperCase/special_casing_Turkish.js both Phase 2: locale-sensitive String methods
-test/intl402/String/prototype/toLocaleUpperCase/validates-all-locale-identifiers.js both Phase 2: locale-sensitive String methods
 test/intl402/constructors-taint-Object-prototype-2.js both Phase 4: testWithIntlConstructors needs Intl.Collator, Intl.NumberFormat and Intl.DateTimeFormat
 test/intl402/constructors-taint-Object-prototype.js both Phase 4: testWithIntlConstructors needs Intl.Collator, Intl.NumberFormat and Intl.DateTimeFormat
 test/intl402/default-locale-is-canonicalized.js both Phase 4: testWithIntlConstructors needs Intl.Collator, Intl.NumberFormat and Intl.DateTimeFormat

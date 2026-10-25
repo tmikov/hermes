@@ -120,6 +120,8 @@ add_subdirectory(js)
 set(HERMES_ENABLE_EH ON)
 set(HERMES_ENABLE_RTTI ON)
 set(HERMES_INTL_PLUGIN_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/CollatorHelpers.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/StringHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/Defaults.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/IntlBytecode.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/LocaleHelpers.cpp

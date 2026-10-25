@@ -14,6 +14,8 @@ add_unittest(HermesIntlUnitTests IntlPluginUnitTests
   DefaultsTest.cpp
   NativeHelpersTest.cpp
   SetupObjectsTest.cpp
+  ${PROJECT_SOURCE_DIR}/intl/jsi/CollatorHelpers.cpp
+  ${PROJECT_SOURCE_DIR}/intl/jsi/StringHelpers.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/Defaults.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/LocaleHelpers.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/NativeHelpers.cpp)

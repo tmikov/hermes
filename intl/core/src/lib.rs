@@ -45,6 +45,46 @@ pub unsafe extern "C" fn hi_string_free(s: HiString) {
     }
 }
 
+/// A UTF-16 string owned by Rust and handed to C++, which must free it with
+/// hi_string16_free.
+#[repr(C)]
+pub struct HiString16 {
+    pub data: *mut u16,
+    pub len: usize,
+    pub capacity: usize,
+}
+
+impl HiString16 {
+    /// The value written to an out-parameter when there is no result.
+    const EMPTY: HiString16 = HiString16 {
+        data: std::ptr::null_mut(),
+        len: 0,
+        capacity: 0,
+    };
+
+    fn from_units(v: Vec<u16>) -> HiString16 {
+        let mut units = std::mem::ManuallyDrop::new(v);
+        HiString16 {
+            data: units.as_mut_ptr(),
+            len: units.len(),
+            capacity: units.capacity(),
+        }
+    }
+}
+
+/// Free a string returned by this library. Accepts the empty value.
+///
+/// # Safety
+/// `s` must come from this library and must not be freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_string16_free(s: HiString16) {
+    if !s.data.is_null() {
+        drop(Vec::from_raw_parts(s.data, s.len, s.capacity));
+    }
+}
+
+mod casemap;
+mod collator;
 mod host;
 mod info;
 mod locale;
@@ -364,6 +404,148 @@ pub unsafe extern "C" fn hi_supported_values(kind: HiValueKind, out: *mut HiStri
     *out = HiString::from_string(supported::values(kind).join(" "));
 }
 
+/// A collator: an ICU4X collator for one set of resolved Intl.Collator
+/// options. Opaque to C++, which frees it with hi_collator_free.
+pub struct HiCollator(icu::collator::CollatorBorrowed<'static>);
+
+// A NativeState holding a HiCollator can be destroyed on any thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<HiCollator>();
+};
+
+/// Make a collator. `locale` is a canonical tag (only its language
+/// identifier is used), `collation` is "default" or a supported collation,
+/// `sensitivity` is "base", "accent", "case" or "variant" and `case_first`
+/// is "upper", "lower" or "false". Null for any other value, or if there is
+/// no data.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_collator_new(
+    locale: *const u8,
+    locale_len: usize,
+    collation: *const u8,
+    collation_len: usize,
+    sensitivity: *const u8,
+    sensitivity_len: usize,
+    ignore_punctuation: bool,
+    numeric: bool,
+    case_first: *const u8,
+    case_first_len: usize,
+) -> *mut HiCollator {
+    let (Some(locale), Some(collation), Some(sensitivity), Some(case_first)) = (
+        as_str(locale, locale_len),
+        as_str(collation, collation_len),
+        as_str(sensitivity, sensitivity_len),
+        as_str(case_first, case_first_len),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    match collator::new_collator(
+        locale,
+        collation,
+        sensitivity,
+        ignore_punctuation,
+        numeric,
+        case_first,
+    ) {
+        Some(c) => Box::into_raw(Box::new(HiCollator(c))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free a collator from hi_collator_new. Accepts null.
+///
+/// # Safety
+/// `collator` must be null or come from hi_collator_new, and must not be
+/// freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_collator_free(collator: *mut HiCollator) {
+    if !collator.is_null() {
+        drop(Box::from_raw(collator));
+    }
+}
+
+/// CompareStrings on two UTF-16 strings: -1, 0 or 1. An unpaired surrogate
+/// compares as U+FFFD.
+///
+/// # Safety
+/// `collator` must be valid; each string must point to its length of
+/// readable u16 units, or the length must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_collator_compare(
+    collator: *const HiCollator,
+    x: *const u16,
+    x_len: usize,
+    y: *const u16,
+    y_len: usize,
+) -> i32 {
+    let units = |p: *const u16, len: usize| -> &[u16] {
+        if len == 0 {
+            &[]
+        } else {
+            std::slice::from_raw_parts(p, len)
+        }
+    };
+    debug_assert!(!collator.is_null());
+    (*collator)
+        .0
+        .compare_utf16(units(x, x_len), units(y, y_len)) as i32
+}
+
+/// The full upper (`upper` true) or lower case mapping of the UTF-16 text,
+/// with the tailoring of `language` ("und", or a language tag). Unpaired
+/// surrogates are copied through unchanged. When it returns true, `out` is
+/// the result; false if `language` is not UTF-8 or does not parse.
+///
+/// # Safety
+/// `text` must point to `len` readable u16 units, or `len` must be 0;
+/// `language` must point to `language_len` readable bytes, or the length
+/// must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_case_map(
+    text: *const u16,
+    len: usize,
+    language: *const u8,
+    language_len: usize,
+    upper: bool,
+    out: *mut HiString16,
+) -> bool {
+    let units: &[u16] = if len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(text, len)
+    };
+    match as_str(language, language_len).and_then(|l| casemap::case_map(units, l, upper)) {
+        Some(v) => {
+            *out = HiString16::from_units(v);
+            true
+        }
+        None => {
+            *out = HiString16::EMPTY;
+            false
+        }
+    }
+}
+
+/// ICU4X's default "<caseFirst> <ignorePunctuation>" for the language
+/// identifier of `locale`, for example "upper false". False if `locale`
+/// does not parse.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_collator_locale_defaults(
+    locale: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_out(out, as_str(locale, len).and_then(collator::locale_defaults))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +573,71 @@ mod tests {
         let result = String::from_utf8(result.to_vec()).unwrap();
         unsafe { hi_string_free(out) };
         Some(result)
+    }
+
+    #[test]
+    fn ffi_case_map() {
+        let run = |text: &[u16], lang: &str, upper: bool| unsafe {
+            let mut out = HiString16::EMPTY;
+            let ok = hi_case_map(
+                text.as_ptr(),
+                text.len(),
+                lang.as_ptr(),
+                lang.len(),
+                upper,
+                &mut out,
+            );
+            let v = if ok {
+                Some(std::slice::from_raw_parts(out.data, out.len).to_vec())
+            } else {
+                None
+            };
+            hi_string16_free(out);
+            v
+        };
+        assert_eq!(run(&[0x61, 0xD800], "und", true), Some(vec![0x41, 0xD800]));
+        assert_eq!(run(&[], "und", true), Some(vec![]));
+        assert_eq!(run(&[0x61], "en_US", true), None);
+    }
+
+    #[test]
+    fn ffi_collator() {
+        let make = |locale: &str, co: &str, sens: &str, cf: &str| unsafe {
+            hi_collator_new(
+                locale.as_ptr(),
+                locale.len(),
+                co.as_ptr(),
+                co.len(),
+                sens.as_ptr(),
+                sens.len(),
+                false,
+                false,
+                cf.as_ptr(),
+                cf.len(),
+            )
+        };
+        let c = make("en", "default", "variant", "false");
+        assert!(!c.is_null());
+        let cmp = |x: &[u16], y: &[u16]| unsafe {
+            hi_collator_compare(c, x.as_ptr(), x.len(), y.as_ptr(), y.len())
+        };
+        let (a, b) = ([0x61u16], [0x62u16]);
+        assert_eq!(cmp(&a, &b), -1);
+        assert_eq!(cmp(&b, &a), 1);
+        assert_eq!(cmp(&a, &a), 0);
+        // Empty strings may come with any pointer.
+        assert_eq!(cmp(&[], &[]), 0);
+        assert_eq!(cmp(&[], &a), -1);
+        unsafe { hi_collator_free(c) };
+        unsafe { hi_collator_free(std::ptr::null_mut()) };
+        assert!(make("en", "search", "variant", "false").is_null());
+        assert!(make("en", "default", "Base", "false").is_null());
+
+        assert_eq!(
+            call(hi_collator_locale_defaults, "da").as_deref(),
+            Some("upper false")
+        );
+        assert_eq!(call(hi_collator_locale_defaults, "en_US"), None);
     }
 
     #[test]

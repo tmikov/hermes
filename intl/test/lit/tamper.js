@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: %hermes %s | %FileCheck --match-full-lines %s
+// RUN: %hermes -Xintl-default-locale=en-US %s | %FileCheck --match-full-lines %s
 
 // User code that replaces intrinsics before its first call to Intl does not
 // change what Intl returns or throws. Nothing calls Intl before the
@@ -41,6 +41,13 @@ var getVariants = getter('variants');
 var getCalendar = getter('calendar');
 var getFirstDayOfWeek = getter('firstDayOfWeek');
 var getNumeric = getter('numeric');
+var OriginalCollator = Intl.Collator;
+var CollatorPrototype = Intl.Collator.prototype;
+var collatorResolvedOptions = CollatorPrototype.resolvedOptions;
+var collatorSupportedLocalesOf = Intl.Collator.supportedLocalesOf;
+var getCompare = Object.getOwnPropertyDescriptor(CollatorPrototype, 'compare').get;
+var localeCompare = String.prototype.localeCompare;
+var toLocaleUpperCase = String.prototype.toLocaleUpperCase;
 var boom = function () {
   throw new Error('tampered intrinsic was used');
 };
@@ -68,6 +75,10 @@ String.prototype.slice = boom;
 String.prototype.indexOf = boom;
 String.prototype.charCodeAt = boom;
 String.prototype.toLowerCase = boom;
+String.prototype.toUpperCase = boom;
+String.prototype.codePointAt = boom;
+String.prototype.normalize = boom;
+String.fromCodePoint = boom;
 String.fromCharCode = boom;
 Function.prototype.call = boom;
 Function.prototype.apply = boom;
@@ -86,13 +97,25 @@ LocalePrototype.maximize = boom;
 LocalePrototype.getCalendars = boom;
 LocalePrototype.getWeekInfo = boom;
 LocalePrototype.getTextInfo = boom;
+CollatorPrototype.resolvedOptions = boom;
+define(CollatorPrototype, 'compare', {__proto__: null, get: boom, configurable: true});
+Intl.Collator.supportedLocalesOf = boom;
 // The names of the fields of the constructor's internal records, of
 // RegionPreference's, and of the objects getWeekInfo and getTextInfo
 // return. "region" is left out: the constructor reads it from its options
-// object, which inherits from Object.prototype, as the spec requires.
+// object, which inherits from Object.prototype, as the spec requires. The
+// Collator's records add the resolution option descriptors' fields, the
+// extension keys, the locale data fields, and the fields of what
+// ResolveOptions and ResolveLocale return. The Collator's own options
+// ("usage", "sensitivity" and so on) are left out, since the Locale tests
+// pass options objects without them; the Collator tests below pass
+// undefined or an object that has every option.
 var recordFields = [
   'locale', 'calendar', 'ca', 'key', 'base', 'extension', 'regionOverride',
-  'firstDay', 'weekend', 'direction',
+  'firstDay', 'weekend', 'direction', 'localeMatcher', 'co', 'kn', 'kf',
+  'sensitivity', 'ignorePunctuation', 'property', 'type', 'values',
+  'options', 'resolvedLocale', 'resolutionOptions', 'localeData',
+  'attributes', 'keywords',
 ];
 for (var k = 0; k < recordFields.length; k++)
   define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
@@ -101,6 +124,7 @@ for (var k = 0; k < recordFields.length; k++)
 var globals = ['Object', 'RangeError', 'TypeError', 'Reflect', 'Math', 'Number', 'Symbol', 'Array'];
 for (var i = 0; i < globals.length; i++) globalThis[globals[i]] = boom;
 Intl.Locale = boom;
+Intl.Collator = boom;
 // Last, because it breaks ordinary descriptor objects: accessors for the
 // descriptor fields on Object.prototype. "value" is also a field of the
 // records of Unicode extension keywords.
@@ -182,3 +206,82 @@ print(stringify(week.weekend), week.firstDay);
 var text = apply(localeGetTextInfo, new OriginalLocale('ar'), []);
 print(text.direction, getPrototypeOf(text) === ObjectPrototype);
 // CHECK-NEXT: rtl true
+
+// Intl.Collator, through the references captured before the tampering: the
+// constructor with and without new, resolvedOptions, the compare getter and
+// its bound function, and supportedLocalesOf.
+var collator = new OriginalCollator('de-u-co-phonebk-kn');
+print(stringify(apply(collatorResolvedOptions, collator, [])));
+// CHECK-NEXT: {"locale":"de-u-co-phonebk-kn","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"phonebk","numeric":true,"caseFirst":"false"}
+var compare = apply(getCompare, collator, []);
+print(compare('ä', 'ad'), compare('2', '10'), compare('a', 'A'));
+// CHECK-NEXT: 1 -1 -1
+print(compare === apply(getCompare, collator, []));
+// CHECK-NEXT: true
+var called = OriginalCollator('da');
+print(
+  getPrototypeOf(called) === CollatorPrototype,
+  stringify(apply(collatorResolvedOptions, called, [])),
+);
+// CHECK-NEXT: true {"locale":"da","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"}
+// An options object with every option, so that no option is read from the
+// tampered Object.prototype.
+var options = {
+  localeMatcher: 'lookup',
+  usage: 'search',
+  collation: 'eor',
+  numeric: false,
+  caseFirst: 'lower',
+  sensitivity: 'base',
+  ignorePunctuation: true,
+};
+var full = new OriginalCollator(['xx', 'de-u-co-phonebk'], options);
+print(stringify(apply(collatorResolvedOptions, full, [])));
+// CHECK-NEXT: {"locale":"de","usage":"search","sensitivity":"base","ignorePunctuation":true,"collation":"eor","numeric":false,"caseFirst":"lower"}
+print(apply(getCompare, full, [])('a-A', 'aa'));
+// CHECK-NEXT: 0
+print(stringify(apply(collatorSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(thrown(() => new OriginalCollator('de', {usage: 'x'}), OriginalRangeError));
+// CHECK-NEXT: ok
+// Every option read before the error is an own property.
+print(
+  thrown(
+    () => new OriginalCollator('de', {localeMatcher: 'lookup', usage: 'sort', collation: 'a'}),
+    OriginalRangeError,
+  ),
+);
+// CHECK-NEXT: ok
+print(thrown(() => apply(collatorResolvedOptions, {}, []), OriginalTypeError));
+// CHECK-NEXT: ok
+print(thrown(() => apply(getCompare, {}, []), OriginalTypeError));
+// CHECK-NEXT: ok
+
+// The String overrides, called as methods (Function.prototype.call is
+// replaced): localeCompare uses neither the replaced Intl.Collator nor the
+// replaced compare getter or resolvedOptions, with or without locales; the
+// case mapping uses none of the replaced String methods.
+print('a'.localeCompare('b'), 'a'.localeCompare('A'), 'b'.localeCompare('a'));
+// CHECK-NEXT: -1 -1 1
+// Again, now that the default collator exists.
+print('a'.localeCompare('b'), 'a'.localeCompare('a', undefined, undefined));
+// CHECK-NEXT: -1 0
+print('ä'.localeCompare('z', 'sv'), 'ä'.localeCompare('z', ['de']));
+// CHECK-NEXT: 1 -1
+print('2'.localeCompare('10', 'de-u-kn'));
+// CHECK-NEXT: -1
+// The options object from the Collator test above, with every option.
+print('a-A'.localeCompare('aa', ['xx', 'de-u-co-phonebk'], options));
+// CHECK-NEXT: 0
+print('i'.toLocaleUpperCase('tr'), 'I'.toLocaleLowerCase(['az']), 'ab'.toLocaleUpperCase());
+// CHECK-NEXT: İ ı AB
+print('ΆΒ'.toLocaleLowerCase('el'), 'άβ'.toLocaleUpperCase(['el-GR']));
+// CHECK-NEXT: άβ ΑΒ
+print(thrown(() => apply(localeCompare, null, ['a']), OriginalTypeError));
+// CHECK-NEXT: ok
+print(thrown(() => 'a'.localeCompare('b', 'xx-invalid-'), OriginalRangeError));
+// CHECK-NEXT: ok
+print(thrown(() => apply(toLocaleUpperCase, undefined, []), OriginalTypeError));
+// CHECK-NEXT: ok
+print(thrown(() => 'a'.toLocaleUpperCase(['']), OriginalRangeError));
+// CHECK-NEXT: ok

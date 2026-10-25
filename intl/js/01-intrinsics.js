@@ -27,6 +27,7 @@ var MathMin = Math.min;
 var MathTrunc = Math.trunc;
 var NumberIsFinite = Number.isFinite;
 var StringFromCharCode = String.fromCharCode;
+var StringPrototype = String.prototype;
 var StringPrototypeCharCodeAt = String.prototype.charCodeAt;
 var StringPrototypeIndexOf = String.prototype.indexOf;
 var StringPrototypeSlice = String.prototype.slice;
@@ -66,6 +67,20 @@ function ToObject(v) {
     throw new _TypeError('Cannot convert undefined or null to object');
   // 2-8. Wrap a primitive in a new wrapper object; return an object as is.
   return _Object(v);
+}
+
+// ECMA-262 7.2.1 RequireObjectCoercible ( arg ). name, when given, is the
+// method whose this value arg is, and goes in the message.
+function RequireObjectCoercible(arg, name = undefined) {
+  // 1. If arg is either undefined or null, throw a TypeError exception.
+  if (arg === undefined || arg === null) {
+    throw new _TypeError(
+      name === undefined
+        ? 'Cannot convert undefined or null to object'
+        : name + ' called on null or undefined',
+    );
+  }
+  // 2. Return unused.
 }
 
 // ECMA-262 7.1.4 ToNumber ( arg )

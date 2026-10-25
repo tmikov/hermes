@@ -6,15 +6,19 @@
  */
 
 /*
-RUN: LC_ALL=en_US.UTF-8 _HERMES_TEST_LOCALE=en-US %hermes -O -target=HBC %s \
+RUN: LC_ALL=en_US.UTF-8 _HERMES_TEST_LOCALE=en-US %hermes -O -target=HBC \
+RUN:            -Xintl-default-locale=en-US %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix EN %s
-RUN: LC_ALL=tr_TR.UTF-8 _HERMES_TEST_LOCALE=tr-TR %hermes -O -target=HBC %s \
+RUN: LC_ALL=tr_TR.UTF-8 _HERMES_TEST_LOCALE=tr-TR %hermes -O -target=HBC \
+RUN:            -Xintl-default-locale=tr-TR %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix TR %s
 RUN: LC_ALL=UTF-8 %hermes -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix NO %s
 RUN: LC_ALL=en_US.UTF-8 _HERMES_TEST_LOCALE=en-US %shermes -exec %s \
+RUN:            -Wx,-Xintl-default-locale=en-US \
 RUN:            | %FileCheck --match-full-lines -check-prefix EN %s
 RUN: LC_ALL=tr_TR.UTF-8 _HERMES_TEST_LOCALE=tr-TR %shermes -exec %s \
+RUN:            -Wx,-Xintl-default-locale=tr-TR \
 RUN:            | %FileCheck --match-full-lines -check-prefix TR %s
 RUN: LC_ALL=UTF-8 %shermes -exec %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix NO %s

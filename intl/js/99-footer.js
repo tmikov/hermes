@@ -16,5 +16,7 @@ return function setup(nativeHelpers, defaults) {
   hostDefaults = defaults;
   // 2. Define globalThis.Intl.
   installIntl();
+  // 3. Replace the locale-sensitive built-ins with their ECMA-402 versions.
+  installBuiltinOverrides();
 };
 })();

@@ -32,14 +32,16 @@ var native = {
   },
 };
 var hostDefaults = {locales: ['en'], timeZone: 'UTC'};
-// 20-Locale.js is not included, so no object is an Intl.Locale,
-// and installIntl installs no Intl.Locale.
+// 20-Locale.js and 30-Collator.js are not included, so no object is an
+// Intl.Locale, and installIntl installs neither Intl.Collator nor
+// Intl.Locale.
 function isLocaleObject(o) {
   return false;
 }
 function localeObjectTag(o) {
   throw new Error('not a Locale');
 }
+function installCollator(intl) {}
 function installLocale(intl) {}
 installIntl();
 

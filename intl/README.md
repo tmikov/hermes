@@ -11,9 +11,11 @@ The design, and the reasons behind it, are in
 Phase 0 plan is
 [doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md](../doc/superpowers/plans/2026-10-22-intl-plugin-phase0.md).
 
-Phase 0 was infrastructure, and Phase 1 added `Intl.Locale`. `Intl` has
-`getCanonicalLocales`, `supportedValuesOf` and `Locale`. The other
-constructors arrive in later phases (see "Phasing" in the spec).
+Phase 0 was infrastructure, Phase 1 added `Intl.Locale`, and Phase 2 added
+`Intl.Collator` and the ECMA-402 versions of `localeCompare`,
+`toLocaleLowerCase` and `toLocaleUpperCase`. `Intl` has
+`getCanonicalLocales`, `supportedValuesOf`, `Locale` and `Collator`. The
+other constructors arrive in later phases (see "Phasing" in the spec).
 
 ## Layout
 
@@ -25,11 +27,17 @@ constructors arrive in later phases (see "Phasing" in the spec).
 | `core/src/info.rs` | The lookups behind the `Intl.Locale` information methods: calendars, hour cycles, time zones, week data, text direction, numbering system and collations. |
 | `core/src/host.rs` | Turning host settings (POSIX locale names, `TZ`, `/etc/localtime`) into ECMA-402 values. |
 | `core/src/supported.rs` | The lists behind `Intl.supportedValuesOf`. |
+| `core/src/collator.rs` | The ICU4X collator for a set of resolved Collator options, and the locale defaults. |
+| `core/src/casemap.rs` | Upper and lower case mapping of UTF-16 text, split at unpaired surrogates. |
 | `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
 | `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
 | `js/20-Locale.js` | `Intl.Locale`: the constructor, the getters, the information methods, `maximize` and `minimize`. |
+| `js/30-Collator.js` | `Intl.Collator`: the constructor, `supportedLocalesOf`, `resolvedOptions` and the `compare` getter. |
+| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase` and `toLocaleUpperCase`, and TransformCase. Later phases add theirs. |
 | `jsi/` | C++: the entry point (`Plugin.cpp`), the embedded bytecode, the native helpers JS calls, and default detection (`Defaults.cpp`). |
+| `jsi/CollatorHelpers.cpp` | The collator helpers and `CollatorState`, the native state that owns the Rust collator. |
+| `jsi/StringHelpers.cpp` | The `caseMap` helper. |
 | `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
 | `test/test262-expectations.txt` | The test262 tests expected to fail, each with a reason. |
@@ -255,7 +263,10 @@ prototype (`jsi/NativeHelpers.cpp`), so a property they lack reads as
    table: it takes the `jsi::Runtime &` and a `const` reference to each
    argument's C++ type. The host function and the argument and result
    conversions are generated from the table too. A new conversion tag needs
-   a `TagType` and a `Convert` in `NativeHelpers.h`.
+   a `TagType` and a `Convert` in `NativeHelpers.h`. The tags are `Bool`
+   (an argument or a result), `Object` (an argument), `Utf8`, `Utf16`
+   (UTF-16 text, lossless for unpaired surrogates, for text to compare or
+   transform), `OptUtf8`, `Int` (a result) and `Undefined` (a result).
 3. JS calls it as `native.name(...)`. JS validates every argument first.
 
 Internal errors are C++ exceptions; Hermes turns them into an `Error`.

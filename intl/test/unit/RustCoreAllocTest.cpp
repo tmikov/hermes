@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// takeString must free the Rust buffer even when copying it throws
-// std::bad_alloc. A leak is reported by LeakSanitizer at exit, so this
+// takeString and takeString16 must free the Rust buffer even when copying it
+// throws std::bad_alloc. A leak is reported by LeakSanitizer at exit, so this
 // test fails (in an ASan build) if the buffer is not freed.
 
 #include "RustCore.h"
@@ -141,11 +141,27 @@ namespace {
 
 using namespace hermes_intl::core;
 
+TEST(RustCoreAllocTest, TakeString16FreesWhenCopyThrows) {
+  // Longer than any small-string buffer, so the copy must allocate.
+  std::u16string text(64, u'a');
+  HiString16 out;
+  ASSERT_TRUE(hi_case_map(
+      reinterpret_cast<const uint16_t *>(text.data()),
+      text.size(),
+      bytes("und"),
+      3,
+      true,
+      &out));
+  ASSERT_GT(out.len, 32u);
+  failNextAllocation = true;
+  EXPECT_THROW(takeString16(out), std::bad_alloc);
+  failNextAllocation = false;
+}
+
 TEST(RustCoreAllocTest, TakeStringFreesWhenCopyThrows) {
   std::string tag = "en-u-ca-gregory-nu-latn-hc-h23-co-phonebk-kf-upper";
   HiString out;
-  ASSERT_TRUE(hi_locale_canonicalize(
-      reinterpret_cast<const uint8_t *>(tag.data()), tag.size(), &out));
+  ASSERT_TRUE(hi_locale_canonicalize(bytes(tag), tag.size(), &out));
   ASSERT_GT(out.len, 32u);
   failNextAllocation = true;
   EXPECT_THROW(takeString(out), std::bad_alloc);

@@ -123,6 +123,7 @@ function installIntl() {
     },
   });
   // 2. ECMA-402 8.2: the constructor properties of Intl.
+  installCollator(IntlObject);
   installLocale(IntlObject);
   // 3. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
   //    "Intl", { [[Writable]]: false, [[Enumerable]]: false,

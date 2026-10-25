@@ -18,6 +18,11 @@
 
 namespace hermes_intl::core {
 
+/// The bytes of \p s as the Rust core takes them.
+inline const uint8_t *bytes(std::string_view s) {
+  return reinterpret_cast<const uint8_t *>(s.data());
+}
+
 /// Frees a string the Rust core returned when it goes out of scope, so that
 /// the buffer is released even if copying it throws.
 template <class RustString, void (*Free)(RustString)>
@@ -40,6 +45,15 @@ inline std::string takeString(HiString s) {
   std::string result;
   if (s.len)
     result.assign(reinterpret_cast<const char *>(s.data), s.len);
+  return result;
+}
+
+/// Take ownership of a UTF-16 string the Rust core returned.
+inline std::u16string takeString16(HiString16 s) {
+  RustStringOwner<HiString16, hi_string16_free> owner(s);
+  std::u16string result;
+  if (s.len)
+    result.assign(reinterpret_cast<const char16_t *>(s.data), s.len);
   return result;
 }
 
@@ -139,6 +153,70 @@ inline std::optional<std::string> timeZoneFromHost(std::string_view raw) {
 /// A case-insensitive IANA name to its primary identifier.
 inline std::optional<std::string> canonicalizeTimeZone(std::string_view name) {
   return callOptional(hi_time_zone_canonicalize, name);
+}
+
+/// ICU4X's default "<caseFirst> <ignorePunctuation>" for the language
+/// identifier of \p locale ("upper false"); nullopt if \p locale does not
+/// parse.
+inline std::optional<std::string> collatorLocaleDefaults(
+    std::string_view locale) {
+  return callOptional(hi_collator_locale_defaults, locale);
+}
+
+/// A collator for \p locale (canonical; only its language identifier is
+/// used), \p collation ("default" or a supported collation),
+/// \p sensitivity ("base", "accent", "case" or "variant") and \p caseFirst
+/// ("upper", "lower" or "false"); null for any other value or if there is
+/// no data. The caller frees it with hi_collator_free.
+inline HiCollator *collatorNew(
+    std::string_view locale,
+    std::string_view collation,
+    std::string_view sensitivity,
+    bool ignorePunctuation,
+    bool numeric,
+    std::string_view caseFirst) {
+  return hi_collator_new(
+      bytes(locale),
+      locale.size(),
+      bytes(collation),
+      collation.size(),
+      bytes(sensitivity),
+      sensitivity.size(),
+      ignorePunctuation,
+      numeric,
+      bytes(caseFirst),
+      caseFirst.size());
+}
+
+/// CompareStrings of \p x and \p y with \p collator: -1, 0 or 1. An
+/// unpaired surrogate compares as U+FFFD.
+inline int collatorCompare(
+    const HiCollator *collator,
+    std::u16string_view x,
+    std::u16string_view y) {
+  return hi_collator_compare(
+      collator,
+      reinterpret_cast<const uint16_t *>(x.data()),
+      x.size(),
+      reinterpret_cast<const uint16_t *>(y.data()),
+      y.size());
+}
+
+/// The full upper (\p upper) or lower case mapping of \p text with the
+/// tailoring of \p language ("und" or a language tag). Unpaired surrogates
+/// are kept. nullopt if \p language does not parse.
+inline std::optional<std::u16string>
+caseMap(std::u16string_view text, std::string_view language, bool upper) {
+  HiString16 out;
+  if (!hi_case_map(
+          reinterpret_cast<const uint16_t *>(text.data()),
+          text.size(),
+          bytes(language),
+          language.size(),
+          upper,
+          &out))
+    return std::nullopt;
+  return takeString16(out);
 }
 
 /// The values of \p kind for Intl.supportedValuesOf, space-separated.

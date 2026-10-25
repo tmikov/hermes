@@ -16,10 +16,18 @@ var TABLE = [
   // [holder, property, 'method', name, length]
   // [holder, property, 'getter', name], whose length is 0
   // [holder, '@@toStringTag', 'toStringTag', value]
+  // [holder, property, 'bound', name, length]: a bound function that a
+  // getter returns, read as holder[property]
   ['Intl', 'getCanonicalLocales', 'method', 'getCanonicalLocales', 1],
   ['Intl', 'supportedValuesOf', 'method', 'supportedValuesOf', 1],
+  ['Intl', 'Collator', 'constructor', 'Collator', 0],
   ['Intl', 'Locale', 'constructor', 'Locale', 1],
   ['Intl', '@@toStringTag', 'toStringTag', 'Intl'],
+  ['Intl.Collator', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.Collator.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.Collator.prototype', 'compare', 'getter', 'get compare'],
+  ['Intl.Collator.prototype', '@@toStringTag', 'toStringTag', 'Intl.Collator'],
+  ['new Intl.Collator()', 'compare', 'bound', '', 2],
   ['Intl.Locale.prototype', 'baseName', 'getter', 'get baseName'],
   ['Intl.Locale.prototype', 'calendar', 'getter', 'get calendar'],
   ['Intl.Locale.prototype', 'caseFirst', 'getter', 'get caseFirst'],
@@ -43,6 +51,9 @@ var TABLE = [
   ['Intl.Locale.prototype', 'minimize', 'method', 'minimize', 0],
   ['Intl.Locale.prototype', 'toString', 'method', 'toString', 0],
   ['Intl.Locale.prototype', '@@toStringTag', 'toStringTag', 'Intl.Locale'],
+  ['String.prototype', 'localeCompare', 'method', 'localeCompare', 1],
+  ['String.prototype', 'toLocaleLowerCase', 'method', 'toLocaleLowerCase', 0],
+  ['String.prototype', 'toLocaleUpperCase', 'method', 'toLocaleUpperCase', 0],
 ];
 
 function isConstructor(f) {
@@ -68,7 +79,7 @@ function check(row) {
   var label = row[0] + '.' + row[1] + ': ';
   var holder = (0, eval)(row[0]);
   var key = row[1] === '@@toStringTag' ? Symbol.toStringTag : row[1];
-  var d = Object.getOwnPropertyDescriptor(holder, key);
+  var d = row[2] === 'bound' ? {} : Object.getOwnPropertyDescriptor(holder, key);
   if (!d) return label + 'missing';
   var problems = [];
   var f;
@@ -103,6 +114,13 @@ function check(row) {
     if (typeof f !== 'function') return label + 'no getter';
     if (isConstructor(f)) problems.push('constructible');
     if (Object.prototype.hasOwnProperty.call(f, 'prototype')) problems.push('prototype');
+  } else if (row[2] === 'bound') {
+    // compare is a getter on the prototype, not an own property of the
+    // instance, so the function is read through it.
+    f = holder[key];
+    if (typeof f !== 'function') return label + 'not a function';
+    if (isConstructor(f)) problems.push('constructible');
+    if (Object.prototype.hasOwnProperty.call(f, 'prototype')) problems.push('prototype');
   } else {
     return label + 'unknown kind ' + row[2];
   }
@@ -117,8 +135,14 @@ function check(row) {
 for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK: Intl.getCanonicalLocales: ok
 // CHECK-NEXT: Intl.supportedValuesOf: ok
+// CHECK-NEXT: Intl.Collator: ok
 // CHECK-NEXT: Intl.Locale: ok
 // CHECK-NEXT: Intl.@@toStringTag: ok
+// CHECK-NEXT: Intl.Collator.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.Collator.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.Collator.prototype.compare: ok
+// CHECK-NEXT: Intl.Collator.prototype.@@toStringTag: ok
+// CHECK-NEXT: new Intl.Collator().compare: ok
 // CHECK-NEXT: Intl.Locale.prototype.baseName: ok
 // CHECK-NEXT: Intl.Locale.prototype.calendar: ok
 // CHECK-NEXT: Intl.Locale.prototype.caseFirst: ok
@@ -142,10 +166,20 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.Locale.prototype.minimize: ok
 // CHECK-NEXT: Intl.Locale.prototype.toString: ok
 // CHECK-NEXT: Intl.Locale.prototype.@@toStringTag: ok
+// CHECK-NEXT: String.prototype.localeCompare: ok
+// CHECK-NEXT: String.prototype.toLocaleLowerCase: ok
+// CHECK-NEXT: String.prototype.toLocaleUpperCase: ok
 
 // Intl and each prototype have exactly the table's properties, and a
 // prototype also its constructor.
 print(Reflect.ownKeys(Intl).map(String).join(','));
-// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Locale,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,Locale,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(Intl.Collator).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.Collator.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,compare,Symbol(Symbol.toStringTag)
+// An instance has no own properties: its slots are private.
+print(Reflect.ownKeys(new Intl.Collator()).length);
+// CHECK-NEXT: 0
 print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)
