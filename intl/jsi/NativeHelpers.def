@@ -17,6 +17,8 @@
 //   OptUtf8    a JS string or undefined (results only)
 //   Int        a JS number that is an integer in int range; as an
 //              argument, anything else is an internal error
+//   Double     a JS number that is finite (arguments only); anything else
+//              is an internal error
 //   Utf8List   a new JS array of strings, from a std::vector<std::string>
 //              of UTF-8 (results only)
 //   Undefined  undefined (results only)
@@ -176,3 +178,48 @@ HERMES_INTL_HELPER(unitPatterns, Utf8List, Utf8, Utf8, Utf8)
 // fraction digits, 2 for a currency CLDR does not list. Throws for anything
 // else.
 HERMES_INTL_HELPER(currencyDigits, Int, Utf8)
+// (locale, calendar) DateTimeFormat's CLDR patterns for one of the 16
+// supported calendars: 0-3 the dateFormats full, long, medium, short; 4-7
+// the timeFormats; 8-11 the standard dateTimeFormats; 12-15 the atTime
+// dateTimeFormats (the standard ones where the locale has none); 16
+// intervalFormatFallback; 17 the numeric leap month pattern ("" if none); 18
+// the Timezone append item; 19 the number N of availableFormats entries,
+// then N pairs (skeleton, pattern) in CLDR's order; then the number M of
+// interval entries, then M triples (skeleton, greatest-difference letter,
+// pattern). Throws for an unknown calendar or a locale that does not parse.
+HERMES_INTL_HELPER(dateTimePatterns, Utf8List, Utf8, Utf8)
+// (locale) The flexible day periods: 0 the number N of periods with a range;
+// then N groups of six: id, start minute, end minute (of the day, 1440 is
+// the end of the day; a start after the end wraps midnight), abbreviated,
+// wide and narrow names ("" where CLDR has none); then noon's abbreviated,
+// wide and narrow names ("" if the rules have no noon). Throws as
+// dateTimePatterns.
+HERMES_INTL_HELPER(dayPeriods, Utf8List, Utf8)
+// (name) The primary identifier of an IANA time zone name, matched without
+// regard to case, or undefined for a name that is not a time zone.
+HERMES_INTL_HELPER(canonicalizeTimeZone, OptUtf8, Utf8)
+// (dateTimeFormat, locale, calendar, timeZone, symbols) Attach the native
+// state of an Intl.DateTimeFormat to dateTimeFormat: the calendar (one of the
+// 16 supported ones), the time zone (a primary identifier, or "+HH:MM" or
+// "-HH:MM") and the names of symbols, for the language identifier of locale.
+// symbols are CLDR name symbols separated by single spaces ("" for none),
+// each one of G GGGG GGGGG MMM MMMM MMMMM LLL LLLL LLLLL EEE EEEE EEEEE ccc
+// cccc ccccc a aaaa aaaaa U z zzzz O OOOO v vvvv that the calendar has: U
+// only for chinese and dangi, the G symbols for every calendar but chinese,
+// dangi and iso8601. Throws for any other value, if there is no data, or if
+// dateTimeFormat already has native state.
+HERMES_INTL_HELPER(
+    dateTimeFormatInit, Undefined, Object, Utf8, Utf8, Utf8, Utf8)
+// (dateTimeFormat, epochMs) ToLocalTime of the time value epochMs, an integer
+// within +-8.64e15, and the text of the symbols at that instant: 0 [[Weekday]]
+// ("0" Sunday to "6"); 1 [[Era]], ICU4X's era code ("ce", "reiwa"), "" for
+// chinese, dangi and iso8601; 2 [[Year]], the era year, the cyclic year 1-60
+// of chinese and dangi, or the ISO year of iso8601; 3 [[RelatedYear]], the
+// ISO year of chinese and dangi, else ""; 4 the month number shown, the
+// ordinal month, or the number of the month code for chinese and dangi; 5 the
+// month code ("M04L"); 6 "1" for a leap month, else "0"; 7-11 [[Day]],
+// [[Hour]], [[Minute]], [[Second]], [[Millisecond]]; 12 [[InDST]], "1" or "0";
+// 13 the UTC offset in seconds; 14 + i the text of symbol i. Zone names have
+// ASCII digits. Throws for any other epochMs, or if dateTimeFormatInit did
+// not initialize dateTimeFormat.
+HERMES_INTL_HELPER(dateTimeFormatLocalTime, Utf8List, Object, Double)

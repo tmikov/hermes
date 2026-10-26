@@ -474,8 +474,17 @@ function CalendarsOfLocale(loc) {
   //    a. Return CreateArrayFromList(« loc.[[Calendar]] »).
   var calendar = LocaleSlots.get(loc, 'calendar');
   if (calendar !== undefined) return CreateArrayFromList([calendar]);
-  // 2. Let preference be RegionPreference(loc.[[Locale]]).
-  var preference = RegionPreference(LocaleSlots.get(loc, 'locale'));
+  // 2-11. The calendars of loc.[[Locale]] (calendarsOfTag), as an Array.
+  return CreateArrayFromList(calendarsOfTag(LocaleSlots.get(loc, 'locale')));
+}
+
+/// Steps 2 to 10 of CalendarsOfLocale, with loc.[[Locale]] replaced by the
+/// language tag tag: the List of calendars in use in tag. Phase 4 decision
+/// 8 shares it between CalendarsOfLocale and the [[LocaleData]] of
+/// Intl.DateTimeFormat, which passes a tag with no -u-ca keyword.
+function calendarsOfTag(tag) {
+  // 2. Let preference be RegionPreference(tag).
+  var preference = RegionPreference(tag);
   // 3. If preference.[[RegionOverride]] is not undefined, let
   //    preferredRegions be « preference.[[RegionOverride]],
   //    preference.[[Region]] »; else let preferredRegions be
@@ -486,7 +495,7 @@ function CalendarsOfLocale(loc) {
       : [preference.region];
   // 4. Let calendarsInUse be a new empty List.
   var calendarsInUse = [];
-  // 5. Let language be GetLocaleLanguage(loc.[[Locale]]).
+  // 5. Let language be GetLocaleLanguage(tag).
   //    Only step 6.b uses it, and that step never applies (see there).
   // 6. For each String region of preferredRegions, do
   for (var i = 0; i < preferredRegions.length; i++) {
@@ -536,8 +545,8 @@ function CalendarsOfLocale(loc) {
   //     data, so this is reached only if none of those calendars is
   //     available, or if "001" had none.
   if (list.length === 0) list = ['gregory'];
-  // 11. Return CreateArrayFromList(list).
-  return CreateArrayFromList(list);
+  //     Return list; CalendarsOfLocale performs step 11.
+  return list;
 }
 
 // CollationsOfLocale ( loc )
@@ -582,8 +591,19 @@ function HourCyclesOfLocale(loc) {
   //    a. Return CreateArrayFromList(« loc.[[HourCycle]] »).
   var hourCycle = LocaleSlots.get(loc, 'hourCycle');
   if (hourCycle !== undefined) return CreateArrayFromList([hourCycle]);
-  // 2. Let preference be RegionPreference(loc.[[Locale]]).
-  var preference = RegionPreference(LocaleSlots.get(loc, 'locale'));
+  // 2-8. The hour cycles of loc.[[Locale]] (hourCyclesOfTag), as an Array.
+  return CreateArrayFromList(hourCyclesOfTag(LocaleSlots.get(loc, 'locale')));
+}
+
+/// Steps 2 to 7 of HourCyclesOfLocale, with loc.[[Locale]] replaced by the
+/// language tag tag: the List of hour cycles in use in tag. Phase 4
+/// decision 8 shares it between HourCyclesOfLocale and the [[LocaleData]]
+/// of Intl.DateTimeFormat, which passes a tag with no -u-hc keyword. The
+/// parameter is not named locale because step 6.a defines a locale of its
+/// own.
+function hourCyclesOfTag(tag) {
+  // 2. Let preference be RegionPreference(tag).
+  var preference = RegionPreference(tag);
   // 3. If preference.[[RegionOverride]] is not undefined, let
   //    preferredRegions be « preference.[[RegionOverride]],
   //    preference.[[Region]] »; else let preferredRegions be
@@ -594,8 +614,8 @@ function HourCyclesOfLocale(loc) {
       : [preference.region];
   // 4. Let hourCycles be a new empty List.
   var hourCycles = [];
-  // 5. Let language be GetLocaleLanguage(loc.[[Locale]]).
-  var language = GetLocaleLanguage(LocaleSlots.get(loc, 'locale'));
+  // 5. Let language be GetLocaleLanguage(tag).
+  var language = GetLocaleLanguage(tag);
   // 6. For each String region of preferredRegions, do
   for (var i = 0; i < preferredRegions.length; i++) {
     var region = preferredRegions[i];
@@ -634,8 +654,8 @@ function HourCyclesOfLocale(loc) {
   // 7. If hourCycles is empty, set hourCycles to « "h23" ». Step 6.c always
   //    finds data, so this is reached only if "001" had none.
   if (hourCycles.length === 0) hourCycles = ['h23'];
-  // 8. Return CreateArrayFromList(hourCycles).
-  return CreateArrayFromList(hourCycles);
+  //    Return hourCycles; HourCyclesOfLocale performs step 8.
+  return hourCycles;
 }
 
 // NumberingSystemsOfLocale ( loc )

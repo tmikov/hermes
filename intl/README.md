@@ -13,11 +13,14 @@ Phase 0 plan is
 
 Phase 0 was infrastructure, Phase 1 added `Intl.Locale`, Phase 2 added
 `Intl.Collator` and the ECMA-402 versions of `localeCompare`,
-`toLocaleLowerCase` and `toLocaleUpperCase`, and Phase 3 added
+`toLocaleLowerCase` and `toLocaleUpperCase`, Phase 3 added
 `Intl.NumberFormat`, `Intl.PluralRules` and the ECMA-402 `toLocaleString`
-of Number, BigInt, Array and TypedArray. `Intl` has `getCanonicalLocales`,
-`supportedValuesOf`, `Locale`, `Collator`, `NumberFormat` and
-`PluralRules`. The other constructors arrive in later phases (see
+of Number, BigInt, Array and TypedArray, and Phase 4 added
+`Intl.DateTimeFormat`, with the time zone rules of IANA tzdb 2026e bundled
+in the library, and the ECMA-402 `toLocaleString`, `toLocaleDateString`
+and `toLocaleTimeString` of Date. `Intl` has `getCanonicalLocales`,
+`supportedValuesOf`, `Locale`, `Collator`, `NumberFormat`, `PluralRules`
+and `DateTimeFormat`. The other constructors arrive in later phases (see
 "Phasing" in the spec).
 
 ## Layout
@@ -36,7 +39,10 @@ of Number, BigInt, Array and TypedArray. `Intl` has `getCanonicalLocales`,
 | `core/src/number.rs` | The number data NumberFormat formats with: symbols, decimal, percent and range patterns, currency patterns and digits, compact patterns and compact currency patterns, as lists of strings, with CLDR's resolution of numbering systems. |
 | `core/src/units.rs` | Unit patterns, including the `X-per-Y` compounds. |
 | `core/src/cldr.rs` | The parsers and lookups of the generated CLDR number files. |
-| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, the number data files `number-symbols.txt`, `units.txt`, `currency-symbols.txt` and `explicit-number-systems.txt`, `LICENSE` (the Unicode License of the CLDR-derived files), `update-cldr-lists.py` and its tests. |
+| `core/src/tz.rs` | The time zone rules: a reader of the IANA tzdb's TZif data that the `jiff-tzdb` crate embeds, giving the UTC offset and daylight saving flag of a zone at any ECMAScript instant. |
+| `core/src/date_data.rs` | The parsers and lookups of the generated CLDR date files: a locale's date and time patterns for a calendar, and its flexible day periods. |
+| `core/src/datetime.rs` | The native half of `Intl.DateTimeFormat`: a formatter's ICU4X calendar, time zone and names, and for an instant the local time (ToLocalTime's record) and the text of the names its patterns use. |
+| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, the number data files `number-symbols.txt`, `units.txt`, `currency-symbols.txt`, `explicit-number-systems.txt` and `compact-currency.txt`, the date data files `date-patterns.txt` and `day-periods.txt`, `LICENSE` (the Unicode License of the CLDR-derived files), `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
 | `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
 | `js/07-number.js` | Intl mathematical values, ToIntlMathematicalValue, and the exact rounding (FormatNumericToString, ToRawPrecision, ToRawFixed, ComputeExponent) that NumberFormat, PluralRules and later constructors share. |
@@ -45,13 +51,19 @@ of Number, BigInt, Array and TypedArray. `Intl` has `getCanonicalLocales`,
 | `js/40-NumberFormat.js` | `Intl.NumberFormat`: the constructor and its options, the legacy constructor behavior, `supportedLocalesOf`, `resolvedOptions`, the `format` getter and the other prototype methods. |
 | `js/41-number-patterns.js` | Formatting: PartitionNumberPattern and the operations it uses, the parts, the ranges, grouping, the digits of the numbering systems, and the caches of the native data. |
 | `js/45-PluralRules.js` | `Intl.PluralRules`: the constructor, `supportedLocalesOf`, `resolvedOptions`, `select` and `selectRange`. |
-| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase`, `toLocaleUpperCase` and the `toLocaleString` of Number, BigInt, Array and TypedArray, and TransformCase. Later phases add theirs. |
+| `js/50-DateTimeFormat.js` | `Intl.DateTimeFormat`: the constructor with CreateDateTimeFormat, the legacy constructor behavior, the time zone identifier operations, `[[LocaleData]]`, `supportedLocalesOf`, `resolvedOptions`, the `format` getter and the other prototype methods. |
+| `js/51-datetime-patterns.js` | The DateTime Format Records made from CLDR's patterns, `[[formats]]` and `[[styles]]`, BasicFormatMatcher, the best-fit matcher, DateTimeStyleFormat, and the caches of the native date data. |
+| `js/52-datetime-format.js` | Formatting: ToLocalTime, FormatDateTimePattern, PartitionDateTimePattern, PartitionDateTimeRangePattern, and FormatDateTime, FormatDateTimeToParts, FormatDateTimeRange and FormatDateTimeRangeToParts. |
+| `js/53-datetime-ranges.js` | The range patterns of each DateTime Format Record, from CLDR's `intervalFormats` and `intervalFormatFallback`. |
+| `js/54-datetime-names.js` | The CLDR name symbols a formatter asks native code for, and the flexible day periods. |
+| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase`, `toLocaleUpperCase`, the `toLocaleString` of Number, BigInt, Array and TypedArray, and the `toLocaleString`, `toLocaleDateString` and `toLocaleTimeString` of Date, with their default formatters, and TransformCase. Later phases add theirs. |
 | `jsi/` | C++: the entry point (`Plugin.cpp`), the embedded bytecode, the native helpers JS calls, and default detection (`Defaults.cpp`). |
 | `jsi/CollatorHelpers.cpp` | The collator helpers and `CollatorState`, the native state that owns the Rust collator. |
 | `jsi/PluralRulesHelpers.cpp` | The plural rules helpers and `PluralRulesState`, the native state that owns the Rust plural rules. |
 | `jsi/NumberHelpers.cpp` | The number data helpers (`numberSymbols`, `currencyPatterns`, `compactCurrencyPatterns`, `compactPatterns`, `unitPatterns`, `currencyDigits`). |
+| `jsi/DateTimeFormatHelpers.cpp` | The date helpers (`dateTimePatterns`, `dayPeriods`, `canonicalizeTimeZone`, `dateTimeFormatInit`, `dateTimeFormatLocalTime`) and `DateTimeFormatState`, the native state that owns a formatter's Rust calendar, time zone and names. |
 | `jsi/StringHelpers.cpp` | The `caseMap` helper. |
-| `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation. |
+| `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation, and `test/lit/Inputs/` holds files the tests use, such as `datetime-locales.js`: the 40 locales and the `formatMatcher: "basic"` check that `datetime-format-locales.js` and its `-2`, `-3` and `-4` parts share, a quarter of the locales each, so that lit runs them in parallel, and `datetime-fields.js`: the check that best fit keeps every requested field, which `datetime-format-fields-1.js` to `-10.js` run, one locale each. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
 | `test/test262-expectations.txt` | The test262 tests expected to fail, each with a reason. |
 
@@ -281,8 +293,10 @@ prototype (`jsi/NativeHelpers.cpp`), so a property they lack reads as
    (UTF-16 text, lossless for unpaired surrogates, for text to compare or
    transform), `OptUtf8`, `Int` (an integer in `int` range, as an argument
    or a result; an argument that is anything else is an internal error),
-   `Utf8List` (a result: a new array of strings, built from JSON so that no
-   setter on `Array.prototype` runs) and `Undefined` (a result).
+   `Double` (an argument: a finite number, such as a time value; anything
+   else is an internal error), `Utf8List` (a result: a new array of
+   strings, built from JSON so that no setter on `Array.prototype` runs) and
+   `Undefined` (a result).
 3. JS calls it as `native.name(...)`. JS validates every argument first.
 
 Internal errors are C++ exceptions; Hermes turns them into an `Error`.
@@ -293,8 +307,9 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 `core/data/calendar-preferences.txt`, `core/data/hour-cycles.txt`,
 `core/data/time-zones-by-region.txt`, `core/data/extension-value-aliases.txt`,
 `core/data/number-symbols.txt`, `core/data/units.txt`,
-`core/data/currency-symbols.txt`, `core/data/explicit-number-systems.txt` and
-`core/data/compact-currency.txt` come from CLDR. When ICU4X is upgraded,
+`core/data/currency-symbols.txt`, `core/data/explicit-number-systems.txt`,
+`core/data/compact-currency.txt`, `core/data/date-patterns.txt` and
+`core/data/day-periods.txt` come from CLDR. When ICU4X is upgraded,
 regenerate them from the CLDR release that ICU4X version uses, and commit the
 result:
 
@@ -398,6 +413,65 @@ has none, from latn's. The generator checks that reading the file back as
 currency sign at an end with only bidi marks and white space beyond it and one
 run of digits, and that the counts of a magnitude have the same digits; a
 negative subpattern (sw's) is dropped.
+
+`date-patterns.txt` (820 KB) holds the date and time patterns that ICU4X does
+not have, from the JSON packages `cldr-dates-full` (`ca-gregorian.json`,
+`ca-generic.json`) and `cldr-cal-<name>-full` for `buddhist`, `chinese`,
+`coptic`, `dangi`, `ethiopic` (`ca-ethiopic.json`, and
+`ca-ethiopic-amete-alem.json` for `ethioaa`), `hebrew`, `indian`, `islamic`
+(`ca-islamic-civil.json`, `ca-islamic-tbla.json`, `ca-islamic-umalqura.json`),
+`japanese`, `persian` and `roc`, all at the same npm version, and from
+`common/main/*.xml` for `iso8601`, which cldr-json does not have: root's
+patterns, with the values each locale of the CLDR chain has explicitly over
+them, the nearest last. In CLDR 48.2 only `zh` has any, 14 intervals of its own
+(`y年MMMd–d日`), which its children inherit; `bg`'s iso8601 calendar holds only an
+inheritance marker, which defines nothing. The generator fails if a locale of
+the chains that is not in `locales.txt` has iso8601 data, and resolves root's
+`atTime` aliases to each locale's own standard patterns. It has a string table,
+then for each locale a `locale <tag> <parent>` line, with the same parents as
+`units.txt`, and for each calendar (BCP 47 ids, plus CLDR's `generic`, which
+only appears as the target of `=`) either `<calendar> = <other>`, where the
+locale's whole data for the calendar equals its data for a calendar listed
+before it, or `<calendar> <key>=<index>...` with the entries that differ from
+the parent's for the calendar (no line where none do). Reading a locale and
+calendar: follow its `=` line if it has one, else take the parent's data for the
+calendar with the locale's own entries over it; `und` has every calendar in
+full. The keys are `d0`-`d3` (`dateFormats` full to short), `t0`-`t3`
+(`timeFormats`), `c0`-`c3` (the standard `dateTimeFormats`), `a0`-`a3` (the
+`atTime` ones), `fb` (`intervalFormatFallback`), `lp` (the numeric leap month
+pattern of `chinese` and `dangi`), `tz` (the `Timezone` append item),
+`f.<skeleton>` (`availableFormats`) and `i.<skeleton>.<letter>`
+(`intervalFormats`), the last two in CLDR's order. Alternates (`-alt-ascii`,
+`-alt-variant`) and count variants (`-count-`) are left out, and so is an entry
+whose skeleton has a field ECMA-402 does not have (`Q`, `w`, `W`, `D`, `F`, `g`,
+`e`, `u`, `Y`, `x`, `X`, `Z`, `V`). Outside quotes, a pattern may have only the
+letters `G y U r M L d E c a b B h H K k m s S z O v`, or generation fails,
+except for two misspellings CLDR 48.2 has (`gl`'s full date format, `te`'s
+`yyyyMMMM`, `ak`'s and `ko`'s interval patterns): `Y` is written as `y`, and `e`
+as `E`, with the same letter count (`ko`'s `e요일` is `E요일`, `월요일`). The
+`dateTimeFormats`, `fb` and `tz` must have `{0}` and `{1}`, and `lp` `{0}`. A
+pattern's numbering override (`_numbers`: `he` `hebrew` `hebr`, `ja` `japanese`
+`y=jpanyear`, and `chinese` and `dangi` `hanidec` in `ja`, `zh-SG`,
+`zh-Hans-HK`, `zh-Hans-MO` and `d=hanidays` in `zh`, `zh-Hant` and `yue`) is
+left out. The generator checks that every locale and calendar read back from the
+written lines gives its CLDR data, which also means a child has every key its
+parent has; it reads `day-periods.txt` back the same way.
+
+`day-periods.txt` (51 KB) holds the flexible day periods (`B`): `rules
+<key>` for each of CLDR's `dayPeriodRuleSet`s (`cldr-core`
+`supplemental/dayPeriods.json`; the keys as BCP 47 tags, `es-CO`, `hi-Latn`),
+each followed by `<period> <from> <before>` lines in minutes of the day
+(`morning1 0 720`; 24:00 is 1440; `before` is smaller than `from` for a period
+that crosses midnight, bg's `night1 1320 240`; an `at` rule is `noon 720 720`),
+then for each locale a `locale <tag> <parent> <rules-key>` line, with the same
+parents as `units.txt`, and `<period> <abbreviated>\t<wide>\t<narrow>` lines
+with the format-context names (`ca-gregorian.json`) of the periods of its
+rules that differ from the parent chain's. The rules key is found as ICU finds
+it, by truncating the tag until a rule set has it, else `und` (`zh-Hant` and
+`zh-HK` use `zh`, though their parent is `und`); names follow the parent
+chain. A period CLDR has no names for (`lij`, `scn`) has no line, and its
+names read as `""`; the generator fails on a period named in some widths only,
+or not named where the parent chain names it.
 
 `calendar-preferences.txt`, `hour-cycles.txt` and `time-zones-by-region.txt`
 feed the `Intl.Locale` information methods and are read by

@@ -7,12 +7,16 @@
 """Regenerate the CLDR-derived data files from CLDR: currencies.txt,
 numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt,
 time-zones-by-region.txt, extension-value-aliases.txt, number-symbols.txt,
-units.txt, currency-symbols.txt, explicit-number-systems.txt and
-compact-currency.txt. The number data files come from the CLDR JSON npm
-packages cldr-core, cldr-numbers-full and cldr-units-full, which hold
-resolved locale data, and explicit-number-systems.txt from
-common/main/*.xml, for the explicit data of numbering systems that cldr-json
-leaves out; compact-currency.txt from both.
+units.txt, currency-symbols.txt, explicit-number-systems.txt,
+compact-currency.txt, date-patterns.txt and day-periods.txt. The number data
+files come from the CLDR JSON npm packages cldr-core, cldr-numbers-full and
+cldr-units-full, which hold resolved locale data, and
+explicit-number-systems.txt from common/main/*.xml, for the explicit data of
+numbering systems that cldr-json leaves out; compact-currency.txt from both.
+date-patterns.txt comes from cldr-dates-full and the cldr-cal-*-full
+packages, and for the iso8601 calendar from common/main/*.xml along each
+locale's CLDR chain, root first (zh adds intervals of its own);
+day-periods.txt from cldr-core and cldr-dates-full.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
 the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
@@ -32,7 +36,25 @@ LISTING = (
     "https://api.github.com/repos/unicode-org/cldr/contents/common/{path}?ref={tag}"
 )
 NPM_TARBALL = "https://registry.npmjs.org/{package}/-/{package}-{version}.tgz"
-PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-units-full"]
+# The cldr-cal-<name>-full packages, which hold the calendars other than
+# gregorian and generic (cldr-dates-full).
+CALENDAR_PACKAGES = [
+    "buddhist",
+    "chinese",
+    "coptic",
+    "dangi",
+    "ethiopic",
+    "hebrew",
+    "indian",
+    "islamic",
+    "japanese",
+    "persian",
+    "roc",
+]
+DATE_PACKAGES = ["cldr-dates-full"] + [
+    f"cldr-cal-{c}-full" for c in CALENDAR_PACKAGES
+]
+PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-units-full"] + DATE_PACKAGES
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -306,14 +328,13 @@ def check_value(value, what):
     return value
 
 
-def resolve_locale_dirs(tree, tags):
-    """Map each tag to the directory of cldr-*-full/main that holds its
-    data. A tag with no directory is looked up with the script that
-    likelySubtags gives inserted (zh-HK is zh-Hant-HK; for a tag with no
-    entry, the script of its language); exit if that is missing too."""
-    have = tree.locale_dirs("cldr-numbers-full") & tree.locale_dirs(
-        "cldr-units-full"
-    )
+def resolve_locale_dirs(tree, tags, packages=("cldr-numbers-full", "cldr-units-full")):
+    """Map each tag to the directory of main/ that holds its data in each of
+    the cldr-*-full `packages`. A tag with no directory is looked up with
+    the script that likelySubtags gives inserted (zh-HK is zh-Hant-HK; for a
+    tag with no entry, the script of its language); exit if that is missing
+    too."""
+    have = set.intersection(*(tree.locale_dirs(p) for p in packages))
     likely = tree.likely_subtags()
     dirs = {}
     for tag in tags:
@@ -1329,29 +1350,716 @@ def compact_currency_lines(tree, tags, load_xml):
     return lines
 
 
+# The calendars of date-patterns.txt, in the order of its lines: the BCP 47
+# id, the cldr-json package and the calendar's name there (its file is
+# ca-<name>.json). generic, CLDR's base of the calendars other than
+# gregorian, comes second so that later calendars can be written as equal to
+# it; no locale formats with it. iso8601 has no cldr-json data: it comes from
+# common/main/*.xml along each locale's CLDR chain, root.xml first, with the
+# values of the locales of the chain over it (zh's intervals in CLDR 48.2).
+DATE_CALENDARS = [
+    ("gregory", "cldr-dates-full", "gregorian"),
+    ("generic", "cldr-dates-full", "generic"),
+    ("buddhist", "cldr-cal-buddhist-full", "buddhist"),
+    ("chinese", "cldr-cal-chinese-full", "chinese"),
+    ("coptic", "cldr-cal-coptic-full", "coptic"),
+    ("dangi", "cldr-cal-dangi-full", "dangi"),
+    ("ethioaa", "cldr-cal-ethiopic-full", "ethiopic-amete-alem"),
+    ("ethiopic", "cldr-cal-ethiopic-full", "ethiopic"),
+    ("hebrew", "cldr-cal-hebrew-full", "hebrew"),
+    ("indian", "cldr-cal-indian-full", "indian"),
+    ("islamic-civil", "cldr-cal-islamic-full", "islamic-civil"),
+    ("islamic-tbla", "cldr-cal-islamic-full", "islamic-tbla"),
+    ("islamic-umalqura", "cldr-cal-islamic-full", "islamic-umalqura"),
+    ("iso8601", None, None),
+    ("japanese", "cldr-cal-japanese-full", "japanese"),
+    ("persian", "cldr-cal-persian-full", "persian"),
+    ("roc", "cldr-cal-roc-full", "roc"),
+]
+# The calendars with a numeric leap month pattern (key lp).
+LEAP_MONTH_CALENDARS = ("chinese", "dangi")
+# dateFormats, timeFormats and dateTimeFormats, keys d0-d3, t0-t3, c0-c3 and
+# a0-a3, full to short.
+DATE_WIDTHS = ["full", "long", "medium", "short"]
+# The pattern letters of decision 6's table, which a kept pattern may have.
+DATE_PATTERN_LETTERS = set("GyUrMLdEcabBhHKkmsSzOv")
+# The letters of fields ECMA-402 does not have: an availableFormats or
+# intervalFormats entry whose skeleton has one is left out.
+DATE_DROPPED_LETTERS = set("QwWDFgeuYxXZV")
+# The keys every calendar of und has (and lp for LEAP_MONTH_CALENDARS).
+DATE_REQUIRED_KEYS = [
+    f"{p}{i}" for p in "dtc" for i in range(len(DATE_WIDTHS))
+] + ["fb", "tz"]
+# The atTime dateTimeFormat of root.xml's iso8601 that is its standard one.
+AT_TIME_ALIAS = "../dateTimeFormat[@type='standard']"
+# xml_iso8601_entries's value of an atTime format that is AT_TIME_ALIAS: the
+# requesting locale's resolved standard format of the same width, as CLDR
+# resolves an alias (iso8601_of replaces it).
+AT_TIME_IS_STANDARD = ("standard",)
+
+
+def normalize_date_pattern(pattern, what):
+    """`pattern`, a CLDR date pattern, with the two misspellings CLDR 48.2
+    has for letters of decision 6's table rewritten outside quotes: Y (the
+    week-based year) as y, and e (the local day of the week; ko's "e요일"
+    means "E요일") as E, with the same letter count. Exit if any other letter
+    outside quotes is not in the table."""
+    out = []
+    quoted = False
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "'":
+            quoted = not quoted
+        if quoted or c == "'" or not (c.isascii() and c.isalpha()):
+            out.append(c)
+            i += 1
+            continue
+        j = i
+        while j < len(pattern) and pattern[j] == c:
+            j += 1
+        n = j - i
+        if c == "Y":
+            c = "y"
+        elif c == "e":
+            c = "E"
+        if c not in DATE_PATTERN_LETTERS:
+            sys.exit(f"{what}: pattern letter {pattern[i:j]!r} in {pattern!r}")
+        out.append(c * n)
+        i = j
+    if quoted:
+        sys.exit(f"{what}: unterminated quote in {pattern!r}")
+    return "".join(out)
+
+
+def keep_skeleton(skeleton, what):
+    """Whether an availableFormats or intervalFormats entry with `skeleton`
+    is kept: not if it has a letter of DATE_DROPPED_LETTERS. Exit on any
+    other letter outside decision 6's table."""
+    if not re.fullmatch(r"[A-Za-z]+", skeleton):
+        sys.exit(f"{what}: bad skeleton {skeleton!r}")
+    letters = set(skeleton)
+    if letters & DATE_DROPPED_LETTERS:
+        return False
+    if letters - DATE_PATTERN_LETTERS:
+        sys.exit(f"{what}: unknown letters in skeleton {skeleton!r}")
+    return True
+
+
+# The placeholders of the values of date-patterns.txt that have some, by the
+# key's first letter: the dateTimeFormats (c, a) combine a date {1} and a
+# time {0}, as fb and tz combine their two parts; lp holds the month.
+DATE_PLACEHOLDERS = {
+    "c": ["{0}", "{1}"],
+    "a": ["{0}", "{1}"],
+    "fb": ["{0}", "{1}"],
+    "tz": ["{0}", "{1}"],
+    "lp": ["{0}"],
+}
+# The keys whose values are not date patterns, which are not normalized.
+DATE_NON_PATTERN_KEYS = ("fb", "tz", "lp")
+
+
+def date_value(value, key, what):
+    """A value of date-patterns.txt under `key`, checked: no tab or newline,
+    not empty, with the placeholders DATE_PLACEHOLDERS gives the key, and
+    for a date pattern (any key but DATE_NON_PATTERN_KEYS) normalized."""
+    what = f"{what} {key}"
+    check_value(value, what)
+    if not value:
+        sys.exit(f"{what}: empty")
+    for p in DATE_PLACEHOLDERS.get(key, DATE_PLACEHOLDERS.get(key[0], [])):
+        if p not in value:
+            sys.exit(f"{what}: no {p} in {value!r}")
+    if key in DATE_NON_PATTERN_KEYS:
+        return value
+    return normalize_date_pattern(value, what)
+
+
+def json_date_pattern(value, what):
+    """A pattern of cldr-json: a string, or an object whose `_value` is the
+    pattern; its `_numbers`, a numbering system override, is left out
+    (decision 17)."""
+    if isinstance(value, dict):
+        if "_value" not in value or set(value) - {"_value", "_numbers"}:
+            sys.exit(f"{what}: unexpected pattern object {value!r}")
+        return value["_value"]
+    return value
+
+
+def json_calendar_entries(cal, j, what):
+    """The entries of date-patterns.txt of one cldr-json calendar object `j`
+    (of the BCP 47 calendar `cal`), as {key: value} in the order of the
+    file: d0-d3, t0-t3, c0-c3, a0-a3 (where there are atTime formats), fb,
+    lp (chinese and dangi), tz, then the availableFormats (f.<skeleton>) and
+    intervalFormats (i.<skeleton>.<letter>) entries in CLDR's order.
+    Alternates (-alt-) and count variants (-count-) are left out, and so are
+    the entries whose skeleton keep_skeleton rejects."""
+    out = {}
+
+    def put(key, value):
+        out[key] = date_value(json_date_pattern(value, f"{what} {key}"), key, what)
+
+    try:
+        dt = j["dateTimeFormats"]
+        at = j.get("dateTimeFormats-atTime", {}).get("standard", {})
+        for prefix, section in (
+            ("d", j["dateFormats"]),
+            ("t", j["timeFormats"]),
+            ("c", dt),
+            ("a", at),
+        ):
+            for i, w in enumerate(DATE_WIDTHS):
+                if prefix == "a" and w not in section:
+                    continue
+                put(f"{prefix}{i}", section[w])
+        put("fb", dt["intervalFormats"]["intervalFormatFallback"])
+        if cal in LEAP_MONTH_CALENDARS:
+            put("lp", j["monthPatterns"]["numeric"]["all"]["leap"])
+        put("tz", dt["appendItems"]["Timezone"])
+        for skeleton, value in dt["availableFormats"].items():
+            if "-alt-" in skeleton or "-count-" in skeleton:
+                continue
+            if keep_skeleton(skeleton, what):
+                put(f"f.{skeleton}", value)
+        for skeleton, items in dt["intervalFormats"].items():
+            if skeleton == "intervalFormatFallback" or "-alt-" in skeleton:
+                continue
+            if not keep_skeleton(skeleton, what):
+                continue
+            for letter, value in items.items():
+                if "-alt-" in letter:
+                    continue
+                if letter not in DATE_PATTERN_LETTERS:
+                    sys.exit(f"{what}: bad interval field {skeleton} {letter!r}")
+                put(f"i.{skeleton}.{letter}", value)
+    except KeyError as e:
+        sys.exit(f"{what}: missing {e}")
+    return out
+
+
+def xml_iso8601_entries(root, locale_id):
+    """The entries of date-patterns.txt that the common/main XML `root` of
+    the CLDR locale `locale_id` has for the iso8601 calendar, as
+    json_calendar_entries gives them, in its order: root.xml's must have
+    every pattern of each kind it lists; another locale's are the values it
+    has explicitly ({} for none; zh's intervals in CLDR 48.2), which go over
+    its parent's. A value xml_value drops (an inheritance marker, a draft
+    neither cldr-json nor ICU includes) is not there. An atTime
+    dateTimeFormat that aliases the standard one is AT_TIME_IS_STANDARD;
+    exit on any other alias in dateFormats, timeFormats and dateTimeFormats, and
+    if root.xml has no iso8601 calendar."""
+    is_root = locale_id == "und"
+    what = f"date patterns {locale_id} iso8601"
+    cals = [
+        c
+        for c in root.iterfind("dates/calendars/calendar")
+        if c.get("type") == "iso8601"
+    ]
+    if len(cals) > 1 or (is_root and not cals):
+        sys.exit(f"{xml_file_name(locale_id)}.xml does not have one iso8601 calendar")
+    if not cals:
+        return {}
+    cal = cals[0]
+    for section in ("dateFormats", "timeFormats", "dateTimeFormats"):
+        for el in cal.iterfind(f"{section}"):
+            for parent in el.iter():
+                for child in parent:
+                    if child.tag != "alias":
+                        continue
+                    if (
+                        parent.tag == "dateTimeFormat"
+                        and parent.get("type") == "atTime"
+                        and child.get("path") == AT_TIME_ALIAS
+                    ):
+                        continue
+                    sys.exit(f"{what}: unhandled alias {child.attrib} in {section}")
+
+    def plain(el, tag):
+        """The first child `tag` of `el` with no alt and no count, or None."""
+        if el is None:
+            return None
+        return next(
+            (
+                e
+                for e in el.findall(tag)
+                if e.get("alt") is None and e.get("count") is None
+            ),
+            None,
+        )
+
+    out = {}
+
+    def put(key, el):
+        """Add the value of `el` under `key`; root's must be there."""
+        value = xml_value(el, f"{what} {key}")
+        if value or is_root:
+            out[key] = date_value(value, key, what)
+
+    for prefix, section, length, fmt in (
+        ("d", "dateFormats", "dateFormatLength", "dateFormat"),
+        ("t", "timeFormats", "timeFormatLength", "timeFormat"),
+    ):
+        for i, w in enumerate(DATE_WIDTHS):
+            el = cal.find(f"{section}/{length}[@type='{w}']/{fmt}")
+            if el is not None or is_root:
+                put(f"{prefix}{i}", plain(el, "pattern"))
+    at_time = {}
+    for i, w in enumerate(DATE_WIDTHS):
+        el = cal.find(f"dateTimeFormats/dateTimeFormatLength[@type='{w}']")
+        formats = el.findall("dateTimeFormat") if el is not None else []
+        standard = [f for f in formats if f.get("type") in (None, "standard")]
+        if len(standard) > 1 or (is_root and not standard):
+            sys.exit(f"{what}: not one standard dateTimeFormat {w}")
+        if standard:
+            put(f"c{i}", plain(standard[0], "pattern"))
+        for f in formats:
+            if f.get("type") != "atTime":
+                continue
+            if f.find("alias") is not None:
+                at_time[f"a{i}"] = AT_TIME_IS_STANDARD
+            else:
+                value = xml_value(plain(f, "pattern"), f"{what} a{i}")
+                if value or is_root:
+                    at_time[f"a{i}"] = date_value(value, f"a{i}", what)
+    out.update(at_time)
+    dt = cal.find("dateTimeFormats")
+    if dt is None:
+        if is_root:
+            sys.exit(f"{what}: no dateTimeFormats")
+        return out
+    fallback = dt.find("intervalFormats/intervalFormatFallback")
+    if fallback is not None or is_root:
+        put("fb", fallback)
+    timezone = [
+        e
+        for e in dt.findall("appendItems/appendItem")
+        if e.get("request") == "Timezone"
+    ]
+    if timezone or is_root:
+        put("tz", timezone[0] if timezone else None)
+    for item in dt.findall("availableFormats/dateFormatItem"):
+        skeleton = item.get("id") or ""
+        if item.get("alt") is None and item.get("count") is None:
+            if keep_skeleton(skeleton, what):
+                put(f"f.{skeleton}", item)
+    for item in dt.findall("intervalFormats/intervalFormatItem"):
+        skeleton = item.get("id") or ""
+        if item.get("alt") is not None or not keep_skeleton(skeleton, what):
+            continue
+        for g in item.findall("greatestDifference"):
+            letter = g.get("id") or ""
+            if g.get("alt") is not None:
+                continue
+            if letter not in DATE_PATTERN_LETTERS:
+                sys.exit(f"{what}: bad interval field {skeleton} {letter!r}")
+            put(f"i.{skeleton}.{letter}", g)
+    return out
+
+
+def xml_defines(el, what):
+    """Whether the XML element `el` holds any data: an alias, or an element
+    with a value xml_value keeps (bg.xml's iso8601 calendar has only an
+    inheritance marker, which defines nothing)."""
+    for e in el.iter():
+        if e.tag == "alias" or (len(e) == 0 and xml_value(e, what).strip()):
+            return True
+    return False
+
+
+def date_patterns_lines(tree, tags, load_xml):
+    """The lines of date-patterns.txt after the comments: a string table,
+    then for each locale of `tags` (and und), in the order of file_parents,
+    'locale <tag> <parent>' and, for each calendar of DATE_CALENDARS,
+    '<calendar> = <other>' where the locale's whole data for the calendar
+    equals its data for a calendar listed before it, else '<calendar>
+    <key>=<index>...' with the entries that differ from what the parent
+    gives for the calendar (no line if none do). The data is
+    json_calendar_entries of the cldr-json packages, and for iso8601
+    xml_iso8601_entries of root.xml with those of each locale of the CLDR
+    chain over them, nearest last (`load_xml` returns common/main files by
+    name): exit if a locale of the chains that is not in `tags` has iso8601
+    calendar data (xml_defines). Exit unless reading every locale
+    and calendar back gives its data, and unless und has every key of
+    DATE_REQUIRED_KEYS for every calendar."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags, DATE_PACKAGES)
+    parents, ordered = file_parents(tree, tags, dirs)
+    parent_entries = tree.parent_locales()
+    ids = set()
+    for d in dirs.values():
+        while d is not None:
+            ids.add(d)
+            d = cldr_parent(parent_entries, d)
+    by_dir = {d: t for t, d in dirs.items()}
+    # The iso8601 data of each locale of the chains: root.xml's, and each
+    # locale's explicit values, which only locales of `tags` may have.
+    xml_iso8601 = {}
+    for i in sorted(ids):
+        name = xml_file_name(i)
+        root = load_xml(name)
+        xml_iso8601[i] = xml_iso8601_entries(root, i)
+        if i in by_dir:
+            continue
+        for c in root.iterfind("dates/calendars/calendar"):
+            if c.get("type") == "iso8601" and xml_defines(c, f"{name} iso8601"):
+                sys.exit(
+                    f"{name}.xml has iso8601 calendar data, and {i} is not "
+                    "in locales.txt"
+                )
+
+    def iso8601_of(d):
+        """The iso8601 entries of the CLDR locale `d`: root's, with the
+        explicit values of each locale of its chain over them, nearest
+        last, and the atTime aliases resolved against the result."""
+        chain = []
+        while d is not None:
+            chain.append(d)
+            d = cldr_parent(parent_entries, d)
+        out = {}
+        for c in reversed(chain):
+            out.update(xml_iso8601[c])
+        # An atTime alias is the locale's own standard format.
+        for i, w in enumerate(DATE_WIDTHS):
+            if out.get(f"a{i}") is AT_TIME_IS_STANDARD:
+                if f"c{i}" not in out:
+                    sys.exit(f"date patterns {chain[0]} iso8601: a{i} aliases no c{i}")
+                out[f"a{i}"] = out[f"c{i}"]
+        return out
+
+    resolved = {}
+    for tag in ordered:
+        d = dirs[tag]
+        for cal, package, name in DATE_CALENDARS:
+            what = f"date patterns {tag} {cal}"
+            if package is None:
+                resolved[(tag, cal)] = iso8601_of(d)
+                continue
+            j = tree.load(package, "main", d, f"ca-{name}.json")
+            if j is None:
+                sys.exit(f"{what}: no ca-{name}.json")
+            j = j["main"][d]["dates"]["calendars"][name]
+            resolved[(tag, cal)] = json_calendar_entries(cal, j, what)
+    for cal, _, _ in DATE_CALENDARS:
+        required = DATE_REQUIRED_KEYS + (["lp"] if cal in LEAP_MONTH_CALENDARS else [])
+        missing = [k for k in required if k not in resolved[("und", cal)]]
+        if missing:
+            sys.exit(f"date patterns und {cal}: missing {missing}")
+
+    alias = {}
+    own = {}
+    effective = {}
+    for tag in ordered:
+        for n, (cal, _, _) in enumerate(DATE_CALENDARS):
+            data = resolved[(tag, cal)]
+            target = next(
+                (c for c, _, _ in DATE_CALENDARS[:n] if resolved[(tag, c)] == data),
+                None,
+            )
+            if target is not None:
+                alias[(tag, cal)] = target
+                effective[(tag, cal)] = effective[(tag, target)]
+                continue
+            base = {} if parents[tag] == "-" else effective[(parents[tag], cal)]
+            own[(tag, cal)] = {k: v for k, v in data.items() if base.get(k) != v}
+            effective[(tag, cal)] = {**base, **own[(tag, cal)]}
+
+    strings = sorted({v for o in own.values() for v in o.values()})
+    index = {s: i for i, s in enumerate(strings)}
+    lines = [f"strings {len(strings)}"] + strings
+    for tag in ordered:
+        lines.append(f"locale {tag} {parents[tag]}")
+        for cal, _, _ in DATE_CALENDARS:
+            if (tag, cal) in alias:
+                lines.append(f"{cal} = {alias[(tag, cal)]}")
+            elif own[(tag, cal)]:
+                items = " ".join(f"{k}={index[v]}" for k, v in own[(tag, cal)].items())
+                lines.append(f"{cal} {items}")
+
+    # Read every pair back from the lines, as the file's reader does.
+    read = date_patterns_reader(lines)
+    for tag in ordered:
+        for cal, _, _ in DATE_CALENDARS:
+            got = read(tag, cal)
+            if got != resolved[(tag, cal)]:
+                missing = sorted(set(got) - set(resolved[(tag, cal)]))
+                sys.exit(
+                    f"date patterns {tag} {cal}: does not read back; the "
+                    f"parent chain has entries it lacks: {missing[:3]}"
+                )
+    return lines
+
+
+def date_patterns_reader(lines):
+    """A function (tag, calendar) -> {key: value} that reads the lines of
+    date-patterns.txt (after the comments) as its reader does: a calendar
+    with an `=` line is the other calendar of the same locale, else the
+    parent's data for the calendar with the locale's own entries over it.
+    Exit on a line it cannot parse, or a tag or calendar it does not
+    have."""
+    head = lines[0].split(" ") if lines else []
+    if len(head) != 2 or head[0] != "strings" or not head[1].isdigit():
+        sys.exit(f"date patterns: bad first line {lines[:1]}")
+    count = int(head[1])
+    strings = lines[1 : 1 + count]
+    locales = {}
+    calendars = {c for c, _, _ in DATE_CALENDARS}
+    cur = None
+    for line in lines[1 + count :]:
+        f = line.split(" ")
+        if f[0] == "locale" and len(f) == 3:
+            cur = locales[f[1]] = (f[2], {})
+        elif cur is None or f[0] not in calendars or f[0] in cur[1]:
+            sys.exit(f"date patterns: unexpected line {line!r}")
+        elif len(f) == 3 and f[1] == "=" and f[2] in calendars:
+            cur[1][f[0]] = f[2]
+        else:
+            entries = {}
+            for item in f[1:]:
+                key, _, i = item.rpartition("=")
+                if not key or not i.isdigit() or int(i) >= count or key in entries:
+                    sys.exit(f"date patterns: bad entry {item!r} in {line!r}")
+                entries[key] = strings[int(i)]
+            cur[1][f[0]] = entries
+
+    def read(tag, cal):
+        if tag not in locales:
+            sys.exit(f"date patterns: no locale {tag}")
+        parent, own = locales[tag]
+        v = own.get(cal, {})
+        if isinstance(v, str):
+            return read(tag, v)
+        base = {} if parent == "-" else read(parent, cal)
+        return {**base, **v}
+
+    return read
+
+
+# The widths of day-periods.txt's names, in the order of its lines.
+DAY_PERIOD_WIDTHS = ["abbreviated", "wide", "narrow"]
+
+
+def day_period_minutes(time, what):
+    """The minute of the day of a dayPeriodRule time, "HH:MM" (24:00 is
+    1440)."""
+    m = re.fullmatch(r"(\d\d):(\d\d)", time if isinstance(time, str) else "")
+    if not m or int(m.group(2)) > 59 or int(m.group(1)) * 60 + int(m.group(2)) > 1440:
+        sys.exit(f"{what}: bad time {time!r}")
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def day_period_rules(tree):
+    """CLDR's dayPeriodRuleSet (cldr-core dayPeriods.json) as {key: {period:
+    (from, before)}}, the keys BCP 47 tags (es_CO is es-CO, root is und), in
+    minutes of the day; an `at` rule is (at, at). Exit unless und has rules."""
+    j = tree.load("cldr-core", "supplemental", "dayPeriods.json")
+    out = {}
+    for key, periods in j["supplemental"]["dayPeriodRuleSet"].items():
+        k = "und" if key == "root" else key.replace("_", "-")
+        if k in out:
+            sys.exit(f"day periods: two rule sets for {k}")
+        rules = {}
+        for period, rule in periods.items():
+            what = f"day periods {k} {period}"
+            if not re.fullmatch(r"[a-z]+[0-9]?", period):
+                sys.exit(f"{what}: bad period name")
+            if set(rule) == {"_at"}:
+                at = day_period_minutes(rule["_at"], what)
+                rules[period] = (at, at)
+            elif set(rule) == {"_from", "_before"}:
+                rules[period] = (
+                    day_period_minutes(rule["_from"], what),
+                    day_period_minutes(rule["_before"], what),
+                )
+            else:
+                sys.exit(f"{what}: unexpected rule {rule!r}")
+        out[k] = rules
+    if "und" not in out:
+        sys.exit("day periods: no rule set for und")
+    return out
+
+
+def day_period_rules_key(tag, rules):
+    """The rule set of `tag`: the first truncation of the tag that has one
+    (as ICU looks them up), else und's."""
+    while tag not in rules:
+        if "-" not in tag:
+            return "und"
+        tag = tag.rsplit("-", 1)[0]
+    return tag
+
+
+def day_periods_lines(tree, tags):
+    """The lines of day-periods.txt after the comments: 'rules <key>' for
+    each rule set of day_period_rules, followed by '<period> <from>
+    <before>' lines; then for each locale of `tags` (and und), in the order
+    of file_parents, 'locale <tag> <parent> <rules key>' and '<period>
+    <abbreviated>\\t<wide>\\t<narrow>' for each period of its rule set whose
+    format-context names (cldr-dates-full ca-gregorian.json) differ from
+    what the parent chain gives. A period with no names has no line and
+    reads as "". Exit if a period has names in some widths only, or none
+    where the parent chain has some."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags, ["cldr-dates-full"])
+    parents, ordered = file_parents(tree, tags, dirs)
+    rules = day_period_rules(tree)
+    keys = {tag: day_period_rules_key(tag, rules) for tag in tags}
+    names = {}
+    for tag in ordered:
+        d = dirs[tag]
+        j = tree.load("cldr-dates-full", "main", d, "ca-gregorian.json")
+        try:
+            fmt = j["main"][d]["dates"]["calendars"]["gregorian"]["dayPeriods"]
+            fmt = fmt["format"]
+        except KeyError as e:
+            sys.exit(f"day periods {tag}: missing {e}")
+        names[tag] = {}
+        for period in rules[keys[tag]]:
+            what = f"day periods {tag} {period}"
+            triple = tuple(
+                check_value(fmt.get(w, {}).get(period, ""), what)
+                for w in DAY_PERIOD_WIDTHS
+            )
+            if any(triple) and not all(triple):
+                sys.exit(f"{what}: names in some widths only: {triple}")
+            names[tag][period] = triple
+
+    own = {}
+
+    def chain(tag, period):
+        while tag != "-":
+            if period in own[tag]:
+                return own[tag][period]
+            tag = parents[tag]
+        return ("",) * len(DAY_PERIOD_WIDTHS)
+
+    for tag in ordered:
+        own[tag] = {}
+        for period, triple in names[tag].items():
+            if chain(parents[tag], period) == triple:
+                continue
+            if not any(triple):
+                sys.exit(
+                    f"day periods {tag} {period}: no names, where the parent "
+                    "chain has some"
+                )
+            own[tag][period] = triple
+
+    lines = []
+    for key in sorted(rules):
+        lines.append(f"rules {key}")
+        for period, (start, before) in sorted(
+            rules[key].items(), key=lambda r: (r[1][0], r[1][1], r[0])
+        ):
+            lines.append(f"{period} {start} {before}")
+    for tag in ordered:
+        lines.append(f"locale {tag} {parents[tag]} {keys[tag]}")
+        for period, triple in own[tag].items():
+            lines.append(f"{period} " + "\t".join(triple))
+
+    # Read the lines back as the file's reader does.
+    got_rules, got_locales = parse_day_periods_lines(lines)
+    if got_rules != rules:
+        sys.exit("day periods: the rules do not read back")
+    for tag in ordered:
+        if tag not in got_locales or got_locales[tag][1] != keys[tag]:
+            sys.exit(f"day periods {tag}: the rules key does not read back")
+        for period, triple in names[tag].items():
+            t = tag
+            got = ("",) * len(DAY_PERIOD_WIDTHS)
+            while t != "-":
+                if period in got_locales[t][2]:
+                    got = got_locales[t][2][period]
+                    break
+                t = got_locales[t][0]
+            if got != triple:
+                sys.exit(f"day periods {tag} {period}: does not read back")
+    return lines
+
+
+def parse_day_periods_lines(lines):
+    """The lines of day-periods.txt (after the comments) as ({key: {period:
+    (from, before)}}, {tag: (parent, rules key, {period: names})}). Exit on
+    a line it cannot parse."""
+    rules, locales = {}, {}
+    cur = None
+    for line in lines:
+        f = line.split(" ")
+        if f[0] == "rules" and len(f) == 2 and not locales:
+            cur = rules[f[1]] = {}
+        elif f[0] == "locale" and len(f) == 4:
+            locales[f[1]] = (f[2], f[3], {})
+            cur = locales[f[1]][2]
+        elif cur is None:
+            sys.exit(f"day periods: unexpected line {line!r}")
+        elif not locales and len(f) == 3 and f[1].isdigit() and f[2].isdigit():
+            cur[f[0]] = (int(f[1]), int(f[2]))
+        elif locales and len(line.split(" ", 1)[-1].split("\t")) == 3:
+            period, names = line.split(" ", 1)
+            cur[period] = tuple(names.split("\t"))
+        else:
+            sys.exit(f"day periods: unexpected line {line!r}")
+    return rules, locales
+
+
+def write_date_files(tree, tag, load_xml):
+    """Write date-patterns.txt and day-periods.txt from the unpacked CLDR
+    JSON packages `tree` of the release `tag`, and the common/main XML files
+    `load_xml` returns by name."""
+    locales = read_locales()
+    write_lines(
+        "date-patterns.txt",
+        tag,
+        "Date patterns (cldr-dates-full and cldr-cal-*-full ca-*.json; "
+        "for iso8601,\n# common/main/*.xml along the CLDR chain, root.xml "
+        "first, zh adding intervals):\n# a string table, then per locale 'locale "
+        "<tag> <parent>' and per calendar (BCP 47\n# ids; generic is CLDR's) "
+        "'<calendar> <key>=<index>...' with the entries that differ\n# from "
+        "its parent's, or '<calendar> = <other>' where the locale's data for "
+        "it equals\n# its data for an earlier calendar. Keys: d0-d3 "
+        "dateFormats, t0-t3 timeFormats,\n# c0-c3 dateTimeFormats, a0-a3 "
+        "atTime, full to short; fb intervalFormatFallback;\n# lp the numeric "
+        "leap month; tz the Timezone append item; f.<skeleton>\n# "
+        "availableFormats; i.<skeleton>.<letter> intervalFormats.",
+        date_patterns_lines(tree, locales, load_xml),
+    )
+    write_lines(
+        "day-periods.txt",
+        tag,
+        "Flexible day periods: CLDR's dayPeriodRuleSet (cldr-core "
+        "dayPeriods.json) as\n# 'rules <key>' and '<period> <from> <before>' "
+        "lines in minutes of the day ('at'\n# rules have from = before), then "
+        "per locale 'locale <tag> <parent> <rules key>'\n# (the rules key the "
+        "first truncation of the tag with a rule set, else und) and\n# "
+        "'<period> <abbreviated>\\t<wide>\\t<narrow>' format-context names "
+        "(ca-gregorian.json)\n# where they differ from the parent chain's; a "
+        "period with no line has no names.",
+        day_periods_lines(tree, locales),
+    )
+
+
+def read_locales():
+    """The tags of locales.txt."""
+    with open(os.path.join(HERE, "locales.txt"), encoding="utf-8") as f:
+        return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+
+
 def write_number_files(tree, tag, load_xml):
     """Write number-symbols.txt, units.txt, currency-symbols.txt,
     explicit-number-systems.txt and compact-currency.txt from the unpacked
     CLDR JSON packages `tree` of the release `tag`, and the common/main XML
-    files `load_xml` returns by name (each is loaded once)."""
-    loaded = {}
-
-    def load_once(name):
-        if name not in loaded:
-            loaded[name] = load_xml(name)
-        return loaded[name]
-
-    with open(os.path.join(HERE, "locales.txt"), encoding="utf-8") as f:
-        locales = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    files `load_xml` returns by name (write_json_data's loader fetches each
+    once)."""
+    locales = read_locales()
     intl_js = os.path.join(HERE, "..", "..", "js", "10-Intl.js")
     with open(intl_js, encoding="utf-8") as f:
         sanctioned = sanctioned_units(f.read())
     check_currency_spacing(tree, locales)
     symbols = number_symbols_lines(tree, locales)
     units = units_lines(tree, locales, sanctioned)
-    currencies = currency_symbols_lines(tree, locales, load_once)
-    explicit = explicit_number_systems_lines(tree, locales, load_once)
-    compact_currency = compact_currency_lines(tree, locales, load_once)
+    currencies = currency_symbols_lines(tree, locales, load_xml)
+    explicit = explicit_number_systems_lines(tree, locales, load_xml)
+    compact_currency = compact_currency_lines(tree, locales, load_xml)
     write_lines(
         "number-symbols.txt",
         tag,
@@ -1417,12 +2125,22 @@ def write_number_files(tree, tag, load_xml):
     )
 
 
-def write_number_data(tag):
+def write_json_data(tag):
     """Generate number-symbols.txt, units.txt, currency-symbols.txt,
-    explicit-number-systems.txt and compact-currency.txt."""
+    explicit-number-systems.txt, compact-currency.txt, date-patterns.txt and
+    day-periods.txt, fetching each common/main XML file once."""
+    loaded = {}
+
+    def load_xml(name):
+        if name not in loaded:
+            loaded[name] = fetch(tag, f"main/{name}.xml")
+        return loaded[name]
+
     with tempfile.TemporaryDirectory() as tmp:
         download_packages(npm_version(tag), tmp)
-        write_number_files(Tree(tmp), tag, lambda name: fetch(tag, f"main/{name}.xml"))
+        tree = Tree(tmp)
+        write_number_files(tree, tag, load_xml)
+        write_date_files(tree, tag, load_xml)
 
 
 def main():
@@ -1478,7 +2196,7 @@ def main():
         [fetch(tag, "bcp47/" + f) for f in bcp47_files(tag)]
     )
     write_value_aliases("extension-value-aliases.txt", tag, table)
-    write_number_data(tag)
+    write_json_data(tag)
 
 
 if __name__ == "__main__":

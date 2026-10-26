@@ -15,6 +15,7 @@ add_unittest(HermesIntlUnitTests IntlPluginUnitTests
   NativeHelpersTest.cpp
   SetupObjectsTest.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/CollatorHelpers.cpp
+  ${PROJECT_SOURCE_DIR}/intl/jsi/DateTimeFormatHelpers.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/StringHelpers.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/Defaults.cpp
   ${PROJECT_SOURCE_DIR}/intl/jsi/LocaleHelpers.cpp

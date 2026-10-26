@@ -6,13 +6,13 @@
  */
 
 /*
-RUN: TZ=EST+5 LC_ALL=en_US _HERMES_TEST_LOCALE=en_US %hermes -O -target=HBC %s \
+RUN: TZ=EST+5 LC_ALL=en_US _HERMES_TEST_LOCALE=en_US %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines %s
-RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %hermes -O -target=HBC %s \
+RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines %s
-RUN: TZ=EST+5 LC_ALL=C %hermes -O -target=HBC %s \
+RUN: TZ=EST+5 LC_ALL=C %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines %s
-RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %shermes -exec %s \
+RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %shermes -exec %s -Wx,-Xintl-plugin=false \
 RUN:            | %FileCheck --match-full-lines %s
 UNSUPPORTED: locale_aware_dates || intl
 */
@@ -27,6 +27,11 @@ UNSUPPORTED: locale_aware_dates || intl
 // strftime for a locale-dependent field without ever calling setlocale:
 // glibc's strftime ignores LC_ALL and friends unless setlocale opted in, so
 // such a change would pass all four runs above undetected.
+//
+// The Intl plugin replaces Date.prototype.toLocaleString,
+// toLocaleDateString and toLocaleTimeString with their ECMA-402 versions,
+// so these runs turn it off (-Xintl-plugin=false) to test Hermes's own;
+// intl/test/lit/to-locale-date-string.js tests the plugin's.
 
 "use strict";
 

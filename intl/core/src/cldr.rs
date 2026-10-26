@@ -35,14 +35,48 @@ use std::sync::OnceLock;
 
 /// The lines of a generated file after its leading `#` comment lines, as
 /// they are: a value may begin or end with a space.
-fn body_lines(text: &'static str) -> impl Iterator<Item = &'static str> {
+pub(crate) fn body_lines(text: &'static str) -> impl Iterator<Item = &'static str> {
     text.lines().skip_while(|l| l.starts_with('#'))
+}
+
+/// The string table that opens a generated file: a `strings <count>` line
+/// and that many lines, taken from `lines` as they are (a string may begin
+/// or end with a space). `file` names the file in panics.
+pub(crate) fn string_table(
+    lines: &mut impl Iterator<Item = &'static str>,
+    file: &str,
+) -> Vec<&'static str> {
+    let count: usize = lines
+        .next()
+        .and_then(|l| l.strip_prefix("strings "))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{file}: no string count"));
+    let strings: Vec<&'static str> = lines.take(count).collect();
+    assert_eq!(strings.len(), count, "{file}: short string table");
+    strings
+}
+
+/// The parent of the locale `tag` from its `locale <tag> <parent>` line: None
+/// for `-`. Panics unless `parent` is `-` or satisfies `known` (a locale
+/// already read: parents come first). `file` names the file in panics.
+pub(crate) fn locale_parent(
+    file: &str,
+    tag: &str,
+    parent: &'static str,
+    known: impl Fn(&str) -> bool,
+) -> Option<&'static str> {
+    let parent = (parent != "-").then_some(parent);
+    assert!(
+        parent.is_none_or(known),
+        "{file}: {tag} comes before its parent"
+    );
+    parent
 }
 
 /// The first locale ICU4X's locale fallback reaches from `id` for which
 /// `has` is true, as a tag. Panics if the fallback reaches `und` and `has`
 /// is false for it too: every file has an `und` entry.
-fn fallback_key(id: &LanguageIdentifier, has: impl Fn(&str) -> bool) -> String {
+pub(crate) fn fallback_key(id: &LanguageIdentifier, has: impl Fn(&str) -> bool) -> String {
     let fallbacker = LocaleFallbacker::new().for_config(LocaleFallbackConfig::default());
     let mut it = fallbacker.fallback_for(DataLocale::from(id));
     loop {
@@ -342,17 +376,7 @@ type CompactCurrencyFile = HashMap<&'static str, CompactCurrencyLocale>;
 /// Parse compact-currency.txt.
 fn parse_compact_currency(text: &'static str) -> CompactCurrencyFile {
     let mut lines = body_lines(text);
-    let count: usize = lines
-        .next()
-        .and_then(|l| l.strip_prefix("strings "))
-        .and_then(|n| n.parse().ok())
-        .expect("compact-currency.txt: no string table");
-    let strings: Vec<&'static str> = lines.by_ref().take(count).collect();
-    assert_eq!(
-        strings.len(),
-        count,
-        "compact-currency.txt: short string table"
-    );
+    let strings = string_table(&mut lines, "compact-currency.txt");
     let string = |i: &str| -> &'static str {
         let i: usize = i.parse().expect("compact-currency.txt: bad index");
         strings[i]
@@ -362,11 +386,9 @@ fn parse_compact_currency(text: &'static str) -> CompactCurrencyFile {
     for line in lines {
         let f: Vec<&'static str> = line.split('\t').collect();
         if let ["locale", tag, parent] = f[..] {
-            let parent = (parent != "-").then_some(parent);
-            assert!(
-                parent.is_none_or(|p| table.contains_key(p)),
-                "compact-currency.txt: {tag} comes before its parent"
-            );
+            let parent = locale_parent("compact-currency.txt", tag, parent, |p| {
+                table.contains_key(p)
+            });
             let fresh = CompactCurrencyLocale {
                 parent,
                 patterns: HashMap::new(),
@@ -661,13 +683,7 @@ pub(crate) struct Units {
 /// Parse units.txt.
 fn parse_units(text: &'static str) -> Units {
     let mut lines = body_lines(text);
-    let count: usize = lines
-        .next()
-        .and_then(|l| l.strip_prefix("strings "))
-        .and_then(|n| n.parse().ok())
-        .expect("units.txt: no string count");
-    let strings: Vec<&'static str> = lines.by_ref().take(count).collect();
-    assert_eq!(strings.len(), count, "units.txt: short string table");
+    let strings = string_table(&mut lines, "units.txt");
     let mut locales = HashMap::new();
     let mut current: Option<&'static str> = None;
     for line in lines {
@@ -677,11 +693,7 @@ fn parse_units(text: &'static str) -> Units {
             let (Some(tag), Some(parent), None) = (words.next(), words.next(), words.next()) else {
                 panic!("units.txt: bad locale line {line:?}");
             };
-            let parent = (parent != "-").then_some(parent);
-            assert!(
-                parent.is_none_or(|p| locales.contains_key(p)),
-                "units.txt: {tag} comes before its parent"
-            );
+            let parent = locale_parent("units.txt", tag, parent, |p| locales.contains_key(p));
             assert_eq!(parent.is_none(), tag == "und", "units.txt: {line:?}");
             let fresh = UnitsLocale {
                 parent,

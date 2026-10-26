@@ -6,17 +6,23 @@
  */
 
 /*
-RUN: TZ=EST+5 LC_ALL=en_US _HERMES_TEST_LOCALE=en_US %hermes -O -target=HBC %s \
+RUN: TZ=EST+5 LC_ALL=en_US _HERMES_TEST_LOCALE=en_US %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix US %s
-RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %hermes -O -target=HBC %s \
+RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines -check-prefix TR %s
-RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %shermes -exec %s \
+RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %shermes -exec %s -Wx,-Xintl-plugin=false \
 RUN:            | %FileCheck --match-full-lines -check-prefix TR %s
 TODO(T53144040) Fix LIT tests on Windows
 XFAIL: windows
 REQUIRES: locale_aware_dates
 UNSUPPORTED: intl
 */
+
+// The Intl plugin replaces Date.prototype.toLocaleString,
+// toLocaleDateString and toLocaleTimeString with their ECMA-402 versions,
+// so these runs turn it off (-Xintl-plugin=false) to test Hermes's own;
+// intl/test/lit/to-locale-date-string.js tests the plugin's.
+
 "use strict";
 
 print('toLocaleString');

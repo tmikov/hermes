@@ -35,6 +35,9 @@ struct OptUtf8 {};
 /// Conversion tag for NativeHelpers.def: a JS number that is an integer in
 /// int range.
 struct Int {};
+/// Conversion tag for NativeHelpers.def: a JS number that is finite
+/// (arguments only).
+struct Double {};
 /// Conversion tag for NativeHelpers.def: a new JS array of strings from
 /// UTF-8 (results only).
 struct Utf8List {};
@@ -73,6 +76,11 @@ struct TagType<OptUtf8> {
 template <>
 struct TagType<Int> {
   using type = int;
+};
+/// Double is a double.
+template <>
+struct TagType<Double> {
+  using type = double;
 };
 /// Utf8List is a std::vector<std::string>.
 template <>
@@ -195,6 +203,20 @@ struct Convert<Int> {
   /// The JS number \p i.
   static facebook::jsi::Value toJS(facebook::jsi::Runtime &, int i) {
     return facebook::jsi::Value(i);
+  }
+};
+
+/// Double: a finite JS number (arguments only).
+template <>
+struct Convert<Double> {
+  /// \p v, which must be a finite number; \p helper names the caller.
+  static double fromJS(
+      facebook::jsi::Runtime &,
+      const facebook::jsi::Value &v,
+      const char *helper) {
+    if (!v.isNumber() || !std::isfinite(v.getNumber()))
+      internalError(std::string(helper) + ": expected a finite number");
+    return v.getNumber();
   }
 };
 

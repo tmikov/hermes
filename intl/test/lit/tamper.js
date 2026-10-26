@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: %hermes -Xintl-default-locale=en-US %s | %FileCheck --match-full-lines %s
+// RUN: %hermes -Xintl-default-locale=en-US -Xintl-default-time-zone=UTC %s | %FileCheck --match-full-lines %s
 
 // User code that replaces intrinsics before its first call to Intl does not
 // change what Intl returns or throws. Nothing calls Intl before the
@@ -60,6 +60,14 @@ var prResolvedOptions = PluralRulesPrototype.resolvedOptions;
 var prSelect = PluralRulesPrototype.select;
 var prSelectRange = PluralRulesPrototype.selectRange;
 var prSupportedLocalesOf = Intl.PluralRules.supportedLocalesOf;
+var OriginalDateTimeFormat = Intl.DateTimeFormat;
+var DateTimeFormatPrototype = Intl.DateTimeFormat.prototype;
+var dtfResolvedOptions = DateTimeFormatPrototype.resolvedOptions;
+var dtfFormatToParts = DateTimeFormatPrototype.formatToParts;
+var dtfFormatRange = DateTimeFormatPrototype.formatRange;
+var dtfFormatRangeToParts = DateTimeFormatPrototype.formatRangeToParts;
+var dtfSupportedLocalesOf = Intl.DateTimeFormat.supportedLocalesOf;
+var getDtfFormat = Object.getOwnPropertyDescriptor(DateTimeFormatPrototype, 'format').get;
 var symbolToPrimitive = Symbol.toPrimitive;
 var stringCharCodeAt = String.prototype.charCodeAt;
 var localeCompare = String.prototype.localeCompare;
@@ -69,6 +77,13 @@ var bigIntToLocaleString = BigInt.prototype.toLocaleString;
 var arrayToLocaleString = Array.prototype.toLocaleString;
 var TypedArrayPrototype = getPrototypeOf(Int8Array.prototype);
 var typedArrayToLocaleString = TypedArrayPrototype.toLocaleString;
+var DatePrototype = Date.prototype;
+var dateToLocaleString = DatePrototype.toLocaleString;
+var dateToLocaleDateString = DatePrototype.toLocaleDateString;
+var dateToLocaleTimeString = DatePrototype.toLocaleTimeString;
+var aDate = new Date(Date.UTC(2026, 0, 5, 15, 7, 9, 123));
+var invalidDate = new Date(NaN);
+var dateProxy = new Proxy(aDate, {});
 // Built from arrays now: the constructors use the replaced iterator.
 var float64s = new Float64Array([1234.5, 2]);
 var bigInt64s = new BigInt64Array([5n]);
@@ -141,6 +156,10 @@ Object.defineProperty = boom;
 Object.getOwnPropertyDescriptor = boom;
 Math.min = boom;
 Math.max = boom;
+Math.floor = boom;
+Date.now = boom;
+Date.prototype.getTime = boom;
+Date.prototype.valueOf = boom;
 Number.prototype.valueOf = boom;
 Number.prototype[symbolToPrimitive] = boom;
 BigInt.prototype.valueOf = boom;
@@ -173,6 +192,12 @@ PluralRulesPrototype.resolvedOptions = boom;
 PluralRulesPrototype.select = boom;
 PluralRulesPrototype.selectRange = boom;
 Intl.PluralRules.supportedLocalesOf = boom;
+DateTimeFormatPrototype.resolvedOptions = boom;
+DateTimeFormatPrototype.formatToParts = boom;
+DateTimeFormatPrototype.formatRange = boom;
+DateTimeFormatPrototype.formatRangeToParts = boom;
+define(DateTimeFormatPrototype, 'format', {__proto__: null, get: boom, configurable: true});
+Intl.DateTimeFormat.supportedLocalesOf = boom;
 // The names of the fields of the constructor's internal records, of
 // RegionPreference's, and of the objects getWeekInfo and getTextInfo
 // return. "region" is left out: the constructor reads it from its options
@@ -188,7 +213,13 @@ Intl.PluralRules.supportedLocalesOf = boom;
 // PluralRules tests pass every option too ("type" is already here as a
 // Locale record field), and the field of ResolvePlural's record is here.
 // "numberingSystem" is both a Locale and a NumberFormat option, so the
-// Locale tests pass it, as undefined.
+// Locale tests pass it, as undefined. The DateTimeFormat options are here
+// too, so the Locale tests pass "hourCycle" as undefined and the
+// DateTimeFormat tests pass undefined or an object with every option; and
+// so are the fields of DateTimeFormat's records: the resolution's, the
+// [[LocaleData]] and format records', the range pattern records', the
+// tokens and fields of a CLDR pattern, the offset parse, the formatter's
+// data, and the keys of its tables (widths and CLDR pattern letters).
 var recordFields = [
   'locale', 'calendar', 'ca', 'key', 'base', 'extension', 'regionOverride',
   'firstDay', 'weekend', 'direction', 'localeMatcher', 'co', 'kn', 'kf',
@@ -211,6 +242,30 @@ var recordFields = [
   'first', 'last', 'outerBefore', 'outerAfter',
   'entries', 'count', 'limit', 'availableLocales', 'relevantExtensionKeys',
   'resolutionOptionDescriptors', 'pluralCategory',
+  'hour12', 'hourCycle', 'timeZone', 'weekday', 'era', 'year', 'month', 'day',
+  'dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits',
+  'timeZoneName', 'formatMatcher', 'dateStyle', 'timeStyle',
+  'hc', 'hourCycle12', 'hourCycle24', 'primaryIdentifier', 'sign',
+  'minuteSeconds', 'fraction', 'dateTimeFormat', 'pattern12',
+  'monthStandalone', 'weekdayStandalone', 'ampmWidth', 'dayPeriodWidth',
+  'hourLetter', 'datePart', 'timePart', 'rangePatterns',
+  'patternLetterCounts', 'letterCounts', 'skeletonWidths',
+  'rangePatterns12', 'decimalSeparator', 'available', 'h12', 'h24',
+  'formats', 'styles', 'dateTimeFormats', 'atTimeFormats',
+  'intervalFallback', 'leapMonthPattern', 'timeZoneAppend', 'intervals',
+  'skeleton', 'fields', 'letter', 'Date', 'Time', 'Connector',
+  'DateTimeRangeFormat', 'family', 'Default', 'Era', 'Year', 'Month', 'Day',
+  'AmPm', 'DayPeriod', 'Hour', 'Minute', 'Second', 'FractionalSecondDigits',
+  'PatternParts', 'Pattern', 'Source', 'dayPeriods', 'patternParts', 'nf',
+  'nf2', 'nf3', 'name', 'field', 'width', 'standalone', 'text', 'full',
+  'long', 'medium', 'short', 'narrow', 'abbreviated', 'wide',
+  'shortOffset', 'longOffset', 'shortGeneric', 'longGeneric',
+  'G', 'y', 'U', 'r', 'M', 'L', 'd', 'E', 'c', 'a', 'b', 'B', 'h', 'H', 'K',
+  'k', 'm', 's', 'S', 'z', 'O', 'v', 'symbolList', 'relatedYear', 'yearName',
+  'monthCode', 'leapMonth', 'millisecond', 'inDST', 'offsetSeconds', 'names',
+  'GGGG', 'GGGGG', 'MMM', 'MMMM', 'MMMMM', 'LLL', 'LLLL', 'LLLLL', 'EEE',
+  'EEEE', 'EEEEE', 'ccc', 'cccc', 'ccccc', 'aaaa', 'aaaaa', 'zzzz', 'OOOO',
+  'vvvv',
 ];
 for (var k = 0; k < recordFields.length; k++)
   define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
@@ -222,6 +277,7 @@ Intl.Locale = boom;
 Intl.Collator = boom;
 Intl.NumberFormat = boom;
 Intl.PluralRules = boom;
+Intl.DateTimeFormat = boom;
 // Last, because it breaks ordinary descriptor objects: accessors for the
 // descriptor fields on Object.prototype. "value" is also a field of the
 // records of Unicode extension keywords.
@@ -261,6 +317,7 @@ var locale = new OriginalLocale('en-latn-us', {
   region: 'GB',
   calendar: 'gregory',
   numberingSystem: undefined,
+  hourCycle: undefined,
 });
 print(apply(localeToString, locale, []));
 // CHECK-NEXT: en-Latn-GB-u-ca-gregory
@@ -281,6 +338,7 @@ var full = new OriginalLocale('en-latn-us-u-ca-buddhist', {
   firstDayOfWeek: '1',
   numeric: true,
   numberingSystem: undefined,
+  hourCycle: undefined,
 });
 print(apply(localeToString, full, []));
 // CHECK-NEXT: en-Latn-US-fonipa-u-ca-gregory-fw-mon-kn
@@ -636,6 +694,176 @@ print(thrown(() => OriginalPluralRules('en'), OriginalTypeError), thrown(() => n
 print(thrown(() => apply(prSelectRange, prFr, [NaN, 1]), OriginalRangeError), thrown(() => apply(prSelectRange, prFr, [1]), OriginalTypeError), thrown(() => apply(prSelect, {}, [1]), OriginalTypeError), thrown(() => apply(prSelect, prFr, [aSymbol]), OriginalTypeError));
 // CHECK-NEXT: ok ok ok ok
 
+// Intl.DateTimeFormat, through the references captured before the
+// tampering: the constructor with and without new, resolvedOptions, the
+// format getter and its bound function (which formats Date.now() through
+// the captured Date.now), formatToParts, formatRange,
+// formatRangeToParts, supportedLocalesOf, and the errors.
+// The time zone offsets use the captured Math.floor. The ja formatter's
+// month is numeric although "long" was asked for, because ja's
+// availableFormats pattern for that skeleton writes it as a number (Node
+// reports the same); its era comes from the pattern's G.
+/// An options object with every option DateTimeFormat reads as an own
+/// property, all undefined; a test assigns the ones it uses, which changes
+/// the own properties without consulting Object.prototype.
+function dtfOptions() {
+  return {
+    localeMatcher: undefined,
+    calendar: undefined,
+    numberingSystem: undefined,
+    hour12: undefined,
+    hourCycle: undefined,
+    timeZone: undefined,
+    weekday: undefined,
+    era: undefined,
+    year: undefined,
+    month: undefined,
+    day: undefined,
+    dayPeriod: undefined,
+    hour: undefined,
+    minute: undefined,
+    second: undefined,
+    fractionalSecondDigits: undefined,
+    timeZoneName: undefined,
+    formatMatcher: undefined,
+    dateStyle: undefined,
+    timeStyle: undefined,
+  };
+}
+var dtf = new OriginalDateTimeFormat();
+print(stringify(apply(dtfResolvedOptions, dtf, [])));
+// CHECK-NEXT: {"locale":"en-US","calendar":"gregory","numberingSystem":"latn","timeZone":"UTC","year":"numeric","month":"numeric","day":"numeric"}
+var dtfFormat = apply(getDtfFormat, dtf, []);
+print(typeof dtfFormat, dtfFormat === apply(getDtfFormat, dtf, []), typeof dtfFormat(), dtfFormat(0), dtfFormat(-1), dtfFormat('86400000'));
+// CHECK-NEXT: function true string 1/1/1970 12/31/1969 1/2/1970
+var dtfCalled = OriginalDateTimeFormat('de');
+print(getPrototypeOf(dtfCalled) === DateTimeFormatPrototype, apply(dtfResolvedOptions, dtfCalled, []).locale);
+// CHECK-NEXT: true de
+var dtfFullOptions = dtfOptions();
+dtfFullOptions.localeMatcher = 'lookup';
+dtfFullOptions.numberingSystem = 'arab';
+dtfFullOptions.hour12 = true;
+dtfFullOptions.timeZone = 'asia/calcutta';
+dtfFullOptions.weekday = 'long';
+dtfFullOptions.year = 'numeric';
+dtfFullOptions.month = 'long';
+dtfFullOptions.day = 'numeric';
+dtfFullOptions.hour = 'numeric';
+dtfFullOptions.minute = 'numeric';
+dtfFullOptions.timeZoneName = 'short';
+dtfFullOptions.formatMatcher = 'best fit';
+var dtfFull = new OriginalDateTimeFormat(['xx', 'ja-JP-u-ca-japanese-hc-h23'], dtfFullOptions);
+print(stringify(apply(dtfResolvedOptions, dtfFull, [])));
+// CHECK-NEXT: {"locale":"ja-JP-u-ca-japanese","calendar":"japanese","numberingSystem":"arab","timeZone":"Asia/Kolkata","hourCycle":"h11","hour12":true,"weekday":"long","era":"short","year":"numeric","month":"numeric","day":"numeric","hour":"numeric","minute":"2-digit","timeZoneName":"short"}
+// format and formatToParts use neither the replaced Intl.NumberFormat nor
+// its replaced prototype, nor the replaced Number.prototype.toLocaleString
+// (replaced for the formatting below, then put back for the
+// toLocaleString tests), nor the replaced Math.floor, String methods or
+// Array.prototype; the names, day periods and numbers come from internal
+// records. (ICU4C writes the japanese year "8" in latn digits, from
+// CLDR's y=jpanyear override, which plan decision 17 does not apply.)
+Number.prototype.toLocaleString = boom;
+var dtfT = Date.UTC(2026, 0, 5, 15, 7, 9, 123);
+var dtfFullFormat = apply(getDtfFormat, dtfFull, []);
+print(dtfFullFormat(dtfT));
+// CHECK-NEXT: 令和٨年١月٥日月曜日 午後٨:٣٧ GMT+٥:٣٠
+print(partsString(apply(dtfFormatToParts, dtfFull, [dtfT])));
+// CHECK-NEXT: era:令和|year:٨|literal:年|month:١|literal:月|day:٥|literal:日|weekday:月曜日|literal: |dayPeriod:午後|hour:٨|literal::|minute:٣٧|literal: |timeZoneName:GMT+٥:٣٠
+var dtfStyles = dtfOptions();
+dtfStyles.dateStyle = 'full';
+dtfStyles.timeStyle = 'short';
+dtfStyles.timeZone = '-0930';
+print(stringify(apply(dtfResolvedOptions, new OriginalDateTimeFormat('en-GB', dtfStyles), [])));
+// CHECK-NEXT: {"locale":"en-GB","calendar":"gregory","numberingSystem":"latn","timeZone":"-09:30","hourCycle":"h23","hour12":false,"dateStyle":"full","timeStyle":"short"}
+print(partsString(apply(dtfFormatToParts, new OriginalDateTimeFormat('en-GB', dtfStyles), [dtfT])));
+// CHECK-NEXT: weekday:Monday|literal:, |day:5|literal: |month:January|literal: |year:2026|literal: at |hour:05|literal::|minute:37
+var dtfBasic = dtfOptions();
+dtfBasic.formatMatcher = 'basic';
+dtfBasic.month = '2-digit';
+dtfBasic.day = '2-digit';
+dtfBasic.fractionalSecondDigits = 2;
+print(stringify(apply(dtfResolvedOptions, new OriginalDateTimeFormat('de', dtfBasic), [])));
+// CHECK-NEXT: {"locale":"de","calendar":"gregory","numberingSystem":"latn","timeZone":"UTC","month":"2-digit","day":"2-digit","fractionalSecondDigits":2}
+print(partsString(apply(dtfFormatToParts, new OriginalDateTimeFormat('de', dtfBasic), [dtfT])));
+// CHECK-NEXT: day:05|literal:.|month:01|literal:., |fractionalSecond:12
+// A calendar with cyclic years and leap months, a named time zone, and a
+// day period with a fraction of a second.
+var dtfChinese = dtfOptions();
+dtfChinese.dateStyle = 'full';
+dtfChinese.timeStyle = 'full';
+dtfChinese.timeZone = 'America/New_York';
+print(esc(partsString(apply(dtfFormatToParts, new OriginalDateTimeFormat('en-u-ca-chinese', dtfChinese), [Date.UTC(2020, 5, 1, 12)]))));
+// CHECK-NEXT: weekday:Monday|literal:, |month:Fourth Monthbis|literal: |day:10|literal:, |relatedYear:2020|literal:(|yearName:geng-zi|literal:) at |hour:8|literal::|minute:00|literal::|second:00|literal:\u202f|dayPeriod:AM|literal: |timeZoneName:Eastern Daylight Time
+var dtfDayPeriod = dtfOptions();
+dtfDayPeriod.dayPeriod = 'long';
+dtfDayPeriod.hour = 'numeric';
+dtfDayPeriod.minute = '2-digit';
+dtfDayPeriod.second = '2-digit';
+dtfDayPeriod.fractionalSecondDigits = 3;
+print(apply(getDtfFormat, new OriginalDateTimeFormat('en', dtfDayPeriod), [])(dtfT));
+// CHECK-NEXT: 3:07:09.123 in the afternoon
+// The ranges (plan Review Focus 3, the range half), with the replacements
+// above in place: an interval pattern, the fallback for a day difference,
+// a date and time style range (its date shared), the fallback with a day
+// period and a fraction of a second, and a chinese date with a time zone
+// name; the collapsed form is below. Reading the parts' type, value and
+// source consults no accessor, since they are own data properties.
+print(esc(apply(dtfFormatRange, dtfFull, [dtfT, dtfT + 3600000])));
+// CHECK-NEXT: \u4ee4\u548c\u0668\u5e74\u0661\u6708\u0665\u65e5\u6708\u66dc\u65e5 \u5348\u5f8c\u0668\u6642\u0663\u0667\u5206\uff5e\u0669\u6642\u0663\u0667\u5206(GMT+\u0665:\u0663\u0660)
+print(esc(rangePartsString(apply(dtfFormatRangeToParts, dtfFull, [dtfT, dtfT + 86400000]))));
+// CHECK-NEXT: era:\u4ee4\u548c:startRange|year:\u0668:startRange|literal:\u5e74:startRange|month:\u0661:startRange|literal:\u6708:startRange|day:\u0665:startRange|literal:\u65e5:startRange|weekday:\u6708\u66dc\u65e5:startRange|literal: :startRange|dayPeriod:\u5348\u5f8c:startRange|hour:\u0668:startRange|literal:::startRange|minute:\u0663\u0667:startRange|literal: :startRange|timeZoneName:GMT+\u0665:\u0663\u0660:startRange|literal:\uff5e:shared|era:\u4ee4\u548c:endRange|year:\u0668:endRange|literal:\u5e74:endRange|month:\u0661:endRange|literal:\u6708:endRange|day:\u0666:endRange|literal:\u65e5:endRange|weekday:\u706b\u66dc\u65e5:endRange|literal: :endRange|dayPeriod:\u5348\u5f8c:endRange|hour:\u0668:endRange|literal:::endRange|minute:\u0663\u0667:endRange|literal: :endRange|timeZoneName:GMT+\u0665:\u0663\u0660:endRange
+var dtfRangeStyles = new OriginalDateTimeFormat('en-GB', dtfStyles);
+print(esc(rangePartsString(apply(dtfFormatRangeToParts, dtfRangeStyles, [dtfT, dtfT + 3600000]))));
+// CHECK-NEXT: weekday:Monday:shared|literal:, :shared|day:5:shared|literal: :shared|month:January:shared|literal: :shared|year:2026:shared|literal:, :shared|hour:05:startRange|literal:::startRange|minute:37:startRange|literal:\u2013:shared|hour:06:endRange|literal:::endRange|minute:37:endRange
+print(esc(rangePartsString(apply(dtfFormatRangeToParts, new OriginalDateTimeFormat('en', dtfDayPeriod), [dtfT, dtfT + 4 * 3600000]))));
+// CHECK-NEXT: hour:3:startRange|literal:::startRange|minute:07:startRange|literal:::startRange|second:09:startRange|literal:.:startRange|fractionalSecond:123:startRange|literal: :startRange|dayPeriod:in the afternoon:startRange|literal:\u2009\u2013\u2009:shared|hour:7:endRange|literal:::endRange|minute:07:endRange|literal:::endRange|second:09:endRange|literal:.:endRange|fractionalSecond:123:endRange|literal: :endRange|dayPeriod:in the evening:endRange
+print(esc(rangePartsString(apply(dtfFormatRangeToParts, new OriginalDateTimeFormat('en-u-ca-chinese', dtfChinese), [Date.UTC(2020, 5, 1, 12), Date.UTC(2020, 5, 1, 12, 0, 30)]))));
+// CHECK-NEXT: weekday:Monday:shared|literal:, :shared|month:Fourth Monthbis:shared|literal: :shared|day:10:shared|literal:, :shared|relatedYear:2020:shared|literal:(:shared|yearName:geng-zi:shared|literal:), :shared|hour:8:startRange|literal:::startRange|minute:00:startRange|literal:::startRange|second:00:startRange|literal:\u202f:startRange|dayPeriod:AM:startRange|literal: :startRange|timeZoneName:Eastern Daylight Time:startRange|literal:\u2009\u2013\u2009:shared|hour:8:endRange|literal:::endRange|minute:00:endRange|literal:::endRange|second:30:endRange|literal:\u202f:endRange|dayPeriod:AM:endRange|literal: :endRange|timeZoneName:Eastern Daylight Time:endRange
+Number.prototype.toLocaleString = numberToLocaleString;
+// The date passed to format is converted with ToNumber, which calls the
+// object's own valueOf and @@toPrimitive (a user-visible Get and Call, as
+// the draft says), and a Date's valueOf from Date.prototype, which is
+// replaced here.
+var ownValueOf = new Date(0);
+ownValueOf.valueOf = () => 86400000;
+var ownToPrimitive = {[symbolToPrimitive]: hint => (hint === 'number' ? 2 * 86400000 : 'x')};
+print(dtfFormat(ownValueOf), dtfFormat(ownToPrimitive), thrown(() => dtfFormat(new Date(0)), Error));
+// CHECK-NEXT: 1/2/1970 1/3/1970 ok
+print(stringify(apply(dtfSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+var dtfBadZone = dtfOptions();
+dtfBadZone.timeZone = 'Nowhere';
+var dtfBadSeconds = dtfOptions();
+dtfBadSeconds.timeZone = '+05:30:00';
+var dtfConflict = dtfOptions();
+dtfConflict.dateStyle = 'short';
+dtfConflict.hour = 'numeric';
+print(
+  thrown(() => new OriginalDateTimeFormat('de', dtfBadZone), OriginalRangeError),
+  thrown(() => new OriginalDateTimeFormat('de', dtfBadSeconds), OriginalRangeError),
+  thrown(() => new OriginalDateTimeFormat('de', dtfConflict), OriginalTypeError),
+  thrown(() => new OriginalDateTimeFormat('xx-invalid-'), OriginalRangeError),
+);
+// CHECK-NEXT: ok ok ok ok
+print(
+  thrown(() => apply(dtfResolvedOptions, {}, []), OriginalTypeError),
+  thrown(() => apply(getDtfFormat, {}, []), OriginalTypeError),
+  thrown(() => apply(dtfFormatToParts, dtf, [aSymbol]), OriginalTypeError),
+  thrown(() => apply(dtfFormatRange, dtf, [1]), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok
+print(apply(dtfFormatToParts, dtf, []).length, esc(apply(dtfFormatRange, dtf, [0, 86400000])), apply(dtfFormatRangeToParts, dtf, [0, 1]).length);
+// CHECK-NEXT: 5 1/1/1970\u2009\u2013\u20091/2/1970 5
+print(
+  thrown(() => dtfFormat(NaN), OriginalRangeError),
+  thrown(() => apply(dtfFormatToParts, dtf, [8.64e15 + 1]), OriginalRangeError),
+  thrown(() => apply(dtfFormatRange, dtf, [0, NaN]), OriginalRangeError),
+  thrown(() => apply(dtfFormatRangeToParts, dtf, [8.64e15 + 1, 0]), OriginalRangeError),
+  thrown(() => apply(dtfFormatRangeToParts, dtf, [0, undefined]), OriginalTypeError),
+  thrown(() => dtfFormat(aSymbol), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok ok ok
+
 // The String overrides, called as methods (Function.prototype.call is
 // replaced): localeCompare uses neither the replaced Intl.Collator nor the
 // replaced compare getter or resolvedOptions, with or without locales; the
@@ -699,5 +927,48 @@ print(
   thrown(() => (1n).toLocaleString('xx-invalid-'), OriginalRangeError),
   thrown(() => [1].toLocaleString('xx-invalid-'), OriginalRangeError),
   thrown(() => float64s.toLocaleString('xx-invalid-'), OriginalRangeError),
+);
+// CHECK-NEXT: ok ok ok ok
+
+// The Date overrides (plan Review Focus 3, the overrides half), called as
+// methods: they use neither the replaced Intl.DateTimeFormat nor its
+// replaced prototype methods and format getter, neither the replaced
+// Intl.NumberFormat nor Number.prototype.toLocaleString (replaced again
+// here), and neither the replaced Date.prototype.getTime and valueOf nor
+// the replaced Math.floor; the time value comes from the captured getTime.
+// The first calls without locales and options create the default
+// DateTimeFormats now.
+Number.prototype.toLocaleString = boom;
+print(esc(aDate.toLocaleString()), aDate.toLocaleDateString(), esc(aDate.toLocaleTimeString()));
+// CHECK-NEXT: 1/5/2026, 3:07:09\u202fPM 1/5/2026 3:07:09\u202fPM
+// Again, now that the defaults exist.
+print(esc(aDate.toLocaleString(undefined, undefined)), aDate.toLocaleDateString(), esc(aDate.toLocaleTimeString()));
+// CHECK-NEXT: 1/5/2026, 3:07:09\u202fPM 1/5/2026 3:07:09\u202fPM
+// The options objects from the DateTimeFormat tests above, with every
+// option: the same strings as format gives there.
+print(aDate.toLocaleString(['xx', 'ja-JP-u-ca-japanese-hc-h23'], dtfFullOptions));
+// CHECK-NEXT: 令和٨年١月٥日月曜日 午後٨:٣٧ GMT+٥:٣٠
+print(aDate.toLocaleString('en-GB', dtfStyles), '|', aDate.toLocaleTimeString('en', dtfDayPeriod));
+// CHECK-NEXT: Monday, 5 January 2026 at 05:37 | 3:07:09.123 in the afternoon
+// toLocaleDateString's date defaults with only a time field asked for.
+var dateHour = dtfOptions();
+dateHour.hour = '2-digit';
+print(esc(aDate.toLocaleDateString('de', dateHour)));
+// CHECK-NEXT: 5.1.2026, 15 Uhr
+// The Date's own valueOf is not consulted: its [[DateValue]] is 0.
+print(ownValueOf.toLocaleDateString(), invalidDate.toLocaleString(), invalidDate.toLocaleTimeString('xx-invalid-'));
+// CHECK-NEXT: 1/1/1970 Invalid Date Invalid Date
+print(
+  thrown(() => apply(dateToLocaleString, {}, []), OriginalTypeError),
+  thrown(() => apply(dateToLocaleDateString, DatePrototype, []), OriginalTypeError),
+  thrown(() => apply(dateToLocaleTimeString, dateProxy, []), OriginalTypeError),
+  thrown(() => apply(dateToLocaleString, 0, []), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok
+print(
+  thrown(() => aDate.toLocaleDateString('en-GB', dtfStyles), OriginalTypeError),
+  thrown(() => aDate.toLocaleTimeString('de', dtfConflict), OriginalTypeError),
+  thrown(() => aDate.toLocaleString('xx-invalid-'), OriginalRangeError),
+  thrown(() => aDate.toLocaleDateString('de', dtfBadZone), OriginalRangeError),
 );
 // CHECK-NEXT: ok ok ok ok

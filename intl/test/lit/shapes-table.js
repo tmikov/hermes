@@ -21,6 +21,7 @@ var TABLE = [
   ['Intl', 'getCanonicalLocales', 'method', 'getCanonicalLocales', 1],
   ['Intl', 'supportedValuesOf', 'method', 'supportedValuesOf', 1],
   ['Intl', 'Collator', 'constructor', 'Collator', 0],
+  ['Intl', 'DateTimeFormat', 'constructor', 'DateTimeFormat', 0],
   ['Intl', 'Locale', 'constructor', 'Locale', 1],
   ['Intl', 'NumberFormat', 'constructor', 'NumberFormat', 0],
   ['Intl', 'PluralRules', 'constructor', 'PluralRules', 0],
@@ -30,6 +31,14 @@ var TABLE = [
   ['Intl.Collator.prototype', 'compare', 'getter', 'get compare'],
   ['Intl.Collator.prototype', '@@toStringTag', 'toStringTag', 'Intl.Collator'],
   ['new Intl.Collator()', 'compare', 'bound', '', 2],
+  ['Intl.DateTimeFormat', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.DateTimeFormat.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.DateTimeFormat.prototype', 'format', 'getter', 'get format'],
+  ['Intl.DateTimeFormat.prototype', 'formatToParts', 'method', 'formatToParts', 1],
+  ['Intl.DateTimeFormat.prototype', 'formatRange', 'method', 'formatRange', 2],
+  ['Intl.DateTimeFormat.prototype', 'formatRangeToParts', 'method', 'formatRangeToParts', 2],
+  ['Intl.DateTimeFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.DateTimeFormat'],
+  ['new Intl.DateTimeFormat()', 'format', 'bound', '', 1],
   ['Intl.Locale.prototype', 'baseName', 'getter', 'get baseName'],
   ['Intl.Locale.prototype', 'calendar', 'getter', 'get calendar'],
   ['Intl.Locale.prototype', 'caseFirst', 'getter', 'get caseFirst'],
@@ -71,6 +80,9 @@ var TABLE = [
   ['String.prototype', 'toLocaleUpperCase', 'method', 'toLocaleUpperCase', 0],
   ['Number.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
   ['BigInt.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
+  ['Date.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
+  ['Date.prototype', 'toLocaleDateString', 'method', 'toLocaleDateString', 0],
+  ['Date.prototype', 'toLocaleTimeString', 'method', 'toLocaleTimeString', 0],
   ['Array.prototype', 'toLocaleString', 'method', 'toLocaleString', 0],
   ['Object.getPrototypeOf(Int8Array.prototype)', 'toLocaleString', 'method', 'toLocaleString', 0],
 ];
@@ -155,6 +167,7 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK: Intl.getCanonicalLocales: ok
 // CHECK-NEXT: Intl.supportedValuesOf: ok
 // CHECK-NEXT: Intl.Collator: ok
+// CHECK-NEXT: Intl.DateTimeFormat: ok
 // CHECK-NEXT: Intl.Locale: ok
 // CHECK-NEXT: Intl.NumberFormat: ok
 // CHECK-NEXT: Intl.PluralRules: ok
@@ -164,6 +177,14 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.Collator.prototype.compare: ok
 // CHECK-NEXT: Intl.Collator.prototype.@@toStringTag: ok
 // CHECK-NEXT: new Intl.Collator().compare: ok
+// CHECK-NEXT: Intl.DateTimeFormat.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.format: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.formatToParts: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.formatRange: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.formatRangeToParts: ok
+// CHECK-NEXT: Intl.DateTimeFormat.prototype.@@toStringTag: ok
+// CHECK-NEXT: new Intl.DateTimeFormat().format: ok
 // CHECK-NEXT: Intl.Locale.prototype.baseName: ok
 // CHECK-NEXT: Intl.Locale.prototype.calendar: ok
 // CHECK-NEXT: Intl.Locale.prototype.caseFirst: ok
@@ -205,19 +226,28 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: String.prototype.toLocaleUpperCase: ok
 // CHECK-NEXT: Number.prototype.toLocaleString: ok
 // CHECK-NEXT: BigInt.prototype.toLocaleString: ok
+// CHECK-NEXT: Date.prototype.toLocaleString: ok
+// CHECK-NEXT: Date.prototype.toLocaleDateString: ok
+// CHECK-NEXT: Date.prototype.toLocaleTimeString: ok
 // CHECK-NEXT: Array.prototype.toLocaleString: ok
 // CHECK-NEXT: Object.getPrototypeOf(Int8Array.prototype).toLocaleString: ok
 
 // Intl and each prototype have exactly the table's properties, and a
 // prototype also its constructor.
 print(Reflect.ownKeys(Intl).map(String).join(','));
-// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,Locale,NumberFormat,PluralRules,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,DateTimeFormat,Locale,NumberFormat,PluralRules,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(Intl.Collator).map(String).join(','));
 // CHECK-NEXT: length,name,prototype,supportedLocalesOf
 print(Reflect.ownKeys(Intl.Collator.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,resolvedOptions,compare,Symbol(Symbol.toStringTag)
 // An instance has no own properties: its slots are private.
 print(Reflect.ownKeys(new Intl.Collator()).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.DateTimeFormat).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.DateTimeFormat.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,format,formatRange,formatRangeToParts,formatToParts,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.DateTimeFormat()).length);
 // CHECK-NEXT: 0
 print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)

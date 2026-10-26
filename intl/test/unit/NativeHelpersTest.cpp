@@ -22,6 +22,7 @@
 
 using namespace facebook;
 using hermes_intl::Bool;
+using hermes_intl::Double;
 using hermes_intl::Int;
 using hermes_intl::Object;
 using hermes_intl::Undefined;
@@ -91,6 +92,14 @@ HERMES_INTL_DECLARE_HELPER(echoInt, Int, Int)
 
 int echoInt(jsi::Runtime &, const int &i) {
   return i;
+}
+
+/// HERMES_INTL_HELPER(doubleIsHalf, Bool, Double): whether its argument is
+/// 0.5.
+HERMES_INTL_DECLARE_HELPER(doubleIsHalf, Bool, Double)
+
+bool doubleIsHalf(jsi::Runtime &, const double &d) {
+  return d == 0.5;
 }
 } // namespace helpers
 
@@ -252,6 +261,32 @@ TEST(NativeHelpersTest, IntArgumentsAreChecked) {
         [&] { eval(*rt, src); }, "echoInt: expected an integer in int range");
 }
 
+TEST(NativeHelpersTest, DoubleArgumentsAreChecked) {
+  auto rt = makeRuntime();
+  jsi::Object h(*rt);
+  HERMES_INTL_ADD_HELPER(*rt, h, doubleIsHalf, Bool, Double);
+  rt->global().setProperty(*rt, "h", h);
+  for (const char *src :
+       {"h.doubleIsHalf(0.5)",
+        "!h.doubleIsHalf(-8.64e15)",
+        "!h.doubleIsHalf(Number.MAX_VALUE)",
+        "!h.doubleIsHalf(-0)"}) {
+    try {
+      EXPECT_TRUE(eval(*rt, src).getBool()) << src;
+    } catch (const jsi::JSError &e) {
+      ADD_FAILURE() << src << ": " << e.getMessage();
+    }
+  }
+  for (const char *src :
+       {"h.doubleIsHalf('1')",
+        "h.doubleIsHalf(undefined)",
+        "h.doubleIsHalf(Infinity)",
+        "h.doubleIsHalf(-Infinity)",
+        "h.doubleIsHalf(NaN)"})
+    expectJSError(
+        [&] { eval(*rt, src); }, "doubleIsHalf: expected a finite number");
+}
+
 /// Native state that is not a CollatorState.
 class OtherState : public jsi::NativeState {};
 
@@ -399,6 +434,72 @@ TEST(NativeHelpersTest, PluralHelpersRejectMisuse) {
       "Intl internal error");
 }
 
+TEST(NativeHelpersTest, DateTimeFormatStateFreedWithRuntime) {
+  // The runtime's destruction frees the DateTimeFormatState; under ASan,
+  // LeakSanitizer fails the test binary if it does not.
+  auto rt = makeRuntimeWithPluginHelpers();
+  EXPECT_TRUE(eval(
+                  *rt,
+                  "var d = {}; native.dateTimeFormatInit(d, 'en', 'gregory', "
+                  "'UTC', 'MMMM') === undefined")
+                  .getBool());
+  EXPECT_EQ(
+      eval(*rt, "native.dateTimeFormatLocalTime(d, 0).length").getNumber(), 15);
+  EXPECT_EQ(
+      eval(*rt, "native.dateTimeFormatLocalTime(d, 0).join()")
+          .getString(*rt)
+          .utf8(*rt),
+      "4,ce,1970,,1,M01,0,1,0,0,0,0,0,0,January");
+  rt.reset();
+}
+
+TEST(NativeHelpersTest, DateTimeFormatHelpersRejectMisuse) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  expectJSError(
+      [&] { eval(*rt, "native.dateTimeFormatLocalTime({}, 0)"); },
+      "Intl internal error");
+  // An object with native state of another kind.
+  jsi::Object other(*rt);
+  other.setNativeState(*rt, std::make_shared<OtherState>());
+  rt->global().setProperty(*rt, "other", other);
+  expectJSError(
+      [&] { eval(*rt, "native.dateTimeFormatLocalTime(other, 0)"); },
+      "Intl internal error");
+  eval(
+      *rt,
+      "var d = {};"
+      "native.dateTimeFormatInit(d, 'en', 'gregory', 'UTC', '');");
+  expectJSError(
+      [&] {
+        eval(*rt, "native.dateTimeFormatInit(d, 'en', 'gregory', 'UTC', '')");
+      },
+      "Intl internal error");
+  expectJSError(
+      [&] {
+        eval(
+            *rt,
+            "native.dateTimeFormatInit({}, 'en', 'gregory', 'UTC', 'MMMMMM')");
+      },
+      "Intl internal error");
+  for (const char *bad :
+       {"native.dateTimeFormatLocalTime(d, 0.5)",
+        "native.dateTimeFormatLocalTime(d, 8.64e15 + 1)",
+        "native.dateTimeFormatLocalTime(d, -8.64e15 - 1)"})
+    expectJSError(
+        [&] { eval(*rt, bad); },
+        "Intl internal error: dateTimeFormatLocalTime: not a time value");
+  // Offsets beyond ICU4X's +-18:00 work.
+  eval(
+      *rt,
+      "var far = {};"
+      "native.dateTimeFormatInit(far, 'en', 'gregory', '+23:00', 'z');");
+  EXPECT_EQ(
+      eval(*rt, "native.dateTimeFormatLocalTime(far, 0)[14]")
+          .getString(*rt)
+          .utf8(*rt),
+      "GMT+23");
+}
+
 TEST(NativeHelpersTest, NumberHelpers) {
   auto rt = makeRuntimeWithPluginHelpers();
   auto str = [&](const char *src) {
@@ -455,6 +556,33 @@ TEST(NativeHelpersTest, NumberHelpers) {
         "native.unitPatterns('en', 'furlong', 'long')",
         "native.unitPatterns('en', 'meter', 'Long')",
         "native.currencyDigits('usd')"})
+    expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
+}
+
+TEST(NativeHelpersTest, DateTimeFormatHelpers) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  auto str = [&](const char *src) {
+    return eval(*rt, src).getString(*rt).utf8(*rt);
+  };
+  EXPECT_EQ(
+      str("native.dateTimePatterns('en', 'gregory').slice(0, 4).join('|')"),
+      "EEEE, MMMM d, y|MMMM d, y|MMM d, y|M/d/yy");
+  // Empty entries survive: en gregory has no leap month pattern.
+  EXPECT_EQ(str("native.dateTimePatterns('en', 'gregory')[17]"), "");
+  EXPECT_EQ(str("native.dateTimePatterns('zh', 'chinese')[17]"), "\u95f0{0}");
+  EXPECT_EQ(
+      str("JSON.stringify(native.dayPeriods('en').slice(0, 7))"),
+      "[\"4\",\"morning1\",\"0\",\"720\",\"in the morning\","
+      "\"in the morning\",\"in the morning\"]");
+  EXPECT_EQ(
+      str("native.canonicalizeTimeZone('asia/calcutta')"), "Asia/Kolkata");
+  EXPECT_EQ(str("native.canonicalizeTimeZone('etc/utc')"), "UTC");
+  EXPECT_EQ(
+      str("String(native.canonicalizeTimeZone('Nowhere/Land'))"), "undefined");
+  for (const char *bad :
+       {"native.dateTimePatterns('en', 'julian')",
+        "native.dateTimePatterns('en_US', 'gregory')",
+        "native.dayPeriods('en_US')"})
     expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
 }
 

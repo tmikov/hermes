@@ -139,6 +139,71 @@ function ThisBigIntValue(value) {
   return ReflectApply(BigIntPrototypeValueOf, value, []);
 }
 
+/// The DateTimeFormats that Date.prototype.toLocaleString,
+/// toLocaleDateString and toLocaleTimeString use when locales and options
+/// are both undefined, keyed by the required argument each passes to
+/// CreateDateTimeFormat ("any", "date", "time"), each created on first use
+/// (design spec "Resistance to tampering").
+var defaultDateTimeFormats = {
+  __proto__: null,
+  any: undefined,
+  date: undefined,
+  time: undefined,
+};
+
+/// CreateDateTimeFormat(%Intl.DateTimeFormat%, locales, options, required,
+/// defaults) for the Date overrides. CreateDateTimeFormat performs every
+/// observable step without going through %Intl.DateTimeFormat% or any
+/// public property. When locales and options are both undefined, those
+/// steps have no observable effect and always give the same DateTimeFormat
+/// for the same required and defaults (the default locale and time zone
+/// are fixed for the runtime's lifetime), so each override's default
+/// DateTimeFormat is created on first use and reused without them. Each
+/// override passes one required with one defaults, so required alone keys
+/// the default.
+function toLocaleDateTimeFormat(locales, options, required, defaults) {
+  // 1. If locales and options are both undefined, return the default
+  //    DateTimeFormat for required, creating it first if there is none.
+  if (locales === undefined && options === undefined) {
+    var dateTimeFormat = defaultDateTimeFormats[required];
+    if (dateTimeFormat === undefined) {
+      dateTimeFormat = CreateDateTimeFormat(
+        undefined,
+        undefined,
+        required,
+        defaults,
+      );
+      defaultDateTimeFormats[required] = dateTimeFormat;
+    }
+    return dateTimeFormat;
+  }
+  // 2. Return ? CreateDateTimeFormat(locales, options, required, defaults).
+  return CreateDateTimeFormat(locales, options, required, defaults);
+}
+
+/// Steps 1 to 3 of the Date overrides: the [[DateValue]] of the this value
+/// dateObj, or a TypeError naming method, the override called, if it has
+/// none.
+function thisDateValue(dateObj, method) {
+  // 1. Let dateObj be the this value. (The caller passes it.)
+  // 2. Perform ? RequireInternalSlot(dateObj, [[DateValue]]).
+  // 3. Let x be dateObj.[[DateValue]].
+  //    The captured Date.prototype.getTime is exactly these steps
+  //    (ECMA-262 21.4.4.10: 1. Let dateObj be the this value. 2. Perform ?
+  //    RequireInternalSlot(dateObj, [[DateValue]]). 3. Return
+  //    dateObj.[[DateValue]].), so it throws a TypeError for an object
+  //    without the slot, such as Date.prototype or a proxy of a Date, and
+  //    nothing else: it runs no user code. Its TypeError names getTime, so
+  //    it is replaced by one that names method.
+  try {
+    return ReflectApply(DatePrototypeGetTime, dateObj, []);
+  } catch (e) {
+    throw new _TypeError(
+      'Date.prototype.' + method + ' called on non-Date object',
+    );
+  }
+}
+
 // ECMA-262 7.3.18 LengthOfArrayLike ( obj )
 function LengthOfArrayLike(obj) {
   // 1. Return ℝ(? ToLength(? Get(obj, "length"))).
@@ -302,7 +367,55 @@ function installBuiltinOverrides() {
     },
   });
 
-  // 4. "Properties of the Array Prototype Object".
+  // 4. "Properties of the Date Prototype Object".
+  defineMethods(DatePrototype, {
+    // Date.prototype.toLocaleString ( [ locales [ , options ] ] )
+    toLocaleString(locales = undefined, options = undefined) {
+      // 1. Let dateObj be the this value.
+      // 2. Perform ? RequireInternalSlot(dateObj, [[DateValue]]).
+      // 3. Let x be dateObj.[[DateValue]].
+      var x = thisDateValue(this, 'toLocaleString');
+      // 4. If x is NaN, return "Invalid Date".
+      if (x !== x) return 'Invalid Date';
+      // 5. Let dateFormat be ? CreateDateTimeFormat(%Intl.DateTimeFormat%,
+      //    locales, options, any, all).
+      var dateFormat = toLocaleDateTimeFormat(locales, options, 'any', 'all');
+      // 6. Return ! FormatDateTime(dateFormat, x).
+      return FormatDateTime(dateFormat, x);
+    },
+
+    // Date.prototype.toLocaleDateString ( [ locales [ , options ] ] )
+    toLocaleDateString(locales = undefined, options = undefined) {
+      // 1. Let dateObj be the this value.
+      // 2. Perform ? RequireInternalSlot(dateObj, [[DateValue]]).
+      // 3. Let x be dateObj.[[DateValue]].
+      var x = thisDateValue(this, 'toLocaleDateString');
+      // 4. If x is NaN, return "Invalid Date".
+      if (x !== x) return 'Invalid Date';
+      // 5. Let dateFormat be ? CreateDateTimeFormat(%Intl.DateTimeFormat%,
+      //    locales, options, date, date).
+      var dateFormat = toLocaleDateTimeFormat(locales, options, 'date', 'date');
+      // 6. Return ! FormatDateTime(dateFormat, x).
+      return FormatDateTime(dateFormat, x);
+    },
+
+    // Date.prototype.toLocaleTimeString ( [ locales [ , options ] ] )
+    toLocaleTimeString(locales = undefined, options = undefined) {
+      // 1. Let dateObj be the this value.
+      // 2. Perform ? RequireInternalSlot(dateObj, [[DateValue]]).
+      // 3. Let x be dateObj.[[DateValue]].
+      var x = thisDateValue(this, 'toLocaleTimeString');
+      // 4. If x is NaN, return "Invalid Date".
+      if (x !== x) return 'Invalid Date';
+      // 5. Let timeFormat be ? CreateDateTimeFormat(%Intl.DateTimeFormat%,
+      //    locales, options, time, time).
+      var timeFormat = toLocaleDateTimeFormat(locales, options, 'time', 'time');
+      // 6. Return ! FormatDateTime(timeFormat, x).
+      return FormatDateTime(timeFormat, x);
+    },
+  });
+
+  // 5. "Properties of the Array Prototype Object".
   defineMethods(ArrayPrototype, {
     // Array.prototype.toLocaleString ( [ locales [ , options ] ] )
     toLocaleString(locales = undefined, options = undefined) {
@@ -348,7 +461,7 @@ function installBuiltinOverrides() {
     },
   });
 
-  // 5. "Properties of the %TypedArray% Prototype Object".
+  // 6. "Properties of the %TypedArray% Prototype Object".
   defineMethods(TypedArrayPrototype, {
     // %TypedArray%.prototype.toLocaleString ( [ locales [ , options ] ] )
     toLocaleString(locales = undefined, options = undefined) {

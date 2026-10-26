@@ -33,6 +33,11 @@ fixed_decimal = "~0.7"
 # of the plural data that holds them.
 icu_pattern = "~0.5"
 zerovec = "~0.11"
+# TryWriteable, which writes ICU4X's formatted date and time names.
+writeable = "~0.6"
+# The IANA time zone database, as TZif data that tz.rs reads. The exact
+# version pins tzdb 2026e (rearguard, slim); a new tzdb is a new version.
+jiff-tzdb = "=0.1.9"
 
 [build-dependencies]
 cbindgen = { version = "0.29", default-features = false }

@@ -86,12 +86,15 @@ pub unsafe extern "C" fn hi_string16_free(s: HiString16) {
 mod casemap;
 mod cldr;
 mod collator;
+mod date_data;
+mod datetime;
 mod host;
 mod info;
 mod locale;
 mod number;
 mod plurals;
 mod supported;
+mod tz;
 mod units;
 
 /// View (data, len) as UTF-8; None if it is not.
@@ -853,6 +856,156 @@ pub unsafe extern "C" fn hi_unit_patterns(
     write_list(out, units::unit_patterns(locale, unit, width))
 }
 
+/// DateTimeFormat's CLDR patterns for the language identifier of `locale`
+/// (a canonical tag) and `calendar`: when it returns true, `out` is the
+/// entries of date_data::date_time_patterns, separated by U+0000. False if a
+/// string is not UTF-8, `locale` does not parse or `calendar` is not one of
+/// the 16 supported calendars.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_date_time_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    calendar: *const u8,
+    calendar_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(calendar)) =
+        (as_str(locale, locale_len), as_str(calendar, calendar_len))
+    else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, date_data::date_time_patterns(locale, calendar))
+}
+
+/// DateTimeFormat's flexible day periods for the language identifier of
+/// `locale` (a canonical tag): when it returns true, `out` is the entries
+/// of date_data::day_periods, separated by U+0000. False if `locale` is not
+/// UTF-8 or does not parse.
+///
+/// # Safety
+/// `locale` must point to `locale_len` readable bytes, or `locale_len` must
+/// be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_day_periods(
+    locale: *const u8,
+    locale_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let Some(locale) = as_str(locale, locale_len) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, date_data::day_periods(locale))
+}
+
+/// A DateTimeFormat's native state: its ICU4X calendar, its time zone rules
+/// and the names its patterns use. Opaque to C++, which frees it with
+/// hi_date_time_format_free.
+pub struct HiDateTimeFormat(datetime::DateTimeFormat);
+
+// A NativeState holding a HiDateTimeFormat can be destroyed on any thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<HiDateTimeFormat>();
+};
+
+/// Make the native state of a DateTimeFormat with datetime::DateTimeFormat::new
+/// from the language identifier of `locale` (a canonical tag), `calendar`
+/// (a supported CLDR calendar id), `time_zone` (a primary identifier or
+/// `±HH:MM`) and `symbols`, CLDR name symbols separated by single spaces
+/// (empty for none). Null if a string is not UTF-8 or any value is not one
+/// datetime::DateTimeFormat::new accepts.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_date_time_format_new(
+    locale: *const u8,
+    locale_len: usize,
+    calendar: *const u8,
+    calendar_len: usize,
+    time_zone: *const u8,
+    time_zone_len: usize,
+    symbols: *const u8,
+    symbols_len: usize,
+) -> *mut HiDateTimeFormat {
+    let (Some(locale), Some(calendar), Some(time_zone), Some(symbols)) = (
+        as_str(locale, locale_len),
+        as_str(calendar, calendar_len),
+        as_str(time_zone, time_zone_len),
+        as_str(symbols, symbols_len),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    // An empty entry (a doubled, leading or trailing space) is no symbol, so
+    // new rejects it.
+    let symbols: Vec<&str> = if symbols.is_empty() {
+        vec![]
+    } else {
+        symbols.split(' ').collect()
+    };
+    match datetime::DateTimeFormat::new(locale, calendar, time_zone, &symbols) {
+        Some(f) => Box::into_raw(Box::new(HiDateTimeFormat(f))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free the native state from hi_date_time_format_new. Accepts null.
+///
+/// # Safety
+/// `format` must be null or come from hi_date_time_format_new, and must not
+/// be freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_date_time_format_free(format: *mut HiDateTimeFormat) {
+    if !format.is_null() {
+        drop(Box::from_raw(format));
+    }
+}
+
+/// The result of hi_date_time_format_local_time.
+#[repr(C)]
+#[derive(Debug, PartialEq)]
+pub enum HiLocalTimeStatus {
+    /// `out` holds the local time and the names.
+    Ok,
+    /// `epoch_ms` is not an integer within ±8.64 × 10^15.
+    NotATimeValue,
+    /// ICU4X reported an error formatting a name.
+    FormatFailed,
+}
+
+/// The local time of the time value `epoch_ms` in `format`'s calendar and
+/// time zone, and the text of its symbols: when it returns Ok, `out` is the
+/// entries of datetime::DateTimeFormat::local_time, separated by U+0000.
+/// Otherwise `out` is empty, and the status says which of the two failures
+/// it was.
+///
+/// # Safety
+/// `format` must be valid; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_date_time_format_local_time(
+    format: *const HiDateTimeFormat,
+    epoch_ms: f64,
+    out: *mut HiString,
+) -> HiLocalTimeStatus {
+    debug_assert!(!format.is_null());
+    if !datetime::is_time_value(epoch_ms) {
+        *out = HiString::EMPTY;
+        return HiLocalTimeStatus::NotATimeValue;
+    }
+    if write_list(out, (*format).0.local_time(epoch_ms)) {
+        HiLocalTimeStatus::Ok
+    } else {
+        HiLocalTimeStatus::FormatFailed
+    }
+}
+
 /// CurrencyDigits: CLDR's number of fraction digits for `currency` (three
 /// uppercase letters), 2 for a currency CLDR does not list; -1 if
 /// `currency` is not three uppercase letters.
@@ -1239,6 +1392,69 @@ mod tests {
         assert_eq!(call(n, "not a tag"), None);
         let c = hi_locale_collations;
         assert_eq!(call(c, "de").as_deref(), Some("emoji eor phonebk"));
+    }
+
+    #[test]
+    fn ffi_date_time_format() {
+        let make = |l: &[u8], c: &[u8], z: &[u8], s: &[u8]| unsafe {
+            hi_date_time_format_new(
+                l.as_ptr(),
+                l.len(),
+                c.as_ptr(),
+                c.len(),
+                z.as_ptr(),
+                z.len(),
+                s.as_ptr(),
+                s.len(),
+            )
+        };
+        let local_time = |f, t| {
+            let mut out = HiString::EMPTY;
+            let status = unsafe { hi_date_time_format_local_time(f, t, &mut out) };
+            if status != HiLocalTimeStatus::Ok {
+                assert!(out.data.is_null());
+                assert_eq!(status, HiLocalTimeStatus::NotATimeValue);
+                return None;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(s)
+        };
+        let f = make(b"en", b"gregory", b"America/New_York", b"MMMM z");
+        assert!(!f.is_null());
+        // 2026-01-05T15:07:09.123Z.
+        assert_eq!(
+            local_time(f, 1767625629123.0)
+                .map(|s| s.split('\0').map(str::to_owned).collect::<Vec<_>>()),
+            Some(
+                [
+                    "1", "ce", "2026", "", "1", "M01", "0", "5", "10", "7", "9", "123", "0",
+                    "-18000", "January", "EST"
+                ]
+                .map(str::to_owned)
+                .to_vec()
+            )
+        );
+        assert_eq!(local_time(f, 0.5), None);
+        unsafe { hi_date_time_format_free(f) };
+        unsafe { hi_date_time_format_free(std::ptr::null_mut()) };
+
+        // No symbols: the 14 fields alone.
+        let f = make(b"en", b"gregory", b"+01:00", b"");
+        assert_eq!(local_time(f, 0.0).unwrap().split('\0').count(), 14);
+        unsafe { hi_date_time_format_free(f) };
+
+        assert!(make(b"en", b"gregory", b"UTC", b"MMMM  z").is_null());
+        assert!(make(b"en", b"gregory", b"UTC", b" MMMM").is_null());
+        assert!(make(b"en", b"gregory", b"UTC", b"MMMM ").is_null());
+        assert!(make(b"en", b"gregory", b"UTC", b"U").is_null());
+        assert!(make(b"en", b"julian", b"UTC", b"").is_null());
+        assert!(make(b"en", b"gregory", b"Nowhere/Land", b"").is_null());
+        assert!(make(&[0xff], b"gregory", b"UTC", b"").is_null());
+        assert!(make(b"en", &[0xff], b"UTC", b"").is_null());
+        assert!(make(b"en", b"gregory", &[0xff], b"").is_null());
+        assert!(make(b"en", b"gregory", b"UTC", &[0xff]).is_null());
     }
 
     #[test]

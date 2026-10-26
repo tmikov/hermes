@@ -402,6 +402,67 @@ inline std::optional<std::vector<std::string>> unitPatterns(
   return takeList(out);
 }
 
+/// DateTimeFormat's CLDR patterns for \p locale and \p calendar (one of the
+/// 16 supported calendars): the entries hi_date_time_patterns documents.
+/// nullopt if \p locale does not parse or the calendar is not supported.
+inline std::optional<std::vector<std::string>> dateTimePatterns(
+    std::string_view locale,
+    std::string_view calendar) {
+  HiString out;
+  if (!hi_date_time_patterns(
+          bytes(locale), locale.size(), bytes(calendar), calendar.size(), &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// DateTimeFormat's flexible day periods for \p locale: the entries
+/// hi_day_periods documents. nullopt if \p locale does not parse.
+inline std::optional<std::vector<std::string>> dayPeriods(
+    std::string_view locale) {
+  HiString out;
+  if (!hi_day_periods(bytes(locale), locale.size(), &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// The native state of a DateTimeFormat for the language identifier of
+/// \p locale (canonical), \p calendar, \p timeZone and \p symbols (CLDR name
+/// symbols separated by single spaces); null for any value
+/// hi_date_time_format_new rejects. The caller frees it with
+/// hi_date_time_format_free.
+inline HiDateTimeFormat *dateTimeFormatNew(
+    std::string_view locale,
+    std::string_view calendar,
+    std::string_view timeZone,
+    std::string_view symbols) {
+  return hi_date_time_format_new(
+      bytes(locale),
+      locale.size(),
+      bytes(calendar),
+      calendar.size(),
+      bytes(timeZone),
+      timeZone.size(),
+      bytes(symbols),
+      symbols.size());
+}
+
+/// The local time of \p epochMs with \p format and the text of its symbols:
+/// when it returns HiLocalTimeStatus_Ok, \p result is the entries
+/// hi_date_time_format_local_time documents; otherwise the status says
+/// whether \p epochMs was not a time value or ICU4X failed, and \p result
+/// is unchanged.
+inline HiLocalTimeStatus dateTimeFormatLocalTime(
+    const HiDateTimeFormat *format,
+    double epochMs,
+    std::vector<std::string> &result) {
+  HiString out;
+  HiLocalTimeStatus status =
+      hi_date_time_format_local_time(format, epochMs, &out);
+  if (status == HiLocalTimeStatus_Ok)
+    result = takeList(out);
+  return status;
+}
+
 /// CurrencyDigits of \p currency (three uppercase letters): CLDR's fraction
 /// digits, 2 for a currency CLDR does not list. nullopt for anything else.
 inline std::optional<int> currencyDigits(std::string_view currency) {

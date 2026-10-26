@@ -7,7 +7,8 @@
 """Unit tests of update-cldr-lists.py's extraction of the -u- and -t- value
 aliases (on fixture bcp47 XML), of number-symbols.txt, units.txt and
 currency-symbols.txt (on fixture CLDR JSON), of explicit-number-systems.txt
-(on fixture common/main XML) and of compact-currency.txt (on both). Run by
+(on fixture common/main XML), of compact-currency.txt and date-patterns.txt
+(on both) and of day-periods.txt (on fixture CLDR JSON). Run by
 check-intl-data; no network."""
 
 import importlib.util
@@ -1016,6 +1017,859 @@ class CompactCurrencyTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(SystemExit, "root currencyFormats arab"):
             self.lines(xml={"root": root})
+
+
+# The calendars of the fixture date packages: (file name, package), as the
+# CLDR JSON npm packages have them.
+DATE_FILES = [
+    ("gregorian", "cldr-dates-full"),
+    ("generic", "cldr-dates-full"),
+    ("buddhist", "cldr-cal-buddhist-full"),
+    ("chinese", "cldr-cal-chinese-full"),
+    ("coptic", "cldr-cal-coptic-full"),
+    ("dangi", "cldr-cal-dangi-full"),
+    ("ethiopic-amete-alem", "cldr-cal-ethiopic-full"),
+    ("ethiopic", "cldr-cal-ethiopic-full"),
+    ("hebrew", "cldr-cal-hebrew-full"),
+    ("indian", "cldr-cal-indian-full"),
+    ("islamic-civil", "cldr-cal-islamic-full"),
+    ("islamic-tbla", "cldr-cal-islamic-full"),
+    ("islamic-umalqura", "cldr-cal-islamic-full"),
+    ("japanese", "cldr-cal-japanese-full"),
+    ("persian", "cldr-cal-persian-full"),
+    ("roc", "cldr-cal-roc-full"),
+]
+WIDTH_NAMES = ["full", "long", "medium", "short"]
+
+
+def calendar_json(entries, day_periods=None):
+    """The calendar object of a ca-*.json file from date-patterns.txt keys
+    and their patterns (`entries`), with the format dayPeriods names
+    {width: {period: name}}."""
+    j = {
+        "months": {},
+        "dateFormats": {},
+        "dateSkeletons": {"full": "yMMMMEEEEd"},
+        "timeFormats": {},
+        "dateTimeFormats": {
+            "availableFormats": {},
+            "appendItems": {"Day": "{0} ({2}: {1})", "Era": "{0} {1}"},
+            "intervalFormats": {},
+        },
+        "dateTimeFormats-atTime": {"standard": {}},
+        "dateTimeFormats-relative": {"standard": {"full": "{1} 'at' {0}"}},
+        "dayPeriods": {"format": day_periods or {}, "stand-alone": {}},
+    }
+    dt = j["dateTimeFormats"]
+    sections = {
+        "d": j["dateFormats"],
+        "t": j["timeFormats"],
+        "c": dt,
+        "a": j["dateTimeFormats-atTime"]["standard"],
+    }
+    for k, v in entries.items():
+        if len(k) == 2 and k[0] in sections and k[1].isdigit():
+            sections[k[0]][WIDTH_NAMES[int(k[1])]] = v
+        elif k == "fb":
+            dt["intervalFormats"]["intervalFormatFallback"] = v
+        elif k == "tz":
+            dt["appendItems"]["Timezone"] = v
+        elif k == "lp":
+            j["monthPatterns"] = {
+                "format": {"wide": {"leap": "{0} leap"}},
+                "numeric": {"all": {"leap": v}},
+            }
+        elif k.startswith("f."):
+            dt["availableFormats"][k[2:]] = v
+        elif k.startswith("i."):
+            skeleton, letter = k[2:].split(".")
+            dt["intervalFormats"].setdefault(skeleton, {})[letter] = v
+        else:
+            raise ValueError(k)
+    return j
+
+
+def widths(*values):
+    return {f"{p}{i}": v for p, vs in values for i, v in enumerate(vs)}
+
+
+UND_GENERIC = {
+    **widths(
+        ("d", ["G y MMMM d, EEEE", "G y MMMM d", "G y MMM d", "GGGGG y-MM-dd"]),
+        ("t", ["HH:mm:ss zzzz", "HH:mm:ss z", "HH:mm:ss", "HH:mm"]),
+        ("c", ["{1} {0}"] * 4),
+        ("a", ["{1} {0}"] * 4),
+    ),
+    "fb": "{0} – {1}",
+    "tz": "{0} {1}",
+    "f.yMMMd": "G y MMM d",
+    "f.Hm": "HH:mm",
+    "i.yMMMd.d": "G y MMM d–d",
+    "i.yMMMd.M": "G y MMM d – MMM d",
+}
+UND_GREGORIAN = {
+    **UND_GENERIC,
+    **widths(("d", ["y MMMM d, EEEE", "y MMMM d", "y MMM d", "y-MM-dd"])),
+    "f.yMMMd": "y MMM d",
+    "i.yMMMd.d": "y MMM d–d",
+    "i.yMMMd.M": "y MMM d – MMM d",
+}
+EN_GREGORIAN = {
+    **widths(
+        ("d", ["EEEE, MMMM d, y", "MMMM d, y", "MMM d, y", "M/d/yy"]),
+        ("t", ["h:mm:ss a zzzz", "h:mm:ss a z", "h:mm:ss a", "h:mm a"]),
+        ("c", ["{1}, {0}"] * 4),
+        ("a", ["{1} 'at' {0}", "{1} 'at' {0}", "{1}, {0}", "{1}, {0}"]),
+    ),
+    "fb": "{0} – {1}",
+    "tz": "{0} {1}",
+    "f.yMMMd": "MMM d, y",
+    "f.Hm": "HH:mm",
+    "i.yMMMd.d": "MMM d – d, y",
+    "i.yMMMd.M": "MMM d – MMM d, y",
+}
+EN_GENERIC = {
+    **EN_GREGORIAN,
+    **widths(("d", ["EEEE, MMMM d, y G", "MMMM d, y G", "MMM d, y G", "M/d/y GGGGG"])),
+    "f.yMMMd": "MMM d, y G",
+    "i.yMMMd.d": "MMM d – d, y G",
+    "i.yMMMd.M": "MMM d – MMM d, y G",
+}
+EN_AU_GREGORIAN = {**EN_GREGORIAN, "d3": "d/M/yy"}
+EN_AU_GENERIC = {**EN_GENERIC, "d3": "d/M/y GGGGG"}
+# en-AU's buddhist has a pattern of its own; en's is its generic.
+EN_AU_BUDDHIST = {**EN_AU_GENERIC, "d1": "d MMMM y G"}
+
+# CLDR entries the generator leaves out, added to en's gregorian.
+EN_DROPPED = {
+    "timeFormats": {"short-alt-ascii": "h:mm a", "short-alt-variant": "H:mm"},
+    "dateFormats": {"short-alt-variant": "MM/dd/yy"},
+    "availableFormats": {
+        "yMMMd-alt-ascii": "MMM d, y",
+        "Hm-alt-variant": "H:mm",
+        "yw-count-one": "'week' w 'of' Y",
+        "yw": "'week' w 'of' Y",
+        "MMMMW-count-other": "'week' W 'of' MMMM",
+        "yQQQ": "QQQ y",
+        "Ed-alt-variant": "d e",
+        "ed": "d e",
+    },
+    "intervalFormats": {"yMMMd": {"d-alt-variant": "MMM d-d, y"}, "yw": {"y": "w y"}},
+}
+
+# Names of day periods (the format context), {width: {period: name}}.
+NAMES_UND = {w: {"am": "AM", "pm": "PM"} for w in ("abbreviated", "wide", "narrow")}
+EN_NAMES = {
+    w: {
+        "am": "AM",
+        "pm": "PM",
+        "midnight": {"abbreviated": "midnight", "wide": "at midnight"}.get(w, "mi"),
+        "noon": "noon" if w != "narrow" else "n",
+        "morning1": "in the morning",
+        "afternoon1": "in the afternoon",
+        "evening1": "in the evening",
+        "night1": "at night",
+    }
+    for w in ("abbreviated", "wide", "narrow")
+}
+EN_AU_NAMES = {w: dict(v) for w, v in EN_NAMES.items()}
+EN_AU_NAMES["narrow"]["morning1"] = "morning"
+EN_AU_NAMES["narrow"]["noon"] = "noon"
+
+
+def date_locale(gregorian, generic, names, **calendars):
+    """The calendars of a fixture locale: each one not given is its
+    generic, with chinese and dangi given the leap month pattern."""
+    out = {"gregorian": gregorian, "generic": generic}
+    for name, _ in DATE_FILES:
+        if name not in out:
+            out[name] = calendars.get(name)
+            if out[name] is None:
+                out[name] = dict(generic)
+                if name in ("chinese", "dangi"):
+                    out[name]["lp"] = "{0}bis"
+    return (out, names)
+
+
+FIXTURE_DATES = {
+    "und": date_locale(UND_GREGORIAN, UND_GENERIC, NAMES_UND),
+    "en": date_locale(EN_GREGORIAN, EN_GENERIC, EN_NAMES),
+    "en-AU": date_locale(
+        EN_AU_GREGORIAN, EN_AU_GENERIC, EN_AU_NAMES, buddhist=EN_AU_BUDDHIST
+    ),
+}
+
+# The day period rules of dayPeriods.json: en's CLDR 48.2 ones; bg's
+# night1 crosses midnight; es_CO's are its own (written with an underscore,
+# as dayPeriods.xml has it); und's are am and pm.
+FIXTURE_RULES = {
+    "und": {
+        "am": {"_from": "00:00", "_before": "12:00"},
+        "pm": {"_from": "12:00", "_before": "24:00"},
+    },
+    "en": {
+        "midnight": {"_at": "00:00"},
+        "noon": {"_at": "12:00"},
+        "morning1": {"_from": "00:00", "_before": "12:00"},
+        "afternoon1": {"_from": "12:00", "_before": "18:00"},
+        "evening1": {"_from": "18:00", "_before": "21:00"},
+        "night1": {"_from": "21:00", "_before": "24:00"},
+    },
+    "bg": {
+        "morning1": {"_from": "04:00", "_before": "11:00"},
+        "morning2": {"_from": "11:00", "_before": "14:00"},
+        "afternoon1": {"_from": "14:00", "_before": "18:00"},
+        "evening1": {"_from": "18:00", "_before": "22:00"},
+        "night1": {"_from": "22:00", "_before": "04:00"},
+    },
+    "es": {
+        "noon": {"_at": "12:00"},
+        "morning1": {"_from": "00:00", "_before": "06:00"},
+        "morning2": {"_from": "06:00", "_before": "12:00"},
+        "evening1": {"_from": "12:00", "_before": "20:00"},
+        "night1": {"_from": "20:00", "_before": "24:00"},
+    },
+    "es_CO": {
+        "noon": {"_at": "12:00"},
+        "morning2": {"_from": "00:00", "_before": "12:00"},
+        "evening1": {"_from": "12:00", "_before": "20:00"},
+        "night1": {"_from": "20:00", "_before": "24:00"},
+    },
+    "zh": {
+        "morning1": {"_from": "00:00", "_before": "12:00"},
+        "afternoon1": {"_from": "12:00", "_before": "24:00"},
+    },
+    "lij": {
+        "morning1": {"_from": "00:00", "_before": "12:00"},
+        "afternoon1": {"_from": "12:00", "_before": "24:00"},
+    },
+}
+
+
+def names_of(periods):
+    """Format dayPeriods names with each width's name of each period of
+    {period: name} the same."""
+    return {w: dict(periods) for w in ("abbreviated", "wide", "narrow")}
+
+
+ES_NAMES = names_of(
+    {
+        "am": "a. m.",
+        "pm": "p. m.",
+        "noon": "del mediodía",
+        "morning1": "de la madrugada",
+        "morning2": "de la mañana",
+        "evening1": "de la tarde",
+        "night1": "de la noche",
+    }
+)
+ZH_NAMES = names_of({"am": "上午", "pm": "下午", "morning1": "早", "afternoon1": "晚"})
+ZH_HANT_NAMES = names_of(
+    {"am": "上午", "pm": "下午", "morning1": "朝", "afternoon1": "夜"}
+)
+
+
+def generic_locale(names):
+    return date_locale(UND_GREGORIAN, UND_GENERIC, names)
+
+
+# Locales of the day period tests, with their names; zh-Hant's CLDR parent
+# is root, so its parent in the file is und while its rules are zh's.
+DAY_PERIOD_DATES = {
+    "und": generic_locale(NAMES_UND),
+    "en": generic_locale(EN_NAMES),
+    "en-AU": generic_locale(EN_AU_NAMES),
+    "es": generic_locale(ES_NAMES),
+    "es-CO": generic_locale(ES_NAMES),
+    "zh": generic_locale(ZH_NAMES),
+    "zh-Hant": generic_locale(ZH_HANT_NAMES),
+    "zh-Hant-HK": generic_locale(ZH_HANT_NAMES),
+    "lij": generic_locale(NAMES_UND),
+}
+DAY_PERIOD_TAGS = ["en", "en-AU", "es", "es-CO", "zh", "zh-Hant", "zh-HK", "lij"]
+DATE_PARENTS = {"en-AU": "en-001", "zh-Hant": "root"}
+DATE_LIKELY = {"zh-HK": "zh-Hant-HK", "zh": "zh-Hans-CN"}
+
+# root.xml's iso8601 calendar, as CLDR 48.2 has it, shortened.
+ISO8601_XML = """<calendar type="iso8601">
+<months><alias source="locale" path="../../calendar[@type='gregorian']/months"/></months>
+<dateFormats>
+<dateFormatLength type="full"><dateFormat><pattern>y MMMM d, EEEE</pattern>
+<datetimeSkeleton>yMMMMEEEEd</datetimeSkeleton></dateFormat></dateFormatLength>
+<dateFormatLength type="long"><dateFormat><pattern>y MMMM d</pattern></dateFormat></dateFormatLength>
+<dateFormatLength type="medium"><dateFormat><pattern>y MMM d</pattern></dateFormat></dateFormatLength>
+<dateFormatLength type="short"><dateFormat><pattern>y-MM-dd</pattern>
+<pattern alt="variant">yy-MM-dd</pattern></dateFormat></dateFormatLength>
+</dateFormats>
+<timeFormats>
+<timeFormatLength type="full"><timeFormat><pattern>HH:mm:ss zzzz</pattern></timeFormat></timeFormatLength>
+<timeFormatLength type="long"><timeFormat><pattern>HH:mm:ss z</pattern></timeFormat></timeFormatLength>
+<timeFormatLength type="medium"><timeFormat><pattern>HH:mm:ss</pattern></timeFormat></timeFormatLength>
+<timeFormatLength type="short"><timeFormat><pattern>HH:mm</pattern></timeFormat></timeFormatLength>
+</timeFormats>
+<dateTimeFormats>
+<dateTimeFormatLength type="full"><dateTimeFormat><pattern>{1} {0}</pattern></dateTimeFormat>
+<dateTimeFormat type="atTime"><alias source="locale" path="../dateTimeFormat[@type='standard']"/></dateTimeFormat></dateTimeFormatLength>
+<dateTimeFormatLength type="long"><dateTimeFormat><pattern>{1} {0}</pattern></dateTimeFormat>
+<dateTimeFormat type="atTime"><alias source="locale" path="../dateTimeFormat[@type='standard']"/></dateTimeFormat></dateTimeFormatLength>
+<dateTimeFormatLength type="medium"><dateTimeFormat><pattern>{1}, {0}</pattern></dateTimeFormat>
+<dateTimeFormat type="atTime"><pattern>{1} 'at' {0}</pattern></dateTimeFormat></dateTimeFormatLength>
+<dateTimeFormatLength type="short"><dateTimeFormat><pattern>{1} {0}</pattern></dateTimeFormat>
+<dateTimeFormat type="atTime"><alias source="locale" path="../dateTimeFormat[@type='standard']"/></dateTimeFormat></dateTimeFormatLength>
+<availableFormats>
+<dateFormatItem id="yMMMd">y MMM d</dateFormatItem>
+<dateFormatItem id="Hm">HH:mm</dateFormatItem>
+<dateFormatItem id="yMMMd" alt="variant">y-MMM-d</dateFormatItem>
+<dateFormatItem id="MMMMW" count="other">MMMM 'week' W</dateFormatItem>
+<dateFormatItem id="yw" count="other">Y 'week' w</dateFormatItem>
+<dateFormatItem id="yQQQ">y QQQ</dateFormatItem>
+</availableFormats>
+<appendItems>
+<appendItem request="Day">{0} ({2}: {1})</appendItem>
+<appendItem request="Timezone">{0} {1}</appendItem>
+</appendItems>
+<intervalFormats>
+<intervalFormatFallback>{0} – {1}</intervalFormatFallback>
+<intervalFormatItem id="yMMMd">
+<greatestDifference id="d">y MMM d–d</greatestDifference>
+<greatestDifference id="M">y MMM d – MMM d</greatestDifference>
+<greatestDifference id="M" alt="variant">y MMM d - MMM d</greatestDifference>
+</intervalFormatItem>
+</intervalFormats>
+</dateTimeFormats>
+</calendar>"""
+ROOT_DATES_XML = (
+    "<ldml><dates><calendars><calendar type=\"gregorian\"/>"
+    + ISO8601_XML
+    + "</calendars></dates></ldml>"
+)
+ISO8601_ENTRIES = {
+    **widths(
+        ("d", ["y MMMM d, EEEE", "y MMMM d", "y MMM d", "y-MM-dd"]),
+        ("t", ["HH:mm:ss zzzz", "HH:mm:ss z", "HH:mm:ss", "HH:mm"]),
+        ("c", ["{1} {0}", "{1} {0}", "{1}, {0}", "{1} {0}"]),
+        ("a", ["{1} {0}", "{1} {0}", "{1} 'at' {0}", "{1} {0}"]),
+    ),
+    "fb": "{0} – {1}",
+    "tz": "{0} {1}",
+    "f.yMMMd": "y MMM d",
+    "f.Hm": "HH:mm",
+    "i.yMMMd.d": "y MMM d–d",
+    "i.yMMMd.M": "y MMM d – MMM d",
+}
+
+# The BCP 47 ids of the calendars of date-patterns.txt, by file name.
+BCP47_CALENDAR = {
+    "gregorian": "gregory",
+    "ethiopic-amete-alem": "ethioaa",
+}
+
+
+def make_date_tree(root, locales, parents, likely, rules, dropped=None):
+    """Write fixture cldr-dates-full, cldr-cal-*-full and cldr-core files
+    under `root` for `locales` ({dir: (calendars, names)}, the calendars
+    {file name: entries}), and return a tree reading them. `dropped` adds
+    raw entries to en's gregorian."""
+    for loc, (calendars, names) in locales.items():
+        for name, package in DATE_FILES:
+            j = calendar_json(calendars[name], names if name == "gregorian" else None)
+            if loc == "en" and name == "gregorian" and dropped:
+                for section, extra in dropped.items():
+                    if section == "dateFormats":
+                        j["dateFormats"].update(extra)
+                    elif section == "timeFormats":
+                        j["timeFormats"].update(extra)
+                    elif section == "availableFormats":
+                        j["dateTimeFormats"]["availableFormats"].update(extra)
+                    else:
+                        iv = j["dateTimeFormats"]["intervalFormats"]
+                        for k, v in extra.items():
+                            iv.setdefault(k, {}).update(v)
+            write_json(
+                root,
+                [package, "package", "main", loc, f"ca-{name}.json"],
+                {"main": {loc: {"dates": {"calendars": {name: j}}}}},
+            )
+    write_json(
+        root,
+        ["cldr-core", "package", "supplemental", "parentLocales.json"],
+        {"supplemental": {"parentLocales": {"parentLocale": parents}}},
+    )
+    write_json(
+        root,
+        ["cldr-core", "package", "supplemental", "likelySubtags.json"],
+        {"supplemental": {"likelySubtags": likely}},
+    )
+    write_json(
+        root,
+        ["cldr-core", "package", "supplemental", "dayPeriods.json"],
+        {"supplemental": {"dayPeriodRuleSet": rules}},
+    )
+    return gen.Tree(root)
+
+
+def parse_date_patterns(lines):
+    """Parse date-patterns.txt lines: {tag: (parent, {calendar: {key:
+    pattern} or ("=", other)})}."""
+    lines = [l for l in lines if not l.startswith("#")]
+    head, count = lines[0].split(" ")
+    assert head == "strings"
+    strings = lines[1 : 1 + int(count)]
+    assert len(strings) == len(set(strings))
+    out = {}
+    for line in lines[1 + int(count) :]:
+        f = line.split(" ")
+        if f[0] == "locale":
+            assert len(f) == 3, line
+            cur = out[f[1]] = (f[2], {})
+        elif f[1] == "=":
+            assert len(f) == 3, line
+            cur[1][f[0]] = ("=", f[2])
+        else:
+            assert f[0] not in cur[1], line
+            cur[1][f[0]] = {
+                k: strings[int(i)] for k, i in (kv.rsplit("=", 1) for kv in f[1:])
+            }
+    return out
+
+
+def read_date_pair(parsed, tag, calendar):
+    """(tag, calendar) of a parsed file, read as the brief says."""
+    parent, calendars = parsed[tag]
+    v = calendars.get(calendar)
+    if isinstance(v, tuple):
+        return read_date_pair(parsed, tag, v[1])
+    base = {} if parent == "-" else read_date_pair(parsed, parent, calendar)
+    return {**base, **(v or {})}
+
+
+def parse_day_periods(lines):
+    """Parse day-periods.txt lines: ({key: {period: (from, before)}},
+    {tag: (parent, rules key, {period: (abbreviated, wide, narrow)})})."""
+    rules, locales = {}, {}
+    cur = None
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if line.startswith("rules "):
+            assert not locales, line
+            f = line.split(" ")
+            assert len(f) == 2, line
+            cur = rules[f[1]] = {}
+        elif line.startswith("locale "):
+            f = line.split(" ")
+            assert len(f) == 4, line
+            locales[f[1]] = (f[2], f[3], {})
+            cur = locales[f[1]][2]
+        elif not locales:
+            period, start, before = line.split(" ")
+            cur[period] = (int(start), int(before))
+        else:
+            period, names = line.split(" ", 1)
+            names = tuple(names.split("\t"))
+            assert len(names) == 3, line
+            cur[period] = names
+    return rules, locales
+
+
+def day_period_names(locales, tag, period):
+    """A period's names for `tag` along the parent chain, "" each if none."""
+    while tag != "-":
+        parent, _, names = locales[tag]
+        if period in names:
+            return names[period]
+        tag = parent
+    return ("", "", "")
+
+
+class DatePatternsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def lines(self, locales=None, xml=None, tags=("en", "en-AU"), dropped=None):
+        tree = make_date_tree(
+            tempfile.mkdtemp(dir=self._tmp.name),
+            FIXTURE_DATES if locales is None else locales,
+            DATE_PARENTS,
+            DATE_LIKELY,
+            FIXTURE_RULES,
+            EN_DROPPED if dropped is None else dropped,
+        )
+        files = {"root": ROOT_DATES_XML}
+        files.update(xml or {})
+        return gen.date_patterns_lines(
+            tree,
+            list(tags),
+            lambda name: ET.fromstring(files.get(name, "<ldml/>")),
+        )
+
+    def parsed(self, **kw):
+        return parse_date_patterns(self.lines(**kw))
+
+    def test_date_pattern_keys(self):
+        p = self.parsed()
+        self.assertEqual(p["en"][0], "und")
+        en = read_date_pair(p, "en", "gregory")
+        self.assertEqual(en["d0"], "EEEE, MMMM d, y")
+        self.assertEqual(en["d3"], "M/d/yy")
+        self.assertEqual(en["t0"], "h:mm:ss a zzzz")
+        self.assertEqual(en["t3"], "h:mm a")
+        self.assertEqual(en["c0"], "{1}, {0}")
+        self.assertEqual(en["a0"], "{1} 'at' {0}")
+        self.assertEqual(en["a3"], "{1}, {0}")
+        self.assertEqual(en["fb"], "{0} – {1}")
+        self.assertEqual(en["tz"], "{0} {1}")
+        self.assertEqual(en["f.yMMMd"], "MMM d, y")
+        self.assertEqual(en["i.yMMMd.d"], "MMM d – d, y")
+        self.assertNotIn("lp", en)
+        self.assertEqual(read_date_pair(p, "en", "chinese")["lp"], "{0}bis")
+        # The keys and calendars are exactly these.
+        self.assertEqual(set(en), set(EN_GREGORIAN))
+        cals = {c for _, (_, cs) in p.items() for c in cs}
+        self.assertLessEqual(
+            cals,
+            {
+                "gregory", "generic", "buddhist", "chinese", "coptic", "dangi",
+                "ethioaa", "ethiopic", "hebrew", "indian", "islamic-civil",
+                "islamic-tbla", "islamic-umalqura", "iso8601", "japanese",
+                "persian", "roc",
+            },
+        )
+        self.assertIn("ethioaa", p["und"][1])
+
+    def test_date_pattern_calendar_alias(self):
+        p = self.parsed()
+        # en's buddhist is its generic; en-AU's has a pattern of its own.
+        self.assertEqual(p["en"][1]["buddhist"], ("=", "generic"))
+        self.assertEqual(p["en-AU"][1]["buddhist"], {"d1": "d MMMM y G", "d3": "d/M/y GGGGG"})
+        # dangi equals the earlier chinese, which differs from generic.
+        self.assertEqual(p["und"][1]["dangi"], ("=", "chinese"))
+        self.assertIsInstance(p["und"][1]["chinese"], dict)
+        # An alias is to a calendar listed before it.
+        for tag, (_, cals) in p.items():
+            order = list(cals)
+            for cal, v in cals.items():
+                if isinstance(v, tuple) and v[1] in cals:
+                    self.assertLess(order.index(v[1]), order.index(cal), (tag, cal))
+                    self.assertIsInstance(cals[v[1]], dict, (tag, cal))
+        # Read through the alias.
+        self.assertEqual(read_date_pair(p, "en", "buddhist"), EN_GENERIC)
+
+    def test_date_pattern_dedup(self):
+        p = self.parsed()
+        # en-AU's gregorian differs from en's in d3 only.
+        self.assertEqual(p["en-AU"][1]["gregory"], {"d3": "d/M/yy"})
+        self.assertEqual(p["en-AU"][1]["generic"], {"d3": "d/M/y GGGGG"})
+        # en lists what differs from und.
+        self.assertNotIn("f.Hm", p["en"][1]["gregory"])
+        self.assertEqual(p["en"][1]["gregory"]["f.yMMMd"], "MMM d, y")
+        self.assertEqual(p["und"][0], "-")
+        self.assertEqual(p["und"][1]["gregory"], UND_GREGORIAN)
+        # A string used twice is one string.
+        lines = self.lines()
+        self.assertEqual(lines.count("{1} {0}"), 1)
+
+    def test_date_pattern_reads_back(self):
+        p = self.parsed()
+        for tag, (calendars, _) in FIXTURE_DATES.items():
+            for name, _ in DATE_FILES:
+                cal = BCP47_CALENDAR.get(name, name)
+                self.assertEqual(
+                    read_date_pair(p, tag, cal), calendars[name], (tag, cal)
+                )
+            self.assertEqual(read_date_pair(p, tag, "iso8601"), ISO8601_ENTRIES, tag)
+        # en-AU's gregorian lacks a key its parent en has.
+        d = dict(FIXTURE_DATES)
+        greg = {k: v for k, v in EN_AU_GREGORIAN.items() if k != "f.Hm"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "en-AU gregory"):
+            self.lines(locales=d)
+
+    def test_date_pattern_rejects_symbols(self):
+        d = dict(FIXTURE_DATES)
+        # A kept skeleton whose pattern has a quarter.
+        greg = {**EN_AU_GREGORIAN, "f.yMMMd": "QQQ d, y"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "en-AU gregory.*QQQ d, y"):
+            self.lines(locales=d)
+        # A time format with a Z.
+        greg = {**EN_AU_GREGORIAN, "t0": "h:mm:ss a Z"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "en-AU gregory.*h:mm:ss a Z"):
+            self.lines(locales=d)
+        # A skeleton with a w, Q or e is dropped, with its pattern.
+        en = read_date_pair(self.parsed(), "en", "gregory")
+        for k in ("f.yw", "f.yQQQ", "f.ed", "f.Ed", "i.yw.y"):
+            self.assertNotIn(k, en)
+        # A letter outside the table, even one ECMA-402 has no field for in
+        # no list (n), fails too.
+        greg = {**EN_AU_GREGORIAN, "f.Hm": "HH:nn"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "en-AU gregory"):
+            self.lines(locales=d)
+
+    def test_date_pattern_normalizes_cldr_typos(self):
+        # CLDR 48.2 writes Y for y (gl's dateFormats full) and eee for EEE:
+        # they are read as the letters meant. Quoted text is kept.
+        d = dict(FIXTURE_DATES)
+        greg = {
+            **EN_AU_GREGORIAN,
+            "d0": "EEEE, d 'de' MMMM 'de' Y",
+            "f.yMMMd": "MMM d, YYYY 'Y'",
+            "i.yMMMd.d": "eee d – eeeeee d, y",
+        }
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        au = read_date_pair(self.parsed(locales=d), "en-AU", "gregory")
+        self.assertEqual(au["d0"], "EEEE, d 'de' MMMM 'de' y")
+        self.assertEqual(au["f.yMMMd"], "MMM d, yyyy 'Y'")
+        self.assertEqual(au["i.yMMMd.d"], "EEE d – EEEEEE d, y")
+        # e of any length is E (ko's "e요일" is "E요일").
+        greg = {**EN_AU_GREGORIAN, "i.yMMMd.d": "e요일 d – ee d, y"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        au = read_date_pair(self.parsed(locales=d), "en-AU", "gregory")
+        self.assertEqual(au["i.yMMMd.d"], "E요일 d – EE d, y")
+
+    def test_alternates_dropped(self):
+        lines = self.lines()
+        p = parse_date_patterns(lines)
+        en = read_date_pair(p, "en", "gregory")
+        self.assertEqual(en, EN_GREGORIAN)
+        for s in ("H:mm", "MM/dd/yy", "MMM d-d, y", "'week' W 'of' MMMM"):
+            self.assertNotIn(s, lines)
+        self.assertFalse([k for k in en if "-alt-" in k or "-count-" in k])
+
+    def test_iso8601_from_root_xml(self):
+        p = self.parsed()
+        self.assertEqual(p["und"][1]["iso8601"], ISO8601_ENTRIES)
+        self.assertNotIn("iso8601", p["en"][1])
+        # Another locale on the chains with an iso8601 calendar fails, and
+        # so does a root without one.
+        en_xml = "<ldml><dates><calendars>" + ISO8601_XML + "</calendars></dates></ldml>"
+        with self.assertRaisesRegex(SystemExit, "en_001.*iso8601"):
+            self.lines(xml={"en_001": en_xml})
+        # A locale of the file with iso8601 values of its own (zh's
+        # intervals in CLDR 48.2) has them over root's, and so do its
+        # children; a marked or provisional value is not one.
+        child = (
+            '<ldml><dates><calendars><calendar type="iso8601"><dateTimeFormats>'
+            '<availableFormats><dateFormatItem id="Hm" draft="provisional">H.mm'
+            "</dateFormatItem></availableFormats><intervalFormats>"
+            '<intervalFormatItem id="yMMMd"><greatestDifference id="d" '
+            'draft="contributed">y年MMMd–d日</greatestDifference>'
+            '<greatestDifference id="M">\u2191\u2191\u2191</greatestDifference>'
+            "</intervalFormatItem></intervalFormats></dateTimeFormats>"
+            "</calendar></calendars></dates></ldml>"
+        )
+        p = parse_date_patterns(self.lines(xml={"en": child}))
+        self.assertEqual(p["en"][1]["iso8601"], {"i.yMMMd.d": "y年MMMd–d日"})
+        self.assertEqual(p["und"][1]["iso8601"], ISO8601_ENTRIES)
+        want = {**ISO8601_ENTRIES, "i.yMMMd.d": "y年MMMd–d日"}
+        self.assertEqual(read_date_pair(p, "en", "iso8601"), want)
+        self.assertEqual(read_date_pair(p, "en-AU", "iso8601"), want)
+        # One that only marks a value as inherited (bg's) defines nothing.
+        marker = (
+            '<ldml><dates><calendars><calendar type="iso8601"><dateTimeFormats>'
+            '<appendItems><appendItem request="Timezone" draft="contributed">'
+            "\u2191\u2191\u2191</appendItem></appendItems></dateTimeFormats>"
+            "</calendar></calendars></dates></ldml>"
+        )
+        self.assertEqual(self.lines(xml={"en_001": marker}), self.lines())
+        with self.assertRaisesRegex(SystemExit, "en_001.*iso8601"):
+            self.lines(xml={"en_001": marker.replace("\u2191\u2191\u2191", "{1} {0}")})
+        with self.assertRaisesRegex(SystemExit, "iso8601"):
+            self.lines(xml={"root": "<ldml/>"})
+        # An alias root's iso8601 has that the generator does not resolve.
+        alias = ROOT_DATES_XML.replace(
+            "<dateFormatItem id=\"Hm\">HH:mm</dateFormatItem>",
+            "<alias source=\"locale\" path=\"../../calendar[@type='gregorian']\"/>",
+        )
+        with self.assertRaisesRegex(SystemExit, "alias"):
+            self.lines(xml={"root": alias})
+
+    def test_iso8601_at_time_alias_resolved_per_locale(self):
+        # root's atTime full aliases its standard full format; a child that
+        # overrides the standard one only gets it for atTime too, while
+        # root's explicit atTime medium stays.
+        child = (
+            '<ldml><dates><calendars><calendar type="iso8601"><dateTimeFormats>'
+            '<dateTimeFormatLength type="full"><dateTimeFormat><pattern>'
+            "{1} 'um' {0}</pattern></dateTimeFormat></dateTimeFormatLength>"
+            '<dateTimeFormatLength type="medium"><dateTimeFormat><pattern>'
+            "{1}; {0}</pattern></dateTimeFormat></dateTimeFormatLength>"
+            "</dateTimeFormats></calendar></calendars></dates></ldml>"
+        )
+        p = parse_date_patterns(self.lines(xml={"en": child}))
+        en = read_date_pair(p, "en", "iso8601")
+        self.assertEqual(en["c0"], "{1} 'um' {0}")
+        self.assertEqual(en["a0"], "{1} 'um' {0}")
+        self.assertEqual(en["c2"], "{1}; {0}")
+        self.assertEqual(en["a2"], "{1} 'at' {0}")
+        self.assertEqual(read_date_pair(p, "en-AU", "iso8601"), en)
+        self.assertEqual(read_date_pair(p, "und", "iso8601"), ISO8601_ENTRIES)
+
+    def test_date_patterns_reader(self):
+        lines = ["strings 2", "y", "M", "locale und -", "gregory d0=1 f.y=0"]
+        lines.append("generic = gregory")
+        read = gen.date_patterns_reader(lines)
+        self.assertEqual(read("und", "generic"), {"d0": "M", "f.y": "y"})
+        # A line the reader cannot parse fails generation.
+        for bad in (
+            ["strings 1", "y", "locale und -", "gregory d0=1"],
+            ["strings 1", "y", "locale und -", "gregory d0"],
+            ["strings 1", "y", "locale und -", "gregory d0=0", "gregory t0=0"],
+            ["strings 1", "y", "locale und -", "nocal d0=0"],
+            ["strings 1", "y", "gregory d0=0"],
+            ["strings x"],
+        ):
+            with self.assertRaises(SystemExit, msg=bad):
+                gen.date_patterns_reader(bad)("und", "gregory")
+
+    def test_rejects_tabs(self):
+        d = dict(FIXTURE_DATES)
+        greg = {**EN_AU_GREGORIAN, "d3": "d/M/yy\t"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "tab"):
+            self.lines(locales=d)
+        greg = {**EN_AU_GREGORIAN, "d3": "d/M/yy\n"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "newline"):
+            self.lines(locales=d)
+
+    def test_date_pattern_placeholders(self):
+        # The dateTimeFormats, the fallback, the append item and the leap
+        # month need their placeholders.
+        d = dict(FIXTURE_DATES)
+        for key, bad in (
+            ("c0", "{1} {1}"),
+            ("a3", "{1}"),
+            ("fb", "{0} -"),
+            ("tz", "{0}"),
+        ):
+            greg = {**EN_AU_GREGORIAN, key: bad}
+            d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+            with self.assertRaisesRegex(SystemExit, f"en-AU gregory {key}", msg=key):
+                self.lines(locales=d)
+        chinese = {**EN_AU_GENERIC, "lp": "bis"}
+        d["en-AU"] = date_locale(
+            EN_AU_GREGORIAN, EN_AU_GENERIC, EN_AU_NAMES, chinese=chinese
+        )
+        with self.assertRaisesRegex(SystemExit, "en-AU chinese lp"):
+            self.lines(locales=d)
+
+
+class DayPeriodsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def lines(self, locales=None, rules=None):
+        tree = make_date_tree(
+            tempfile.mkdtemp(dir=self._tmp.name),
+            DAY_PERIOD_DATES if locales is None else locales,
+            DATE_PARENTS,
+            DATE_LIKELY,
+            FIXTURE_RULES if rules is None else rules,
+        )
+        return gen.day_periods_lines(tree, DAY_PERIOD_TAGS)
+
+    def test_day_period_rules(self):
+        rules, _ = parse_day_periods(self.lines())
+        self.assertEqual(
+            rules["en"],
+            {
+                "midnight": (0, 0),
+                "noon": (720, 720),
+                "morning1": (0, 720),
+                "afternoon1": (720, 1080),
+                "evening1": (1080, 1260),
+                "night1": (1260, 1440),
+            },
+        )
+        # A period that crosses midnight keeps from > before.
+        self.assertEqual(rules["bg"]["night1"], (1320, 240))
+        # es_CO is written es-CO; both are there.
+        self.assertEqual(rules["es"]["morning1"], (0, 360))
+        self.assertEqual(rules["es-CO"]["morning2"], (0, 720))
+        self.assertNotIn("morning1", rules["es-CO"])
+        self.assertEqual(rules["und"], {"am": (0, 720), "pm": (720, 1440)})
+        self.assertEqual(
+            set(rules), {"und", "en", "bg", "es", "es-CO", "zh", "lij"}
+        )
+        bad = dict(FIXTURE_RULES, en={"noon": {"_at": "12:60"}})
+        with self.assertRaisesRegex(SystemExit, "en noon"):
+            self.lines(rules=bad)
+
+    def test_day_period_rules_key_by_truncation(self):
+        _, locales = parse_day_periods(self.lines())
+        # zh-Hant's parent is und (CLDR's parentLocales), its rules zh's
+        # (truncation, as ICU looks them up); zh-HK's (zh-Hant-HK) too.
+        self.assertEqual(locales["zh-Hant"][:2], ("und", "zh"))
+        self.assertEqual(locales["zh-HK"][:2], ("zh-Hant", "zh"))
+        self.assertEqual(locales["es-CO"][:2], ("es", "es-CO"))
+        self.assertEqual(locales["en-AU"][:2], ("en", "en"))
+        self.assertEqual(locales["und"][:2], ("-", "und"))
+        # zh-Hant lists names for zh's periods, which und does not have.
+        self.assertEqual(locales["zh-Hant"][2]["morning1"], ("朝", "朝", "朝"))
+        self.assertNotIn("morning1", locales["zh-HK"][2])
+        self.assertEqual(
+            day_period_names(locales, "zh-HK", "afternoon1"), ("夜", "夜", "夜")
+        )
+
+    def test_day_period_names(self):
+        _, locales = parse_day_periods(self.lines())
+        self.assertEqual(locales["en"][0], "und")
+        en = locales["en"][2]
+        self.assertEqual(en["morning1"], ("in the morning",) * 3)
+        self.assertEqual(en["noon"], ("noon", "noon", "n"))
+        # The widths are in the order abbreviated, wide, narrow.
+        self.assertEqual(en["midnight"], ("midnight", "at midnight", "mi"))
+        # am and pm are not en's periods.
+        self.assertNotIn("am", en)
+        self.assertEqual(locales["und"][2]["am"], ("AM", "AM", "AM"))
+        # en-AU lists only the periods whose names differ from en's.
+        self.assertEqual(
+            locales["en-AU"][2],
+            {
+                "morning1": ("in the morning", "in the morning", "morning"),
+                "noon": ("noon", "noon", "noon"),
+            },
+        )
+        self.assertEqual(locales["es-CO"][2], {})
+        # A period with no name in CLDR (lij's) has no line, and reads as "".
+        self.assertEqual(locales["lij"][:3], ("und", "lij", {}))
+        self.assertEqual(day_period_names(locales, "lij", "morning1"), ("", "", ""))
+        # Every locale's periods read back to its names.
+        for tag in DAY_PERIOD_TAGS:
+            d = {"zh-HK": "zh-Hant-HK"}.get(tag, tag)
+            names = DAY_PERIOD_DATES[d][1]
+            key = locales[tag][1]
+            for period in FIXTURE_RULES[key.replace("-", "_")]:
+                want = tuple(
+                    names[w].get(period, "") for w in ("abbreviated", "wide", "narrow")
+                )
+                self.assertEqual(day_period_names(locales, tag, period), want)
+
+    def test_day_period_names_must_read_back(self):
+        # en-AU lacks a name its parent has.
+        d = dict(DAY_PERIOD_DATES)
+        names = {w: dict(v) for w, v in EN_NAMES.items()}
+        for w in names:
+            del names[w]["noon"]
+        d["en-AU"] = generic_locale(names)
+        with self.assertRaisesRegex(SystemExit, "en-AU noon"):
+            self.lines(locales=d)
+        # A period named in some widths only.
+        names = {w: dict(v) for w, v in EN_NAMES.items()}
+        del names["narrow"]["noon"]
+        d["en-AU"] = generic_locale(names)
+        with self.assertRaisesRegex(SystemExit, "en-AU noon"):
+            self.lines(locales=d)
+        names = {w: dict(v) for w, v in EN_NAMES.items()}
+        names["wide"]["noon"] = "no\ton"
+        d["en-AU"] = generic_locale(names)
+        with self.assertRaisesRegex(SystemExit, "tab"):
+            self.lines(locales=d)
 
 
 if __name__ == "__main__":

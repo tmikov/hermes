@@ -31,7 +31,7 @@ pub enum Kind {
 
 /// The calendars ICU4X implements, as CLDR calendar ids. "islamic" and
 /// "islamic-rgsa" are left out: ICU4X has no algorithm for them.
-const CALENDARS: &[&str] = &[
+pub(crate) const CALENDARS: &[&str] = &[
     "buddhist",
     "chinese",
     "coptic",

@@ -44,6 +44,31 @@ function AvailableCalendars() {
   return splitSpaces(native.supportedValues('calendar'));
 }
 
+/// The List of step 2 of Intl.supportedValuesOf for the key "calendar":
+/// the calendar types of AvailableCalendars() that are canonical, in its
+/// order. DateTimeFormat's [[LocaleData]] lists them too (Phase 4 decision
+/// 9). Computed on first use; callers never modify it.
+var canonicalCalendarList;
+function canonicalCalendars() {
+  if (canonicalCalendarList === undefined) {
+    // a. Let list be a new empty List.
+    var list = [];
+    // b. For each element identifier of AvailableCalendars(), do
+    var calendars = AvailableCalendars();
+    for (var i = 0; i < calendars.length; i++) {
+      var identifier = calendars[i];
+      // i. Let canonical be CanonicalizeUValue("ca", identifier).
+      var canonical = CanonicalizeUValue('ca', identifier);
+      // ii. If identifier is canonical, then
+      //     1. Append identifier to list.
+      if (identifier === canonical) listPush(list, identifier);
+    }
+    canonicalCalendarList = list;
+  }
+  //    Return list.
+  return canonicalCalendarList;
+}
+
 /// Split a space-separated list from native code into a List. Empty items
 /// (from leading, trailing or repeated spaces) are skipped.
 function splitSpaces(s) {
@@ -89,18 +114,9 @@ function installIntl() {
       var list;
       if (key === 'calendar') {
         // 2. If key is "calendar", then
-        //    a. Let list be a new empty List.
-        list = [];
-        //    b. For each element identifier of AvailableCalendars(), do
-        var calendars = AvailableCalendars();
-        for (var i = 0; i < calendars.length; i++) {
-          var identifier = calendars[i];
-          //    i. Let canonical be CanonicalizeUValue("ca", identifier).
-          var canonical = CanonicalizeUValue('ca', identifier);
-          //    ii. If identifier is canonical, then
-          //        1. Append identifier to list.
-          if (identifier === canonical) listPush(list, identifier);
-        }
+        //    a-b. Let list be the canonical elements of AvailableCalendars()
+        //         (canonicalCalendars).
+        list = canonicalCalendars();
       } else if (key === 'collation') {
         // 3. Else if key is "collation", then
         //    a. Let list be AvailableCanonicalCollations( ).
@@ -133,6 +149,7 @@ function installIntl() {
   // 3. ECMA-402 8.2: the constructor properties of Intl, in the draft's
   //    order.
   installCollator(IntlObject);
+  installDateTimeFormat(IntlObject);
   installLocale(IntlObject);
   installNumberFormat(IntlObject);
   installPluralRules(IntlObject);
