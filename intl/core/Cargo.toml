@@ -33,6 +33,9 @@ fixed_decimal = "~0.7"
 # of the plural data that holds them.
 icu_pattern = "~0.5"
 zerovec = "~0.11"
+# The key type of icu_experimental's dialect name map, at the version ICU4X
+# 2.3 uses.
+potential_utf = "~0.1.6"
 # TryWriteable, which writes ICU4X's formatted date and time names.
 writeable = "~0.6"
 # The IANA time zone database, as TZif data that tz.rs reads. The exact

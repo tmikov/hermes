@@ -150,9 +150,14 @@ function installIntl() {
   //    order.
   installCollator(IntlObject);
   installDateTimeFormat(IntlObject);
+  installDisplayNames(IntlObject);
+  installDurationFormat(IntlObject);
+  installListFormat(IntlObject);
   installLocale(IntlObject);
   installNumberFormat(IntlObject);
   installPluralRules(IntlObject);
+  installRelativeTimeFormat(IntlObject);
+  installSegmenter(IntlObject);
   // 4. ECMA-402 8.1.1 Intl [ %Symbol.toStringTag% ]: the String value
   //    "Intl", { [[Writable]]: false, [[Enumerable]]: false,
   //    [[Configurable]]: true }.

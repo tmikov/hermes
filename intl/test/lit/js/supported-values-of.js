@@ -32,10 +32,13 @@ var native = {
   },
 };
 var hostDefaults = {locales: ['en'], timeZone: 'UTC'};
-// 20-Locale.js, 30-Collator.js, 40-NumberFormat.js, 45-PluralRules.js and
-// 50-DateTimeFormat.js are not included, so no object is an Intl.Locale,
-// and installIntl installs none of Intl.Collator, Intl.DateTimeFormat,
-// Intl.Locale, Intl.NumberFormat and Intl.PluralRules.
+// 20-Locale.js, 30-Collator.js, 40-NumberFormat.js, 45-PluralRules.js,
+// 50-DateTimeFormat.js, 60-ListFormat.js, 62-RelativeTimeFormat.js,
+// 64-DisplayNames.js, 66-DurationFormat.js and 68-Segmenter.js are not
+// included, so no object is an Intl.Locale, and installIntl installs none of
+// Intl.Collator, Intl.DateTimeFormat, Intl.DisplayNames,
+// Intl.DurationFormat, Intl.ListFormat, Intl.Locale, Intl.NumberFormat,
+// Intl.PluralRules, Intl.RelativeTimeFormat and Intl.Segmenter.
 function isLocaleObject(o) {
   return false;
 }
@@ -44,9 +47,14 @@ function localeObjectTag(o) {
 }
 function installCollator(intl) {}
 function installDateTimeFormat(intl) {}
+function installDisplayNames(intl) {}
+function installDurationFormat(intl) {}
+function installListFormat(intl) {}
 function installLocale(intl) {}
 function installNumberFormat(intl) {}
 function installPluralRules(intl) {}
+function installRelativeTimeFormat(intl) {}
+function installSegmenter(intl) {}
 installIntl();
 
 print(JSON.stringify(globalThis.Intl.supportedValuesOf('calendar')));

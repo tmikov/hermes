@@ -122,13 +122,17 @@ set(HERMES_ENABLE_RTTI ON)
 set(HERMES_INTL_PLUGIN_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/CollatorHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/DateTimeFormatHelpers.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/DisplayNamesHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/StringHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/Defaults.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/IntlBytecode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/ListFormatHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/LocaleHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/NativeHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/NumberHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/PluralRulesHelpers.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/RelativeTimeFormatHelpers.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jsi/SegmenterHelpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/jsi/Plugin.cpp)
 add_hermes_library(hermesintl SHARED ${HERMES_INTL_PLUGIN_SOURCES})
 target_include_directories(hermesintl PRIVATE

@@ -68,6 +68,36 @@ var dtfFormatRange = DateTimeFormatPrototype.formatRange;
 var dtfFormatRangeToParts = DateTimeFormatPrototype.formatRangeToParts;
 var dtfSupportedLocalesOf = Intl.DateTimeFormat.supportedLocalesOf;
 var getDtfFormat = Object.getOwnPropertyDescriptor(DateTimeFormatPrototype, 'format').get;
+var OriginalListFormat = Intl.ListFormat;
+var ListFormatPrototype = Intl.ListFormat.prototype;
+var lfResolvedOptions = ListFormatPrototype.resolvedOptions;
+var lfFormat = ListFormatPrototype.format;
+var lfFormatToParts = ListFormatPrototype.formatToParts;
+var lfSupportedLocalesOf = Intl.ListFormat.supportedLocalesOf;
+var OriginalRelativeTimeFormat = Intl.RelativeTimeFormat;
+var RelativeTimeFormatPrototype = Intl.RelativeTimeFormat.prototype;
+var rtfResolvedOptions = RelativeTimeFormatPrototype.resolvedOptions;
+var rtfFormat = RelativeTimeFormatPrototype.format;
+var rtfFormatToParts = RelativeTimeFormatPrototype.formatToParts;
+var rtfSupportedLocalesOf = Intl.RelativeTimeFormat.supportedLocalesOf;
+var OriginalDisplayNames = Intl.DisplayNames;
+var DisplayNamesPrototype = Intl.DisplayNames.prototype;
+var dnResolvedOptions = DisplayNamesPrototype.resolvedOptions;
+var dnOf = DisplayNamesPrototype.of;
+var dnSupportedLocalesOf = Intl.DisplayNames.supportedLocalesOf;
+var OriginalDurationFormat = Intl.DurationFormat;
+var DurationFormatPrototype = Intl.DurationFormat.prototype;
+var dfResolvedOptions = DurationFormatPrototype.resolvedOptions;
+var dfFormat = DurationFormatPrototype.format;
+var dfFormatToParts = DurationFormatPrototype.formatToParts;
+var dfSupportedLocalesOf = Intl.DurationFormat.supportedLocalesOf;
+var OriginalSegmenter = Intl.Segmenter;
+var SegmenterPrototype = Intl.Segmenter.prototype;
+var sgResolvedOptions = SegmenterPrototype.resolvedOptions;
+var sgSegment = SegmenterPrototype.segment;
+var sgSupportedLocalesOf = Intl.Segmenter.supportedLocalesOf;
+var hasOwn = Object.hasOwn;
+var symbolIterator = Symbol.iterator;
 var symbolToPrimitive = Symbol.toPrimitive;
 var stringCharCodeAt = String.prototype.charCodeAt;
 var localeCompare = String.prototype.localeCompare;
@@ -157,6 +187,7 @@ Object.getOwnPropertyDescriptor = boom;
 Math.min = boom;
 Math.max = boom;
 Math.floor = boom;
+Math.abs = boom;
 Date.now = boom;
 Date.prototype.getTime = boom;
 Date.prototype.valueOf = boom;
@@ -198,6 +229,24 @@ DateTimeFormatPrototype.formatRange = boom;
 DateTimeFormatPrototype.formatRangeToParts = boom;
 define(DateTimeFormatPrototype, 'format', {__proto__: null, get: boom, configurable: true});
 Intl.DateTimeFormat.supportedLocalesOf = boom;
+ListFormatPrototype.resolvedOptions = boom;
+ListFormatPrototype.format = boom;
+ListFormatPrototype.formatToParts = boom;
+Intl.ListFormat.supportedLocalesOf = boom;
+RelativeTimeFormatPrototype.resolvedOptions = boom;
+RelativeTimeFormatPrototype.format = boom;
+RelativeTimeFormatPrototype.formatToParts = boom;
+Intl.RelativeTimeFormat.supportedLocalesOf = boom;
+DisplayNamesPrototype.resolvedOptions = boom;
+DisplayNamesPrototype.of = boom;
+Intl.DisplayNames.supportedLocalesOf = boom;
+DurationFormatPrototype.resolvedOptions = boom;
+DurationFormatPrototype.format = boom;
+DurationFormatPrototype.formatToParts = boom;
+Intl.DurationFormat.supportedLocalesOf = boom;
+SegmenterPrototype.resolvedOptions = boom;
+SegmenterPrototype.segment = boom;
+Intl.Segmenter.supportedLocalesOf = boom;
 // The names of the fields of the constructor's internal records, of
 // RegionPreference's, and of the objects getWeekInfo and getTextInfo
 // return. "region" is left out: the constructor reads it from its options
@@ -219,7 +268,14 @@ Intl.DateTimeFormat.supportedLocalesOf = boom;
 // so are the fields of DateTimeFormat's records: the resolution's, the
 // [[LocaleData]] and format records', the range pattern records', the
 // tokens and fields of a CLDR pattern, the offset parse, the formatter's
-// data, and the keys of its tables (widths and CLDR pattern letters).
+// data, and the keys of its tables (widths and CLDR pattern letters). The
+// ListFormat tests pass every option too ("type" and "style" are already
+// here); the fields of the iterator record are here, and "done", which
+// IteratorStepValue reads from the iterator's own results. The
+// RelativeTimeFormat tests pass every option too ("numeric" gets its
+// accessor later, before them, since the Locale tests pass options objects
+// without it); the fields of its records are here: the units of its data
+// and the tenses and relative names of each unit.
 var recordFields = [
   'locale', 'calendar', 'ca', 'key', 'base', 'extension', 'regionOverride',
   'firstDay', 'weekend', 'direction', 'localeMatcher', 'co', 'kn', 'kf',
@@ -265,7 +321,9 @@ var recordFields = [
   'monthCode', 'leapMonth', 'millisecond', 'inDST', 'offsetSeconds', 'names',
   'GGGG', 'GGGGG', 'MMM', 'MMMM', 'MMMMM', 'LLL', 'LLLL', 'LLLLL', 'EEE',
   'EEEE', 'EEEEE', 'ccc', 'cccc', 'ccccc', 'aaaa', 'aaaaa', 'zzzz', 'OOOO',
-  'vvvv',
+  'vvvv', 'iterator', 'nextMethod', 'done',
+  'week', 'quarter', 'future', 'past', 'relatives', '-2', '-1', '0', '1', '2',
+  '3',
 ];
 for (var k = 0; k < recordFields.length; k++)
   define(ObjectPrototype, recordFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
@@ -278,6 +336,11 @@ Intl.Collator = boom;
 Intl.NumberFormat = boom;
 Intl.PluralRules = boom;
 Intl.DateTimeFormat = boom;
+Intl.ListFormat = boom;
+Intl.RelativeTimeFormat = boom;
+Intl.DisplayNames = boom;
+Intl.DurationFormat = boom;
+Intl.Segmenter = boom;
 // Last, because it breaks ordinary descriptor objects: accessors for the
 // descriptor fields on Object.prototype. "value" is also a field of the
 // records of Unicode extension keywords.
@@ -694,6 +757,53 @@ print(thrown(() => OriginalPluralRules('en'), OriginalTypeError), thrown(() => n
 print(thrown(() => apply(prSelectRange, prFr, [NaN, 1]), OriginalRangeError), thrown(() => apply(prSelectRange, prFr, [1]), OriginalTypeError), thrown(() => apply(prSelect, {}, [1]), OriginalTypeError), thrown(() => apply(prSelect, prFr, [aSymbol]), OriginalTypeError));
 // CHECK-NEXT: ok ok ok ok
 
+// Intl.ListFormat (plan Review Focus 2), through the references captured
+// before the tampering: the constructor, resolvedOptions, format and
+// formatToParts over iterables, the closing of an iterator that gives a
+// value that is not a String, and supportedLocalesOf.
+/// An iterable of the values values whose iterator has a return method
+/// that counts its calls in returnCalls[0]. Its results are own data
+/// properties, as the iterator protocol reads them through Get.
+function iterable(values, returnCalls) {
+  return {
+    [symbolIterator]: function () {
+      var i = 0;
+      return {
+        next: function () {
+          return i < values.length ? {done: false, value: values[i++]} : {done: true, value: undefined};
+        },
+        return: function () {
+          returnCalls[0]++;
+          return {};
+        },
+      };
+    },
+  };
+}
+var lfOptions = {localeMatcher: 'lookup', type: 'unit', style: 'short'};
+var lfEs = new OriginalListFormat(['xx', 'es'], lfOptions);
+print(stringify(apply(lfResolvedOptions, lfEs, [])));
+// CHECK-NEXT: {"locale":"es","type":"unit","style":"short"}
+var lfCalls = [0];
+print(apply(lfFormat, lfEs, [iterable(['a', 'b', 'c'], lfCalls)]), apply(lfFormat, lfEs, [iterable(['a', 'b'], lfCalls)]), lfCalls[0]);
+// CHECK-NEXT: a, b, c a y b 0
+print(partsString(apply(lfFormatToParts, new OriginalListFormat('he'), [iterable(['x', 'Ibiza'], lfCalls)])));
+// CHECK-NEXT: element:x|literal: ו‑|element:Ibiza
+// A string iterates through String.prototype[@@iterator], which is not
+// replaced; an array through the replaced Array.prototype[@@iterator], which
+// the draft requires.
+var lfEn = new OriginalListFormat('en');
+print(apply(lfFormat, lfEn, ['xyz']), apply(lfFormat, lfEn, [undefined]) === '', thrown(() => apply(lfFormat, lfEn, [['a', 'b']]), Error));
+// CHECK-NEXT: x, y, and z true ok
+print(thrown(() => apply(lfFormat, lfEn, [iterable(['a', 1], lfCalls)]), OriginalTypeError), lfCalls[0]);
+// CHECK-NEXT: ok 1
+print(thrown(() => apply(lfFormatToParts, lfEn, [null]), OriginalTypeError), thrown(() => apply(lfFormat, {}, ['a']), OriginalTypeError));
+// CHECK-NEXT: ok ok
+print(stringify(apply(lfSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(thrown(() => OriginalListFormat('en'), OriginalTypeError), thrown(() => new OriginalListFormat('en', {localeMatcher: 'lookup', type: 'x'}), OriginalRangeError));
+// CHECK-NEXT: ok ok
+
 // Intl.DateTimeFormat, through the references captured before the
 // tampering: the constructor with and without new, resolvedOptions, the
 // format getter and its bound function (which formats Date.now() through
@@ -972,3 +1082,261 @@ print(
   thrown(() => aDate.toLocaleDateString('de', dtfBadZone), OriginalRangeError),
 );
 // CHECK-NEXT: ok ok ok ok
+
+// Intl.RelativeTimeFormat (plan Review Focus 2), through the references
+// captured before the tampering, last, once Number.prototype.toLocaleString
+// is replaced too: the constructor, resolvedOptions, format and
+// formatToParts use neither the replaced Intl.NumberFormat, Intl.PluralRules
+// and their prototype methods, nor the replaced Math, Math.abs, BigInt and
+// Number.prototype.toLocaleString, and make their results without
+// consulting the accessors on Object.prototype and Array.prototype.
+/// The parts of the formatToParts result parts, as type:value or
+/// type:value:unit for a part with a unit, separated by "|".
+function unitPartsString(parts) {
+  var out = '';
+  for (var i = 0; i < parts.length; i++) {
+    out += (i === 0 ? '' : '|') + parts[i].type + ':' + parts[i].value;
+    if (hasOwn(parts[i], 'unit')) out += ':' + parts[i].unit;
+  }
+  return out;
+}
+// "numeric", a RelativeTimeFormat option and the name of a slot, gets an
+// accessor on Object.prototype only now: the Locale and Collator tests
+// above pass options objects without it. The options objects below have it
+// as an own property.
+define(ObjectPrototype, 'numeric', {__proto__: null, get: boom, set: boom, configurable: true});
+var rtfOptions = {localeMatcher: 'lookup', numberingSystem: 'arab', style: 'short', numeric: 'auto'};
+var rtfEnArab = new OriginalRelativeTimeFormat(['xx', 'en'], rtfOptions);
+print(stringify(apply(rtfResolvedOptions, rtfEnArab, [])));
+// CHECK-NEXT: {"locale":"en","style":"short","numeric":"auto","numberingSystem":"arab"}
+print(apply(rtfFormat, rtfEnArab, [-1, 'day']), apply(rtfFormat, rtfEnArab, [-0, 'second']), apply(rtfFormat, rtfEnArab, [1000, 'seconds']));
+// CHECK-NEXT: yesterday now in ١٬٠٠٠ sec.
+print(unitPartsString(apply(rtfFormatToParts, rtfEnArab, [-1000, 'quarter'])));
+// CHECK-NEXT: integer:١:quarter|group:٬:quarter|integer:٠٠٠:quarter|literal: qtrs. ago
+var rtfEn = new OriginalRelativeTimeFormat('en');
+print(apply(rtfFormat, rtfEn, [-1, 'day']), '|', unitPartsString(apply(rtfFormatToParts, rtfEn, [-1234.5, 'hours'])));
+// CHECK-NEXT: 1 day ago | integer:1:hour|group:,:hour|integer:234:hour|decimal:.:hour|fraction:5:hour|literal: hours ago
+// The plural rules: pl's "few" form, and ar's pattern without {0}.
+print(apply(rtfFormat, new OriginalRelativeTimeFormat('pl'), [-2, 'year']), unitPartsString(apply(rtfFormatToParts, new OriginalRelativeTimeFormat('ar'), [-1, 'second'])));
+// CHECK-NEXT: 2 lata temu literal:قبل ثانية واحدة
+print(stringify(apply(rtfSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(
+  thrown(() => OriginalRelativeTimeFormat('en'), OriginalTypeError),
+  thrown(() => new OriginalRelativeTimeFormat('en', null), OriginalTypeError),
+  thrown(() => new OriginalRelativeTimeFormat('en', {localeMatcher: 'lookup', numberingSystem: undefined, style: 'x'}), OriginalRangeError),
+);
+// CHECK-NEXT: ok ok ok
+print(
+  thrown(() => apply(rtfFormat, rtfEn, [NaN, 'day']), OriginalRangeError),
+  thrown(() => apply(rtfFormatToParts, rtfEn, [1, 'Day']), OriginalRangeError),
+  thrown(() => apply(rtfFormat, {}, [1, 'day']), OriginalTypeError),
+  thrown(() => apply(rtfFormat, rtfEn, [aSymbol, 'day']), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok
+
+// Intl.DisplayNames (plan Review Focus 2), through the references captured
+// before the tampering, last: the constructor, resolvedOptions, of and
+// supportedLocalesOf use no replaced intrinsic, and make their results
+// without consulting the accessors on Object.prototype and Array.prototype.
+// "fallback" and "languageDisplay", DisplayNames options and the names of
+// slots, and "language", "script", "region" and "variants", the parts of a
+// language code, get accessors only now: the Locale tests above pass
+// options objects without them, and the Locale constructor reads its
+// language, script, region and variants options from Object.prototype too.
+// The options objects below have every option as an own property.
+var dnFields = ['fallback', 'languageDisplay', 'language', 'script', 'region', 'variants'];
+for (var k = 0; k < dnFields.length; k++)
+  define(ObjectPrototype, dnFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
+/// An options object with every DisplayNames option: type and style as
+/// given, localeMatcher "lookup", fallback "none" and languageDisplay
+/// languageDisplay.
+function dnOptions(type, style, languageDisplay) {
+  return {localeMatcher: 'lookup', style: style, type: type, fallback: 'none', languageDisplay: languageDisplay};
+}
+var dnDe = new OriginalDisplayNames(['xx', 'de'], dnOptions('language', 'short', 'standard'));
+print(stringify(apply(dnResolvedOptions, dnDe, [])));
+// CHECK-NEXT: {"locale":"de","style":"short","type":"language","fallback":"none","languageDisplay":"standard"}
+print(apply(dnOf, dnDe, ['zh-Hans-CN']), '|', apply(dnOf, dnDe, ['en-GB']), '|', apply(dnOf, dnDe, ['de-1996']), '|', apply(dnOf, dnDe, ['en-ZY']));
+// CHECK-NEXT: Chinesisch (Vereinfacht, China) | Englisch (UK) | Deutsch (Neue deutsche Rechtschreibung) | undefined
+// The dialect name, and the fullwidth brackets.
+var dnEn = new OriginalDisplayNames('en', dnOptions('language', 'long', 'dialect'));
+var dnZh = new OriginalDisplayNames('zh', dnOptions('language', 'long', 'dialect'));
+print(apply(dnOf, dnEn, ['en-US']), '|', apply(dnOf, dnEn, ['sh']), '|', apply(dnOf, dnZh, ['en-CD']));
+// CHECK-NEXT: American English | Serbian (Latin) | 英语（刚果［金］）
+// The codes of the other types are canonicalized with the captured
+// functions.
+print(
+  apply(dnOf, new OriginalDisplayNames('en', dnOptions('region', 'long', 'dialect')), ['us']),
+  '|', apply(dnOf, new OriginalDisplayNames('en', dnOptions('script', 'long', 'dialect')), ['latn']),
+  '|', apply(dnOf, new OriginalDisplayNames('en', dnOptions('currency', 'long', 'dialect')), ['usd']),
+  '|', apply(dnOf, new OriginalDisplayNames('en', dnOptions('calendar', 'long', 'dialect')), ['GREGORY']),
+  '|', apply(dnOf, new OriginalDisplayNames('en', dnOptions('dateTimeField', 'short', 'dialect')), ['year']),
+);
+// CHECK-NEXT: United States | Latin | US Dollar | Gregorian Calendar | yr.
+print(stringify(apply(dnSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(
+  thrown(() => OriginalDisplayNames('en', dnOptions('region', 'long', 'dialect')), OriginalTypeError),
+  thrown(() => new OriginalDisplayNames('en'), OriginalTypeError),
+  thrown(() => new OriginalDisplayNames('en', null), OriginalTypeError),
+  thrown(() => new OriginalDisplayNames('en', dnOptions('x', 'long', 'dialect')), OriginalRangeError),
+  thrown(() => new OriginalDisplayNames('en', dnOptions(undefined, 'long', 'dialect')), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok ok
+var dnRegion = new OriginalDisplayNames('en', dnOptions('region', 'long', 'dialect'));
+print(
+  thrown(() => apply(dnOf, dnRegion, ['ZZZ']), OriginalRangeError),
+  thrown(() => apply(dnOf, dnEn, ['en-u-ca-gregory']), OriginalRangeError),
+  thrown(() => apply(dnOf, dnRegion, [aSymbol]), OriginalTypeError),
+  thrown(() => apply(dnOf, {}, ['US']), OriginalTypeError),
+  thrown(() => apply(dnResolvedOptions, {}, []), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok ok
+
+// Intl.DurationFormat (plan Review Focus 2), through the references
+// captured before the tampering: the constructor, resolvedOptions,
+// format, formatToParts and supportedLocalesOf use neither the replaced
+// Intl.NumberFormat, Intl.ListFormat and their prototype methods (replaced
+// above), nor the replaced BigInt, Math.abs and Array.prototype, and make
+// their results without consulting the accessors on Object.prototype and
+// Array.prototype. The DurationFormat options, which are also the fields
+// of a duration, and the fields of DurationFormat's records get accessors
+// only now. The options objects and durations below have every option and
+// field as an own property, since the draft reads both with Get.
+var dfUnits = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds', 'milliseconds', 'microseconds', 'nanoseconds'];
+var dfFields = ['fractionalDigits', 'display', 'unitOptions', 'digitalBase', 'numberFormatUnit', 'twoDigitHours', 'hourMinuteSeparator', 'minuteSecondSeparator', 'numberFormats', 'listFormat'];
+for (var k = 0; k < dfUnits.length; k++) {
+  define(ObjectPrototype, dfUnits[k], {__proto__: null, get: boom, set: boom, configurable: true});
+  define(ObjectPrototype, dfUnits[k] + 'Display', {__proto__: null, get: boom, set: boom, configurable: true});
+}
+for (var k = 0; k < dfFields.length; k++)
+  define(ObjectPrototype, dfFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
+/// An options object with every DurationFormat option: style and
+/// fractionalDigits as given, the numbering system nu, and the hours and
+/// milliseconds styles hours and milliseconds; the other units and every
+/// display undefined.
+function dfOptions(style, fractionalDigits, nu, hours, milliseconds) {
+  return {
+    localeMatcher: 'lookup', numberingSystem: nu, style: style,
+    years: undefined, yearsDisplay: undefined, months: undefined, monthsDisplay: undefined,
+    weeks: undefined, weeksDisplay: undefined, days: undefined, daysDisplay: undefined,
+    hours: hours, hoursDisplay: undefined, minutes: undefined, minutesDisplay: undefined,
+    seconds: undefined, secondsDisplay: undefined, milliseconds: milliseconds, millisecondsDisplay: undefined,
+    microseconds: undefined, microsecondsDisplay: undefined, nanoseconds: undefined, nanosecondsDisplay: undefined,
+    fractionalDigits: fractionalDigits,
+  };
+}
+/// A duration with every field: days, hours, minutes, seconds,
+/// milliseconds and nanoseconds as given, the others undefined.
+function dfDuration(days, hours, minutes, seconds, milliseconds, nanoseconds) {
+  return {
+    years: undefined, months: undefined, weeks: undefined, days: days, hours: hours, minutes: minutes,
+    seconds: seconds, milliseconds: milliseconds, microseconds: undefined, nanoseconds: nanoseconds,
+  };
+}
+var dfFr = new OriginalDurationFormat(['xx', 'fr'], dfOptions('digital', 3, undefined, undefined, undefined));
+print(stringify(apply(dfResolvedOptions, dfFr, [])));
+// CHECK-NEXT: {"locale":"fr","numberingSystem":"latn","style":"digital","years":"short","yearsDisplay":"auto","months":"short","monthsDisplay":"auto","weeks":"short","weeksDisplay":"auto","days":"short","daysDisplay":"auto","hours":"numeric","hoursDisplay":"always","minutes":"2-digit","minutesDisplay":"always","seconds":"2-digit","secondsDisplay":"always","milliseconds":"numeric","millisecondsDisplay":"auto","microseconds":"numeric","microsecondsDisplay":"auto","nanoseconds":"numeric","nanosecondsDisplay":"auto","fractionalDigits":3}
+print(esc(apply(dfFormat, dfFr, [dfDuration(2, 1, 2, 3, 456, 7)])));
+// CHECK-NEXT: 2\u202fj et 1:02:03,456
+print(unitPartsString(apply(dfFormatToParts, dfFr, [dfDuration(undefined, -1, undefined, -3, -5, undefined)])));
+// CHECK-NEXT: minusSign:-:hour|integer:1:hour|literal::|integer:00:minute|literal::|integer:03:second|decimal:,:second|fraction:005:second
+// The unit styles, with the list literals and the grouping; a fractional
+// unit folds into the one before it with exact BigInt arithmetic (Node's
+// inexact sum gives "4,503,599,627,370,498 sec").
+var dfEn = new OriginalDurationFormat('en', dfOptions('long', undefined, undefined, undefined, undefined));
+print(apply(dfFormat, dfEn, [dfDuration(1, 2, 3, 4, undefined, undefined)]), '|', unitPartsString(apply(dfFormatToParts, dfEn, [dfDuration(undefined, 1234, undefined, 5, undefined, undefined)])));
+// CHECK-NEXT: 1 day, 2 hours, 3 minutes, 4 seconds | integer:1:hour|group:,:hour|integer:234:hour|literal: :hour|unit:hours:hour|literal:, |integer:5:second|literal: :second|unit:seconds:second
+var dfFrac = new OriginalDurationFormat('en', dfOptions('short', undefined, undefined, undefined, 'numeric'));
+print(apply(dfFormat, dfFrac, [dfDuration(undefined, undefined, undefined, 1, 4503599627370497000, 1)]));
+// CHECK-NEXT: 4,503,599,627,370,498.024000001 sec
+// The numbering system, and ar's dual without a number part.
+print(apply(dfFormat, new OriginalDurationFormat('ar', dfOptions('long', undefined, 'arab', undefined, undefined)), [dfDuration(undefined, 2, 5, undefined, undefined, undefined)]));
+// CHECK-NEXT: ساعتان و٥ دقائق
+print(stringify(apply(dfSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(
+  thrown(() => OriginalDurationFormat('en'), OriginalTypeError),
+  thrown(() => new OriginalDurationFormat('en', null), OriginalTypeError),
+  thrown(() => new OriginalDurationFormat('en', dfOptions('x', undefined, undefined, undefined, undefined)), OriginalRangeError),
+  thrown(() => new OriginalDurationFormat('en', dfOptions('digital', undefined, undefined, undefined, 'long')), OriginalRangeError),
+  thrown(() => new OriginalDurationFormat('en', dfOptions('short', 10, undefined, undefined, undefined)), OriginalRangeError),
+);
+// CHECK-NEXT: ok ok ok ok ok
+print(
+  thrown(() => apply(dfFormat, dfEn, ['PT1H']), OriginalRangeError),
+  thrown(() => apply(dfFormat, dfEn, [1]), OriginalTypeError),
+  thrown(() => apply(dfFormat, dfEn, [dfDuration(undefined, undefined, undefined, undefined, undefined, undefined)]), OriginalTypeError),
+  thrown(() => apply(dfFormatToParts, dfEn, [dfDuration(undefined, 1.5, undefined, undefined, undefined, undefined)]), OriginalRangeError),
+  thrown(() => apply(dfFormat, dfEn, [dfDuration(1, -1, undefined, undefined, undefined, undefined)]), OriginalRangeError),
+  thrown(() => apply(dfFormat, dfEn, [dfDuration(undefined, aSymbol, undefined, undefined, undefined, undefined)]), OriginalTypeError),
+  thrown(() => apply(dfFormat, {}, [dfDuration(1, undefined, undefined, undefined, undefined, undefined)]), OriginalTypeError),
+  thrown(() => apply(dfResolvedOptions, {}, []), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok ok ok ok ok
+
+// Intl.Segmenter (plan Review Focus 2), through the references captured
+// before the tampering, last: the constructor, resolvedOptions, segment,
+// containing, the Segments objects' @@iterator, the iterators' next and
+// supportedLocalesOf use none of the replaced intrinsics (String.prototype
+// .slice, Math.trunc and Number.isFinite among them), and make the segment
+// data objects and iterator results without consulting the accessors on
+// Object.prototype. The Segmenter option and the fields of segment data
+// objects get accessors only now, and "value", the iterator results'
+// field, gets a setter too ("done" has one already). The options objects
+// below have every option as an own property.
+var sgFields = ['granularity', 'segment', 'index', 'input', 'isWordLike', 'value'];
+for (var k = 0; k < sgFields.length; k++)
+  define(ObjectPrototype, sgFields[k], {__proto__: null, get: boom, set: boom, configurable: true});
+var sgWord = new OriginalSegmenter(['xx', 'en'], {localeMatcher: 'lookup', granularity: 'word'});
+print(stringify(apply(sgResolvedOptions, sgWord, [])));
+// CHECK-NEXT: {"locale":"en","granularity":"word"}
+var sgSegments = apply(sgSegment, sgWord, ['Hi, w\ud800rld!']);
+// The prototypes' methods are captured from the first Segments object and
+// its iterator, then replaced: the plugin never calls them through the
+// prototypes.
+var SegmentsPrototype = getPrototypeOf(sgSegments);
+var sgContaining = SegmentsPrototype.containing;
+var sgIterate = SegmentsPrototype[symbolIterator];
+var sgIt = apply(sgIterate, sgSegments, []);
+var SegmentIteratorPrototype = getPrototypeOf(sgIt);
+var sgNext = SegmentIteratorPrototype.next;
+SegmentsPrototype.containing = boom;
+SegmentsPrototype[symbolIterator] = boom;
+SegmentIteratorPrototype.next = boom;
+getPrototypeOf(SegmentIteratorPrototype)[symbolIterator] = boom;
+print(stringify(apply(sgContaining, sgSegments, [6.7])), apply(sgContaining, sgSegments, [Infinity]), apply(sgContaining, sgSegments, [-1]));
+// CHECK-NEXT: {"segment":"rld","index":6,"input":"Hi, w\ud800rld!","isWordLike":true} undefined undefined
+/// The segments the iterator it gives from where it stands, each as
+/// stringify of the iterator result, through the captured next.
+function sgRest(it) {
+  var out = '';
+  for (;;) {
+    var r = apply(sgNext, it, []);
+    out += stringify(r);
+    if (r.done) return out;
+  }
+}
+print(sgRest(sgIt));
+// CHECK-NEXT: {"value":{"segment":"Hi","index":0,"input":"Hi, w\ud800rld!","isWordLike":true},"done":false}{"value":{"segment":",","index":2,"input":"Hi, w\ud800rld!","isWordLike":false},"done":false}{"value":{"segment":" ","index":3,"input":"Hi, w\ud800rld!","isWordLike":false},"done":false}{"value":{"segment":"w","index":4,"input":"Hi, w\ud800rld!","isWordLike":true},"done":false}{"value":{"segment":"\ud800","index":5,"input":"Hi, w\ud800rld!","isWordLike":false},"done":false}{"value":{"segment":"rld","index":6,"input":"Hi, w\ud800rld!","isWordLike":true},"done":false}{"value":{"segment":"!","index":9,"input":"Hi, w\ud800rld!","isWordLike":false},"done":false}{"done":true}
+// Grapheme and sentence segment data objects have no isWordLike.
+var sgSentence = new OriginalSegmenter('en', {localeMatcher: 'best fit', granularity: 'sentence'});
+print(sgRest(apply(sgIterate, apply(sgSegment, sgSentence, ['One. Two.']), [])));
+// CHECK-NEXT: {"value":{"segment":"One. ","index":0,"input":"One. Two."},"done":false}{"value":{"segment":"Two.","index":5,"input":"One. Two."},"done":false}{"done":true}
+var sgGrapheme = new OriginalSegmenter(undefined, undefined);
+print(stringify(apply(sgResolvedOptions, sgGrapheme, [])), stringify(apply(sgContaining, apply(sgSegment, sgGrapheme, ['ab']), [1])));
+// CHECK-NEXT: {"locale":"en-US","granularity":"grapheme"} {"segment":"b","index":1,"input":"ab"}
+print(stringify(apply(sgSupportedLocalesOf, null, [['de', 'xx', 'th-TH']])));
+// CHECK-NEXT: ["de","th-TH"]
+print(
+  thrown(() => OriginalSegmenter('en'), OriginalTypeError),
+  thrown(() => new OriginalSegmenter('en', null), OriginalTypeError),
+  thrown(() => new OriginalSegmenter('en', {localeMatcher: 'lookup', granularity: 'line'}), OriginalRangeError),
+  thrown(() => apply(sgSegment, sgWord, [aSymbol]), OriginalTypeError),
+  thrown(() => apply(sgContaining, sgSegments, [1n]), OriginalTypeError),
+  thrown(() => apply(sgNext, sgSegments, []), OriginalTypeError),
+  thrown(() => apply(sgContaining, sgIt, [0]), OriginalTypeError),
+  thrown(() => apply(sgResolvedOptions, {}, []), OriginalTypeError),
+);
+// CHECK-NEXT: ok ok ok ok ok ok ok ok

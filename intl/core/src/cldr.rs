@@ -8,7 +8,7 @@
 //!
 //! - `number-symbols.txt`: per locale and numbering system, the percent
 //!   sign, exponent symbol, infinity, NaN, approximately sign, percent
-//!   pattern and range pattern;
+//!   pattern, range pattern, currency separators and time separator;
 //! - `units.txt`: the unit patterns, by locale, width, unit and plural key,
 //!   each locale holding only what differs from its parents;
 //! - `currency-symbols.txt`: the currency symbols and narrow symbols, which
@@ -115,6 +115,9 @@ pub(crate) struct NumberSymbols {
     /// `currencyGroup`, the grouping separator of currency formats; empty
     /// where the locale has none of its own (only de-AT has one).
     pub currency_group: &'static str,
+    /// `timeSeparator`, between hours, minutes and seconds (`:`; da's
+    /// latn `.`).
+    pub time_separator: &'static str,
 }
 
 /// number-symbols.txt by locale.
@@ -125,10 +128,10 @@ fn parse_symbols(text: &'static str) -> SymbolsTable {
     let mut table = SymbolsTable::new();
     for line in body_lines(text) {
         let f: Vec<&'static str> = line.split('\t').collect();
-        let [locale, nu, percent_sign, exponential, infinity, nan, approximately_sign, percent_pattern, range_pattern, currency_decimal, currency_group] =
+        let [locale, nu, percent_sign, exponential, infinity, nan, approximately_sign, percent_pattern, range_pattern, currency_decimal, currency_group, time_separator] =
             f[..]
         else {
-            panic!("number-symbols.txt: not 11 fields: {line:?}");
+            panic!("number-symbols.txt: not 12 fields: {line:?}");
         };
         let rows = table.entry(locale).or_default();
         assert!(
@@ -146,6 +149,7 @@ fn parse_symbols(text: &'static str) -> SymbolsTable {
             range_pattern,
             currency_decimal,
             currency_group,
+            time_separator,
         });
     }
     assert!(table.contains_key("und"), "number-symbols.txt: no und");
@@ -180,6 +184,9 @@ pub(crate) const EXPLICIT_EXPONENTIAL: usize = 5;
 pub(crate) const EXPLICIT_INFINITY: usize = 6;
 pub(crate) const EXPLICIT_NAN: usize = 7;
 pub(crate) const EXPLICIT_APPROXIMATELY_SIGN: usize = 8;
+pub(crate) const EXPLICIT_TIME_SEPARATOR: usize = 9;
+/// The number of symbols of a symbols line of explicit-number-systems.txt.
+const EXPLICIT_SYMBOLS: usize = 10;
 
 /// The currency patterns of a currency line of explicit-number-systems.txt,
 /// in its order: standard, its alphaNextToNumber alternate, accounting
@@ -201,7 +208,7 @@ struct ExplicitLocale {
     /// The CLDR parent of the locale; None for und.
     parent: Option<&'static str>,
     /// The symbols (EXPLICIT_DECIMAL and the rest) by numbering system.
-    symbols: HashMap<&'static str, [&'static str; 9]>,
+    symbols: HashMap<&'static str, [&'static str; EXPLICIT_SYMBOLS]>,
     /// The percent pattern by numbering system.
     percent: HashMap<&'static str, &'static str>,
     /// The range pattern by numbering system.
@@ -240,9 +247,9 @@ fn parse_explicit(text: &'static str) -> ExplicitTable {
         let tag = current.expect("explicit-number-systems.txt: entry before any locale");
         let entry = table.get_mut(tag).unwrap();
         let fresh = match f[..] {
-            ["symbols", nu, a, b, c, d, e, g, h, i, j] => entry
+            ["symbols", nu, a, b, c, d, e, g, h, i, j, k] => entry
                 .symbols
-                .insert(nu, [a, b, c, d, e, g, h, i, j])
+                .insert(nu, [a, b, c, d, e, g, h, i, j, k])
                 .is_none(),
             ["percent", nu, pattern] => entry.percent.insert(nu, pattern).is_none(),
             ["range", nu, pattern] => entry.range.insert(nu, pattern).is_none(),

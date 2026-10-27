@@ -254,26 +254,6 @@ function IntlMVFromNumber(x) {
   return intlMV;
 }
 
-/// Whether v is an Object.
-function isObject(v) {
-  // 1. Return whether v is an Object: typeof gives "object" for a non-null
-  //    object and "function" for a callable one.
-  return (typeof v === 'object' && v !== null) || typeof v === 'function';
-}
-
-// ECMA-262 7.3.10 GetMethod ( V, P )
-function GetMethod(V, P) {
-  // 1. Let func be ? GetV(V, P).
-  var func = V[P];
-  // 2. If func is either undefined or null, return undefined.
-  if (func === undefined || func === null) return undefined;
-  // 3. If IsCallable(func) is false, throw a TypeError exception.
-  if (typeof func !== 'function')
-    throw new _TypeError('Property is not a function');
-  // 4. Return func.
-  return func;
-}
-
 // ECMA-262 7.1.1.1 OrdinaryToPrimitive ( O, hint ), with hint number.
 function OrdinaryToPrimitiveNumber(O) {
   // 1. If hint is string, then ... 2. Else,

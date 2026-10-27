@@ -100,7 +100,7 @@ fn currency_type(code: &str) -> Option<CurrencyType> {
 /// request is silent: a miss is an ordinary step of resolving a numbering
 /// system (en with arab, ar with bali) or a currency CLDR has no name for,
 /// which debug builds of ICU4X would otherwise report on stderr.
-fn load<M: DataMarker>(
+pub(crate) fn load<M: DataMarker>(
     provider: &impl DataProvider<M>,
     locale: &DataLocale,
     attributes: &str,
@@ -280,7 +280,7 @@ impl DecimalData {
 /// The cardinal plural categories of the language identifier of `locale`,
 /// from the plural rules that Intl.PluralRules and NumberFormat select
 /// with.
-fn plural_categories(locale: &str) -> Option<Vec<PluralCategory>> {
+pub(crate) fn plural_categories(locale: &str) -> Option<Vec<PluralCategory>> {
     let rules = crate::plurals::new_plural_rules(locale, false)?;
     Some(rules.rules().categories().collect())
 }
@@ -497,7 +497,10 @@ fn percent_patterns(pattern: &str, percent_sign: &str, plus: &Sign, minus: &Sign
 /// - 18 the range pattern in CLDR's form (`{0}–{1}`);
 /// - 19 and 20 the primary and secondary group sizes of percent patterns,
 ///   from the CLDR percent pattern (bn groups decimals 3 and 2, percents 3
-///   and 3); the minimum grouping is entry 11 for both.
+///   and 3); the minimum grouping is entry 11 for both;
+/// - 21 the time separator, CLDR's `timeSeparator`, which DurationFormat's
+///   digital style puts between hours, minutes and seconds (`:`; da's latn
+///   `.`, ug's arabext `٫`).
 ///
 /// The currency style's separators are currency_separators'.
 ///
@@ -536,6 +539,7 @@ pub fn symbols(locale: &str, nu: &str) -> Option<Vec<String>> {
         cldr::explicit_percent_pattern(id, nu),
     );
     let range_pattern = field(|r| r.range_pattern, cldr::explicit_range_pattern(id, nu));
+    let time_separator = field(|r| r.time_separator, symbol(cldr::EXPLICIT_TIME_SEPARATOR));
     let secondary = if g.secondary == 0 {
         g.primary
     } else {
@@ -570,6 +574,7 @@ pub fn symbols(locale: &str, nu: &str) -> Option<Vec<String>> {
         range_pattern.to_owned(),
         percent_primary.to_string(),
         percent_secondary.to_string(),
+        time_separator.to_owned(),
     ])
 }
 
@@ -730,7 +735,7 @@ fn addressing_operands(category: PluralCategory, exact: bool) -> PluralOperands 
 /// The six entries (zero, one, two, few, many, other) of plural data as
 /// `render` makes them, for a locale whose plural categories are
 /// `categories`: a category the locale lacks gets other's.
-fn by_category<'a, V: zerovec::ule::VarULE + ?Sized>(
+pub(crate) fn by_category<'a, V: zerovec::ule::VarULE + ?Sized>(
     data: &'a PluralElementsPackedULE<V>,
     categories: &[PluralCategory],
 ) -> Vec<&'a V> {
@@ -751,7 +756,7 @@ fn by_category<'a, V: zerovec::ule::VarULE + ?Sized>(
 /// The explicit 0 (`one` false) or 1 pattern of plural data, rendered;
 /// empty when it has none, and also when it is the same as the pattern of
 /// the category of 0 or 1, which then gives the same result.
-fn explicit<V: zerovec::ule::VarULE + ?Sized>(
+pub(crate) fn explicit<V: zerovec::ule::VarULE + ?Sized>(
     data: &PluralElementsPackedULE<V>,
     one: bool,
     render: impl Fn(&V) -> String,
@@ -1309,7 +1314,7 @@ fn select_currency_pattern(
 }
 
 /// A compact pattern of ICU4X in CLDR's form (`{0}K`).
-fn render_compact(pattern: &Pattern<SinglePlaceholder>) -> String {
+pub(crate) fn render_compact(pattern: &Pattern<SinglePlaceholder>) -> String {
     let mut out = String::new();
     for item in pattern.iter() {
         match item {
@@ -1379,6 +1384,39 @@ mod tests {
         v.expect("no data")
     }
 
+    /// Entry 21, the time separator: CLDR's per locale and numbering
+    /// system, and a non-empty string for every locale of locales.txt in
+    /// each numbering system number-symbols.txt has for it and its default
+    /// one (the plan's Review Focus 5).
+    #[test]
+    fn time_separator() {
+        fn sep(locale: &str, nu: &str) -> String {
+            list(symbols(locale, nu)).swap_remove(21)
+        }
+        assert_eq!(sep("da", "latn"), ".");
+        assert_eq!(sep("en", "latn"), ":");
+        assert_eq!(sep("fi", "latn"), ".");
+        assert_eq!(sep("ug", "arabext"), "٫");
+        assert!(!sep("ar", "arab").is_empty());
+        // A numbering system outside the locale's own: CLDR's explicit
+        // value along the chain (root's arabext "٫", no's arab "."), else
+        // the locale's latn one.
+        assert_eq!(sep("en", "arabext"), "٫");
+        assert_eq!(sep("nb", "arab"), ".");
+        assert_eq!(sep("da", "deva"), ".");
+        for locale in crate::locale::test_locales() {
+            let id = language_id(locale).unwrap();
+            let mut nus: Vec<String> = cldr::number_symbols(&id)
+                .iter()
+                .map(|r| r.nu.to_owned())
+                .collect();
+            nus.push(crate::info::default_numbering_system(locale).unwrap());
+            for nu in nus {
+                assert!(!sep(locale, &nu).is_empty(), "{locale} {nu}");
+            }
+        }
+    }
+
     #[test]
     fn symbols_en_de_ar() {
         assert_eq!(
@@ -1405,6 +1443,7 @@ mod tests {
                 "{0}–{1}",
                 "3",
                 "3",
+                ":",
             ]
         );
         let de = list(symbols("de", "latn"));
@@ -1502,7 +1541,7 @@ mod tests {
         assert_eq!(en[15], "{number}{percentSign}\u{61c}");
         assert_eq!(en[17], "\u{61c}{minusSign}{number}{percentSign}\u{61c}");
         assert_eq!(en[18], "{0}–{1}");
-        assert_eq!(en[19..], ["3", "3"]);
+        assert_eq!(en[19..], ["3", "3", ":"]);
         // de-u-nu-arab: "\u{61c}-١٬٢٣٤٫٥" and "٥٠٪\u{61c}", root's percent
         // pattern rather than de's "#,##0 %".
         let de = list(symbols("de", "arab"));
@@ -2260,7 +2299,7 @@ mod tests {
             let default = crate::info::default_numbering_system(locale).unwrap();
             for nu in [default.as_str(), "latn"] {
                 let s = symbols(locale, nu).unwrap_or_else(|| panic!("{locale} {nu}"));
-                assert_eq!(s.len(), 21, "{locale} {nu}");
+                assert_eq!(s.len(), 22, "{locale} {nu}");
                 for (i, x) in s.iter().enumerate() {
                     assert!(!x.is_empty(), "{locale} {nu} symbol {i}");
                 }

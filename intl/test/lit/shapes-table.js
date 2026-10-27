@@ -18,13 +18,19 @@ var TABLE = [
   // [holder, '@@toStringTag', 'toStringTag', value]
   // [holder, property, 'bound', name, length]: a bound function that a
   // getter returns, read as holder[property]
+  // A property '@@iterator' is the key Symbol.iterator.
   ['Intl', 'getCanonicalLocales', 'method', 'getCanonicalLocales', 1],
   ['Intl', 'supportedValuesOf', 'method', 'supportedValuesOf', 1],
   ['Intl', 'Collator', 'constructor', 'Collator', 0],
   ['Intl', 'DateTimeFormat', 'constructor', 'DateTimeFormat', 0],
+  ['Intl', 'DisplayNames', 'constructor', 'DisplayNames', 2],
+  ['Intl', 'DurationFormat', 'constructor', 'DurationFormat', 0],
+  ['Intl', 'ListFormat', 'constructor', 'ListFormat', 0],
   ['Intl', 'Locale', 'constructor', 'Locale', 1],
   ['Intl', 'NumberFormat', 'constructor', 'NumberFormat', 0],
   ['Intl', 'PluralRules', 'constructor', 'PluralRules', 0],
+  ['Intl', 'RelativeTimeFormat', 'constructor', 'RelativeTimeFormat', 0],
+  ['Intl', 'Segmenter', 'constructor', 'Segmenter', 0],
   ['Intl', '@@toStringTag', 'toStringTag', 'Intl'],
   ['Intl.Collator', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
   ['Intl.Collator.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
@@ -39,6 +45,20 @@ var TABLE = [
   ['Intl.DateTimeFormat.prototype', 'formatRangeToParts', 'method', 'formatRangeToParts', 2],
   ['Intl.DateTimeFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.DateTimeFormat'],
   ['new Intl.DateTimeFormat()', 'format', 'bound', '', 1],
+  ['Intl.DisplayNames', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.DisplayNames.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.DisplayNames.prototype', 'of', 'method', 'of', 1],
+  ['Intl.DisplayNames.prototype', '@@toStringTag', 'toStringTag', 'Intl.DisplayNames'],
+  ['Intl.DurationFormat', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.DurationFormat.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.DurationFormat.prototype', 'format', 'method', 'format', 1],
+  ['Intl.DurationFormat.prototype', 'formatToParts', 'method', 'formatToParts', 1],
+  ['Intl.DurationFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.DurationFormat'],
+  ['Intl.ListFormat', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.ListFormat.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.ListFormat.prototype', 'format', 'method', 'format', 1],
+  ['Intl.ListFormat.prototype', 'formatToParts', 'method', 'formatToParts', 1],
+  ['Intl.ListFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.ListFormat'],
   ['Intl.Locale.prototype', 'baseName', 'getter', 'get baseName'],
   ['Intl.Locale.prototype', 'calendar', 'getter', 'get calendar'],
   ['Intl.Locale.prototype', 'caseFirst', 'getter', 'get caseFirst'],
@@ -75,6 +95,21 @@ var TABLE = [
   ['Intl.PluralRules.prototype', 'select', 'method', 'select', 1],
   ['Intl.PluralRules.prototype', 'selectRange', 'method', 'selectRange', 2],
   ['Intl.PluralRules.prototype', '@@toStringTag', 'toStringTag', 'Intl.PluralRules'],
+  ['Intl.RelativeTimeFormat', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.RelativeTimeFormat.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.RelativeTimeFormat.prototype', 'format', 'method', 'format', 2],
+  ['Intl.RelativeTimeFormat.prototype', 'formatToParts', 'method', 'formatToParts', 2],
+  ['Intl.RelativeTimeFormat.prototype', '@@toStringTag', 'toStringTag', 'Intl.RelativeTimeFormat'],
+  ['Intl.Segmenter', 'supportedLocalesOf', 'method', 'supportedLocalesOf', 1],
+  ['Intl.Segmenter.prototype', 'resolvedOptions', 'method', 'resolvedOptions', 0],
+  ['Intl.Segmenter.prototype', 'segment', 'method', 'segment', 1],
+  ['Intl.Segmenter.prototype', '@@toStringTag', 'toStringTag', 'Intl.Segmenter'],
+  // %IntlSegmentsPrototype% and %IntlSegmentIteratorPrototype%, which no
+  // global property reaches, through a Segments object and its iterator.
+  ['Object.getPrototypeOf(new Intl.Segmenter().segment("a"))', 'containing', 'method', 'containing', 1],
+  ['Object.getPrototypeOf(new Intl.Segmenter().segment("a"))', '@@iterator', 'method', '[Symbol.iterator]', 0],
+  ['Object.getPrototypeOf(new Intl.Segmenter().segment("a")[Symbol.iterator]())', 'next', 'method', 'next', 0],
+  ['Object.getPrototypeOf(new Intl.Segmenter().segment("a")[Symbol.iterator]())', '@@toStringTag', 'toStringTag', 'Segmenter String Iterator'],
   ['String.prototype', 'localeCompare', 'method', 'localeCompare', 1],
   ['String.prototype', 'toLocaleLowerCase', 'method', 'toLocaleLowerCase', 0],
   ['String.prototype', 'toLocaleUpperCase', 'method', 'toLocaleUpperCase', 0],
@@ -109,7 +144,8 @@ function checkFunctionProperty(f, key, expected, problems) {
 function check(row) {
   var label = row[0] + '.' + row[1] + ': ';
   var holder = (0, eval)(row[0]);
-  var key = row[1] === '@@toStringTag' ? Symbol.toStringTag : row[1];
+  var key =
+    row[1] === '@@toStringTag' ? Symbol.toStringTag : row[1] === '@@iterator' ? Symbol.iterator : row[1];
   var d = row[2] === 'bound' ? {} : Object.getOwnPropertyDescriptor(holder, key);
   if (!d) return label + 'missing';
   var problems = [];
@@ -168,9 +204,14 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.supportedValuesOf: ok
 // CHECK-NEXT: Intl.Collator: ok
 // CHECK-NEXT: Intl.DateTimeFormat: ok
+// CHECK-NEXT: Intl.DisplayNames: ok
+// CHECK-NEXT: Intl.DurationFormat: ok
+// CHECK-NEXT: Intl.ListFormat: ok
 // CHECK-NEXT: Intl.Locale: ok
 // CHECK-NEXT: Intl.NumberFormat: ok
 // CHECK-NEXT: Intl.PluralRules: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat: ok
+// CHECK-NEXT: Intl.Segmenter: ok
 // CHECK-NEXT: Intl.@@toStringTag: ok
 // CHECK-NEXT: Intl.Collator.supportedLocalesOf: ok
 // CHECK-NEXT: Intl.Collator.prototype.resolvedOptions: ok
@@ -185,6 +226,20 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.DateTimeFormat.prototype.formatRangeToParts: ok
 // CHECK-NEXT: Intl.DateTimeFormat.prototype.@@toStringTag: ok
 // CHECK-NEXT: new Intl.DateTimeFormat().format: ok
+// CHECK-NEXT: Intl.DisplayNames.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.DisplayNames.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.DisplayNames.prototype.of: ok
+// CHECK-NEXT: Intl.DisplayNames.prototype.@@toStringTag: ok
+// CHECK-NEXT: Intl.DurationFormat.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.DurationFormat.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.DurationFormat.prototype.format: ok
+// CHECK-NEXT: Intl.DurationFormat.prototype.formatToParts: ok
+// CHECK-NEXT: Intl.DurationFormat.prototype.@@toStringTag: ok
+// CHECK-NEXT: Intl.ListFormat.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.ListFormat.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.ListFormat.prototype.format: ok
+// CHECK-NEXT: Intl.ListFormat.prototype.formatToParts: ok
+// CHECK-NEXT: Intl.ListFormat.prototype.@@toStringTag: ok
 // CHECK-NEXT: Intl.Locale.prototype.baseName: ok
 // CHECK-NEXT: Intl.Locale.prototype.calendar: ok
 // CHECK-NEXT: Intl.Locale.prototype.caseFirst: ok
@@ -221,6 +276,19 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // CHECK-NEXT: Intl.PluralRules.prototype.select: ok
 // CHECK-NEXT: Intl.PluralRules.prototype.selectRange: ok
 // CHECK-NEXT: Intl.PluralRules.prototype.@@toStringTag: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat.prototype.format: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat.prototype.formatToParts: ok
+// CHECK-NEXT: Intl.RelativeTimeFormat.prototype.@@toStringTag: ok
+// CHECK-NEXT: Intl.Segmenter.supportedLocalesOf: ok
+// CHECK-NEXT: Intl.Segmenter.prototype.resolvedOptions: ok
+// CHECK-NEXT: Intl.Segmenter.prototype.segment: ok
+// CHECK-NEXT: Intl.Segmenter.prototype.@@toStringTag: ok
+// CHECK-NEXT: Object.getPrototypeOf(new Intl.Segmenter().segment("a")).containing: ok
+// CHECK-NEXT: Object.getPrototypeOf(new Intl.Segmenter().segment("a")).@@iterator: ok
+// CHECK-NEXT: Object.getPrototypeOf(new Intl.Segmenter().segment("a")[Symbol.iterator]()).next: ok
+// CHECK-NEXT: Object.getPrototypeOf(new Intl.Segmenter().segment("a")[Symbol.iterator]()).@@toStringTag: ok
 // CHECK-NEXT: String.prototype.localeCompare: ok
 // CHECK-NEXT: String.prototype.toLocaleLowerCase: ok
 // CHECK-NEXT: String.prototype.toLocaleUpperCase: ok
@@ -235,7 +303,7 @@ for (var i = 0; i < TABLE.length; i++) print(check(TABLE[i]));
 // Intl and each prototype have exactly the table's properties, and a
 // prototype also its constructor.
 print(Reflect.ownKeys(Intl).map(String).join(','));
-// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,DateTimeFormat,Locale,NumberFormat,PluralRules,Symbol(Symbol.toStringTag)
+// CHECK-NEXT: getCanonicalLocales,supportedValuesOf,Collator,DateTimeFormat,DisplayNames,DurationFormat,ListFormat,Locale,NumberFormat,PluralRules,RelativeTimeFormat,Segmenter,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(Intl.Collator).map(String).join(','));
 // CHECK-NEXT: length,name,prototype,supportedLocalesOf
 print(Reflect.ownKeys(Intl.Collator.prototype).map(String).join(','));
@@ -248,6 +316,24 @@ print(Reflect.ownKeys(Intl.DateTimeFormat).map(String).join(','));
 print(Reflect.ownKeys(Intl.DateTimeFormat.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,resolvedOptions,format,formatRange,formatRangeToParts,formatToParts,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(new Intl.DateTimeFormat()).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.DisplayNames).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.DisplayNames.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,of,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.DisplayNames('en', {type: 'region'})).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.DurationFormat).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.DurationFormat.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,format,formatToParts,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.DurationFormat()).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.ListFormat).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.ListFormat.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,format,formatToParts,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.ListFormat()).length);
 // CHECK-NEXT: 0
 print(Reflect.ownKeys(Intl.Locale.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,baseName,calendar,caseFirst,collation,firstDayOfWeek,hourCycle,language,numberingSystem,numeric,region,script,variants,getCalendars,getCollations,getHourCycles,getNumberingSystems,getTextInfo,getTimeZones,getWeekInfo,maximize,minimize,toString,Symbol(Symbol.toStringTag)
@@ -263,3 +349,27 @@ print(Reflect.ownKeys(Intl.PluralRules.prototype).map(String).join(','));
 // CHECK-NEXT: constructor,resolvedOptions,select,selectRange,Symbol(Symbol.toStringTag)
 print(Reflect.ownKeys(new Intl.PluralRules()).length);
 // CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.RelativeTimeFormat).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.RelativeTimeFormat.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,format,formatToParts,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.RelativeTimeFormat()).length);
+// CHECK-NEXT: 0
+print(Reflect.ownKeys(Intl.Segmenter).map(String).join(','));
+// CHECK-NEXT: length,name,prototype,supportedLocalesOf
+print(Reflect.ownKeys(Intl.Segmenter.prototype).map(String).join(','));
+// CHECK-NEXT: constructor,resolvedOptions,segment,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(new Intl.Segmenter()).length);
+// CHECK-NEXT: 0
+// %IntlSegmentsPrototype% has no @@toStringTag and no constructor, and
+// %IntlSegmentIteratorPrototype% inherits @@iterator from
+// %Iterator.prototype%. A Segments object and an iterator have no own
+// properties either.
+var segmentsObject = new Intl.Segmenter().segment('a');
+var segmentIterator = segmentsObject[Symbol.iterator]();
+print(Reflect.ownKeys(Object.getPrototypeOf(segmentsObject)).map(String).join(','));
+// CHECK-NEXT: containing,Symbol(Symbol.iterator)
+print(Reflect.ownKeys(Object.getPrototypeOf(segmentIterator)).map(String).join(','));
+// CHECK-NEXT: next,Symbol(Symbol.toStringTag)
+print(Reflect.ownKeys(segmentsObject).length, Reflect.ownKeys(segmentIterator).length);
+// CHECK-NEXT: 0 0

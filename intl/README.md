@@ -18,10 +18,14 @@ Phase 0 was infrastructure, Phase 1 added `Intl.Locale`, Phase 2 added
 of Number, BigInt, Array and TypedArray, and Phase 4 added
 `Intl.DateTimeFormat`, with the time zone rules of IANA tzdb 2026e bundled
 in the library, and the ECMA-402 `toLocaleString`, `toLocaleDateString`
-and `toLocaleTimeString` of Date. `Intl` has `getCanonicalLocales`,
-`supportedValuesOf`, `Locale`, `Collator`, `NumberFormat`, `PluralRules`
-and `DateTimeFormat`. The other constructors arrive in later phases (see
-"Phasing" in the spec).
+and `toLocaleTimeString` of Date. Phase 5 added the five remaining
+constructors: `Intl.ListFormat`, `Intl.RelativeTimeFormat`,
+`Intl.DisplayNames`, `Intl.DurationFormat` and `Intl.Segmenter`. `Intl`
+has `getCanonicalLocales`, `supportedValuesOf`, `Locale`, `Collator`,
+`NumberFormat`, `PluralRules`, `DateTimeFormat`, `ListFormat`,
+`RelativeTimeFormat`, `DisplayNames`, `DurationFormat` and `Segmenter`.
+Later phases package it for the other platforms and delete Hermes's old
+`Intl` (see "Phasing" in the spec).
 
 ## Layout
 
@@ -42,9 +46,14 @@ and `DateTimeFormat`. The other constructors arrive in later phases (see
 | `core/src/tz.rs` | The time zone rules: a reader of the IANA tzdb's TZif data that the `jiff-tzdb` crate embeds, giving the UTC offset and daylight saving flag of a zone at any ECMAScript instant. |
 | `core/src/date_data.rs` | The parsers and lookups of the generated CLDR date files: a locale's date and time patterns for a calendar, and its flexible day periods. |
 | `core/src/datetime.rs` | The native half of `Intl.DateTimeFormat`: a formatter's ICU4X calendar, time zone and names, and for an instant the local time (ToLocalTime's record) and the text of the names its patterns use. |
-| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, the number data files `number-symbols.txt`, `units.txt`, `currency-symbols.txt`, `explicit-number-systems.txt` and `compact-currency.txt`, the date data files `date-patterns.txt` and `day-periods.txt`, `LICENSE` (the Unicode License of the CLDR-derived files), `update-cldr-lists.py` and its tests. |
+| `core/src/list.rs` | The native half of `Intl.ListFormat`: ICU4X's list formatter for a locale, type and style, and the literal text it puts around the elements of a list, chosen by the list's last element. |
+| `core/src/relativetime.rs` | The relative time patterns and names of a locale and style, from `icu_experimental`'s data. |
+| `core/src/displaynames.rs` | The display names of `Intl.DisplayNames`: single language, dialect, region, script, variant, currency, calendar and date-time field names, from `icu_experimental`'s data and `display-names.txt`, and the locale display patterns. |
+| `core/src/segmenter.rs` | The native half of `Intl.Segmenter`: ICU4X's grapheme, word (dictionary) and sentence segmenters, every boundary of a string with whether each word segment is word-like, FindBoundary, and the workarounds for three ICU4X 2.3 word segmentation bugs. |
+| `core/data/` | `locales.txt`, `currencies.txt`, `numbering-systems.txt`, `calendar-preferences.txt`, `hour-cycles.txt`, `time-zones-by-region.txt`, `extension-value-aliases.txt`, the number data files `number-symbols.txt`, `units.txt`, `currency-symbols.txt`, `explicit-number-systems.txt` and `compact-currency.txt`, the date data files `date-patterns.txt` and `day-periods.txt`, `display-names.txt` (the DisplayNames data ICU4X lacks), `LICENSE` (the Unicode License of the CLDR-derived files), `update-cldr-lists.py` and its tests. |
 | `js/` | The ECMA-402 code in JS, concatenated in file-name order and compiled to bytecode by this build's `hermesc`. `00-header.js` and `99-footer.js` wrap the rest in a function. |
 | `js/05-tags.js` | The Unicode locale grammar checks and the ECMA-402 abstract operations for locale objects. |
+| `js/06-iterators.js` | ECMA-262's iterator protocol (GetIterator, IteratorStepValue, and IteratorClose for a throw), which ListFormat's StringListFromIterable uses in place of `for-of`. |
 | `js/07-number.js` | Intl mathematical values, ToIntlMathematicalValue, and the exact rounding (FormatNumericToString, ToRawPrecision, ToRawFixed, ComputeExponent) that NumberFormat, PluralRules and later constructors share. |
 | `js/20-Locale.js` | `Intl.Locale`: the constructor, the getters, the information methods, `maximize` and `minimize`. |
 | `js/30-Collator.js` | `Intl.Collator`: the constructor, `supportedLocalesOf`, `resolvedOptions` and the `compare` getter. |
@@ -56,12 +65,21 @@ and `DateTimeFormat`. The other constructors arrive in later phases (see
 | `js/52-datetime-format.js` | Formatting: ToLocalTime, FormatDateTimePattern, PartitionDateTimePattern, PartitionDateTimeRangePattern, and FormatDateTime, FormatDateTimeToParts, FormatDateTimeRange and FormatDateTimeRangeToParts. |
 | `js/53-datetime-ranges.js` | The range patterns of each DateTime Format Record, from CLDR's `intervalFormats` and `intervalFormatFallback`. |
 | `js/54-datetime-names.js` | The CLDR name symbols a formatter asks native code for, and the flexible day periods. |
-| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase`, `toLocaleUpperCase`, the `toLocaleString` of Number, BigInt, Array and TypedArray, and the `toLocaleString`, `toLocaleDateString` and `toLocaleTimeString` of Date, with their default formatters, and TransformCase. Later phases add theirs. |
+| `js/60-ListFormat.js` | `Intl.ListFormat`: the constructor, `supportedLocalesOf`, `resolvedOptions`, `format` and `formatToParts`, with CreateListFormat and CreatePartsFromList, which DurationFormat also uses, and StringListFromIterable. |
+| `js/62-RelativeTimeFormat.js` | `Intl.RelativeTimeFormat`: the constructor, `supportedLocalesOf`, `resolvedOptions`, `format` and `formatToParts`, and the cache of the native relative time data. |
+| `js/64-DisplayNames.js` | `Intl.DisplayNames`: the constructor, `supportedLocalesOf`, `resolvedOptions` and `of`, with the composition of language names by UTS 35's algorithm. |
+| `js/66-DurationFormat.js` | `Intl.DurationFormat`: the constructor, `supportedLocalesOf`, `resolvedOptions`, `format` and `formatToParts`, and the operations from ToIntegerIfIntegral to PartitionDurationFormatPattern, with exact BigInt arithmetic. |
+| `js/68-Segmenter.js` | `Intl.Segmenter`: the constructor, `supportedLocalesOf`, `resolvedOptions` and `segment`, the Segments objects with `containing` and `[Symbol.iterator]`, and the Segment Iterators. |
+| `js/80-builtins.js` | The overrides of `localeCompare`, `toLocaleLowerCase`, `toLocaleUpperCase`, the `toLocaleString` of Number, BigInt, Array and TypedArray, and the `toLocaleString`, `toLocaleDateString` and `toLocaleTimeString` of Date, with their default formatters, and TransformCase. |
 | `jsi/` | C++: the entry point (`Plugin.cpp`), the embedded bytecode, the native helpers JS calls, and default detection (`Defaults.cpp`). |
 | `jsi/CollatorHelpers.cpp` | The collator helpers and `CollatorState`, the native state that owns the Rust collator. |
 | `jsi/PluralRulesHelpers.cpp` | The plural rules helpers and `PluralRulesState`, the native state that owns the Rust plural rules. |
 | `jsi/NumberHelpers.cpp` | The number data helpers (`numberSymbols`, `currencyPatterns`, `compactCurrencyPatterns`, `compactPatterns`, `unitPatterns`, `currencyDigits`). |
 | `jsi/DateTimeFormatHelpers.cpp` | The date helpers (`dateTimePatterns`, `dayPeriods`, `canonicalizeTimeZone`, `dateTimeFormatInit`, `dateTimeFormatLocalTime`) and `DateTimeFormatState`, the native state that owns a formatter's Rust calendar, time zone and names. |
+| `jsi/ListFormatHelpers.cpp` | The list helpers (`listFormatInit`, `listFormatLiterals`) and `ListFormatState`, the native state that owns a formatter's Rust list formatter. |
+| `jsi/RelativeTimeFormatHelpers.cpp` | The `relativeTimePatterns` helper. |
+| `jsi/DisplayNamesHelpers.cpp` | The display name helpers (`displayName`, `localeDisplayPatterns`). |
+| `jsi/SegmenterHelpers.cpp` | The segmentation helpers (`segmenterInit`, `segmentsInit`, `segmentsFindBoundary`, `segmentsIsWordLike`), `SegmenterState`, which owns a Segmenter's Rust segmenter, and `SegmentsState`, which owns the boundaries of a Segments object's string. |
 | `jsi/StringHelpers.cpp` | The `caseMap` helper. |
 | `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation, and `test/lit/Inputs/` holds files the tests use, such as `datetime-locales.js`: the 40 locales and the `formatMatcher: "basic"` check that `datetime-format-locales.js` and its `-2`, `-3` and `-4` parts share, a quarter of the locales each, so that lit runs them in parallel, and `datetime-fields.js`: the check that best fit keeps every requested field, which `datetime-format-fields-1.js` to `-10.js` run, one locale each. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
@@ -308,10 +326,10 @@ Internal errors are C++ exceptions; Hermes turns them into an `Error`.
 `core/data/time-zones-by-region.txt`, `core/data/extension-value-aliases.txt`,
 `core/data/number-symbols.txt`, `core/data/units.txt`,
 `core/data/currency-symbols.txt`, `core/data/explicit-number-systems.txt`,
-`core/data/compact-currency.txt`, `core/data/date-patterns.txt` and
-`core/data/day-periods.txt` come from CLDR. When ICU4X is upgraded,
-regenerate them from the CLDR release that ICU4X version uses, and commit the
-result:
+`core/data/compact-currency.txt`, `core/data/date-patterns.txt`,
+`core/data/day-periods.txt` and `core/data/display-names.txt` come from CLDR.
+When ICU4X is upgraded, regenerate them from the CLDR release that ICU4X
+version uses, and commit the result:
 
 ```
 python3 intl/core/data/update-cldr-lists.py release-48-2
@@ -323,11 +341,14 @@ generator downloads version 48.2.0 for the tag `release-48-2` from the npm
 registry), whose locale data is already resolved. `number-symbols.txt` has one
 tab-separated line per locale and numbering system: `<locale> <nu>
 <percentSign> <exponential> <infinity> <nan> <approximatelySign>
-<percentPattern> <rangePattern> <currencyDecimal> <currencyGroup>`, the last
-two empty where the locale has no separators of its own for currency formats
-(de-AT's `currencyGroup` ".", fr-CH's `currencyDecimal` "."), which the
-currency style uses. `units.txt` has a string table (`strings <count>`, then
-one pattern per line), then for each locale a `locale <tag> <parent>` line and
+<percentPattern> <rangePattern> <currencyDecimal> <currencyGroup>
+<timeSeparator>`; the currency separators are empty where the locale has no
+separators of its own for currency formats (de-AT's `currencyGroup` ".",
+fr-CH's `currencyDecimal` "."), which the currency style uses, and
+`timeSeparator` is what DurationFormat's digital style puts between hours,
+minutes and seconds (":"; "." in da's latn, "٫" in ug's arabext).
+`units.txt` has a string table (`strings <count>`, then one pattern per line),
+then for each locale a `locale <tag> <parent>` line and
 the entries `<width> <unit> <key>=<index>...` that differ from its parent chain
 (`<unit>` is `-` for the width's compound pattern). `currency-symbols.txt` (35
 KB) is tab-separated: for each locale a `locale <tag> <parent>` line, with the
@@ -366,11 +387,11 @@ explicit values the XML has for numbering systems outside a locale's default
 and other numbering systems, which cldr-json and ICU4X leave out. For each
 locale of the chains it has a `locale <tag> <parent>` line (the CLDR parent),
 then tab-separated lines `symbols <nu> <decimal> <group> <minusSign> <plusSign>
-<percentSign> <exponential> <infinity> <nan> <approximatelySign>`, `percent
-<nu> <pattern>`, `range <nu> <pattern>` and `currency <nu> <standard>
-<standardAlpha> <accounting> <accountingAlpha>`, with an empty field for a
-value the locale does not have; `=standard` is an accounting pattern that
-aliases to the standard one. Values marked as inherited (`↑↑↑`) or of draft level unconfirmed or
+<percentSign> <exponential> <infinity> <nan> <approximatelySign>
+<timeSeparator>`, `percent <nu> <pattern>`, `range <nu> <pattern>` and
+`currency <nu> <standard> <standardAlpha> <accounting> <accountingAlpha>`, with
+an empty field for a value the locale does not have; `=standard` is an
+accounting pattern that aliases to the standard one. Values marked as inherited (`↑↑↑`) or of draft level unconfirmed or
 provisional, which cldr-json and ICU leave out, are skipped. Root has such data
 for arab (symbols, percent and currency patterns) and arabext (symbols) in CLDR
 48.2, and so do many locales (fr's arab plus sign, cv's NaN for every numbering
@@ -472,6 +493,37 @@ it, by truncating the tag until a rule set has it, else `und` (`zh-Hant` and
 chain. A period CLDR has no names for (`lij`, `scn`) has no line, and its
 names read as `""`; the generator fails on a period named in some widths only,
 or not named where the parent chain names it.
+
+`display-names.txt` (252 KB) holds the DisplayNames data that ICU4X does not
+have, from the JSON package `cldr-localenames-full` (at the same npm version)
+and `cldr-dates-full`. For each locale it has a `locale <tag> <parent>` line,
+with the same parents as `units.txt`, then `<key>\t<value>` lines for the
+entries that differ from the parent chain's; a key is read from the nearest
+locale of the chain that has it, and `und` has every key root defines. The
+keys are `ca.<calendar>`, the calendar names
+(`localeDisplayNames.json` `types.calendar`) of the 16 calendars of
+`core/src/supported.rs`, by BCP 47 id (CLDR's `gregorian` is `gregory`,
+`ethiopic-amete-alem` `ethioaa`; CLDR's `islamic` and `islamic-rgsa` are left
+out, and root has none); `f.<code>.<style>`, the names of the date-time
+fields of ECMA-402's 12 codes (`dateFields.json` `displayName` of the field,
+`<field>-short` and `<field>-narrow` for the styles `long`, `short` and
+`narrow`; `weekOfYear` is CLDR's `week`, `dayPeriod` `dayperiod`,
+`timeZoneName` `zone`; `displayName-alt-variant` is left out); `lp` and `ls`,
+`localeDisplayPattern`'s `localePattern` (`{0} ({1})`) and `localeSeparator`
+(`{0}, {1}`), which must have `{0}` and `{1}`; and `eq.<kind>.<style>.<code>`
+with an empty value for each name in `languages.json`, `territories.json`,
+`scripts.json` and `variants.json` that equals its code (en's `US-alt-short`
+`US`, `Thai`, `fon`), which ICU4X's data leaves out: `<kind>` is `language`,
+`dialect` for a language key with a `-`, `region`, `script` or `variant`,
+`<style>` is `long`, or `short` for an `-alt-short` entry, and `<code>` is
+CLDR's key: variants are uppercase (`PINYIN`), so a reader uppercases a
+variant subtag before it looks one up. An `eq` entry applies only where ICU4X has no name for the code,
+so a locale may inherit one for a code it has its own name for (`nn`'s `tiv`
+"tivi" under `no`'s "tiv", `hi-Latn`'s short `US` "America" under `en-IN`'s
+"US"): ICU4X has that name, and the entry is never used. The generator fails
+unless `und` has `lp`, `ls` and all 36 field names and `en` names every
+calendar, and unless reading every locale back gives its CLDR entries, with
+only that exception.
 
 `calendar-preferences.txt`, `hour-cycles.txt` and `time-zones-by-region.txt`
 feed the `Intl.Locale` information methods and are read by

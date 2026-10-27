@@ -55,7 +55,7 @@ pub(crate) const CALENDARS: &[&str] = &[
 /// canonical form or neither, so each alias whose canonical form is in
 /// CALENDARS is listed too; Intl.supportedValuesOf drops the aliases again
 /// (ECMA-402 8.3.2 step 2.b). locale.rs canonicalizes them the same way.
-const CALENDAR_ALIASES: &[(&str, &str)] = &[
+pub(crate) const CALENDAR_ALIASES: &[(&str, &str)] = &[
     ("ethiopic-amete-alem", "ethioaa"),
     ("islamicc", "islamic-civil"),
 ];

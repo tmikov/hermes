@@ -434,6 +434,122 @@ TEST(NativeHelpersTest, PluralHelpersRejectMisuse) {
       "Intl internal error");
 }
 
+TEST(NativeHelpersTest, ListFormatStateFreedWithRuntime) {
+  // The runtime's destruction frees the ListFormatState; under ASan,
+  // LeakSanitizer fails the test binary if it does not.
+  auto rt = makeRuntimeWithPluginHelpers();
+  EXPECT_TRUE(eval(
+                  *rt,
+                  "var l = {};"
+                  "native.listFormatInit(l, 'es', 'conjunction', 'long') "
+                  "=== undefined")
+                  .getBool());
+  EXPECT_EQ(
+      eval(*rt, "native.listFormatLiterals(l, true, 'Ibiza').join('|')")
+          .getString(*rt)
+          .utf8(*rt),
+      "| e |");
+  rt.reset();
+}
+
+TEST(NativeHelpersTest, ListFormatHelpersRejectMisuse) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  expectJSError(
+      [&] { eval(*rt, "native.listFormatLiterals({}, true, 'a')"); },
+      "Intl internal error");
+  // An object with native state of another kind.
+  jsi::Object other(*rt);
+  other.setNativeState(*rt, std::make_shared<OtherState>());
+  rt->global().setProperty(*rt, "other", other);
+  expectJSError(
+      [&] { eval(*rt, "native.listFormatLiterals(other, false, 'a')"); },
+      "Intl internal error");
+  eval(*rt, "var l = {}; native.listFormatInit(l, 'en', 'unit', 'short');");
+  expectJSError(
+      [&] { eval(*rt, "native.listFormatInit(l, 'en', 'unit', 'short')"); },
+      "Intl internal error");
+  expectJSError(
+      [&] { eval(*rt, "native.listFormatInit({}, 'en', 'and', 'long')"); },
+      "Intl internal error");
+  expectJSError(
+      [&] {
+        eval(*rt, "native.listFormatInit({}, 'en', 'conjunction', 'wide')");
+      },
+      "Intl internal error");
+  expectJSError(
+      [&] {
+        eval(*rt, "native.listFormatInit({}, 'en_US', 'conjunction', 'long')");
+      },
+      "Intl internal error");
+}
+
+TEST(NativeHelpersTest, SegmenterStatesFreedWithRuntime) {
+  // The runtime's destruction frees the SegmenterState and both
+  // SegmentsStates; under ASan, LeakSanitizer fails the test binary if it
+  // does not.
+  auto rt = makeRuntimeWithPluginHelpers();
+  EXPECT_TRUE(eval(
+                  *rt,
+                  "var s = {}, a = {}, b = {};"
+                  "native.segmenterInit(s, 'en', 'word') === undefined &&"
+                  "native.segmentsInit(a, s, 'Hello world') === undefined &&"
+                  "native.segmentsInit(b, s, 'a\\ud800b') === undefined")
+                  .getBool());
+  EXPECT_EQ(
+      eval(*rt, "native.segmentsFindBoundary(a, 7, false)").getNumber(), 6);
+  EXPECT_EQ(
+      eval(*rt, "native.segmentsFindBoundary(b, 1, true)").getNumber(), 2);
+  EXPECT_TRUE(eval(*rt, "native.segmentsIsWordLike(a, 6)").getBool());
+  EXPECT_FALSE(eval(*rt, "native.segmentsIsWordLike(b, 1)").getBool());
+  rt.reset();
+}
+
+TEST(NativeHelpersTest, SegmenterHelpersRejectMisuse) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  // An object with native state of another kind.
+  jsi::Object other(*rt);
+  other.setNativeState(*rt, std::make_shared<OtherState>());
+  rt->global().setProperty(*rt, "other", other);
+  eval(
+      *rt,
+      "var s = {}; native.segmenterInit(s, 'en', 'word');"
+      "var g = {}; native.segmenterInit(g, 'en', 'grapheme');"
+      "var a = {}; native.segmentsInit(a, s, 'Hello world');"
+      "var ga = {}; native.segmentsInit(ga, g, 'ab');");
+  for (const char *bad : {
+           // Objects without their state.
+           "native.segmentsInit({}, {}, 'a')",
+           "native.segmentsInit({}, other, 'a')",
+           "native.segmentsInit({}, a, 'a')",
+           "native.segmentsFindBoundary({}, 0, true)",
+           "native.segmentsFindBoundary(other, 0, true)",
+           "native.segmentsFindBoundary(s, 0, true)",
+           "native.segmentsIsWordLike({}, 0)",
+           "native.segmentsIsWordLike(other, 0)",
+           "native.segmentsIsWordLike(s, 0)",
+           // Objects that already have state.
+           "native.segmenterInit(s, 'en', 'word')",
+           "native.segmenterInit(other, 'en', 'word')",
+           "native.segmentsInit(a, s, 'a')",
+           "native.segmentsInit(other, s, 'a')",
+           "native.segmentsInit(s, s, 'a')",
+           // Values JS never sends.
+           "native.segmenterInit({}, 'en', 'line')",
+           "native.segmenterInit({}, 'en_US', 'word')",
+           "native.segmentsFindBoundary(a, 11, false)",
+           "native.segmentsFindBoundary(a, -1, true)",
+           "native.segmentsIsWordLike(a, 1)",
+           "native.segmentsIsWordLike(a, 11)",
+           "native.segmentsIsWordLike(ga, 0)",
+       })
+    expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
+  // segmentsInit on the empty string succeeds, and has no index.
+  eval(*rt, "var e = {}; native.segmentsInit(e, s, '');");
+  expectJSError(
+      [&] { eval(*rt, "native.segmentsFindBoundary(e, 0, false)"); },
+      "Intl internal error");
+}
+
 TEST(NativeHelpersTest, DateTimeFormatStateFreedWithRuntime) {
   // The runtime's destruction frees the DateTimeFormatState; under ASan,
   // LeakSanitizer fails the test binary if it does not.
@@ -505,7 +621,8 @@ TEST(NativeHelpersTest, NumberHelpers) {
   auto str = [&](const char *src) {
     return eval(*rt, src).getString(*rt).utf8(*rt);
   };
-  EXPECT_EQ(str("String(native.numberSymbols('en', 'latn').length)"), "21");
+  EXPECT_EQ(str("String(native.numberSymbols('en', 'latn').length)"), "22");
+  EXPECT_EQ(str("native.numberSymbols('da', 'latn')[21]"), ".");
   EXPECT_EQ(
       str("native.currencySeparators('pt-PT', 'latn', 'PTE').join(' ')"),
       "$ ,");
@@ -556,6 +673,59 @@ TEST(NativeHelpersTest, NumberHelpers) {
         "native.unitPatterns('en', 'furlong', 'long')",
         "native.unitPatterns('en', 'meter', 'Long')",
         "native.currencyDigits('usd')"})
+    expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
+}
+
+TEST(NativeHelpersTest, RelativeTimeFormatHelpers) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  auto str = [&](const char *src) {
+    return eval(*rt, src).getString(*rt).utf8(*rt);
+  };
+  // en long second: the six future patterns (zero, two, few and many get
+  // other's), the six past ones, and the one relative name, "now".
+  EXPECT_EQ(
+      str("JSON.stringify(native.relativeTimePatterns('en', 'long')"
+          ".slice(0, 15))"),
+      "[\"in {0} seconds\",\"in {0} second\",\"in {0} seconds\","
+      "\"in {0} seconds\",\"in {0} seconds\",\"in {0} seconds\","
+      "\"{0} seconds ago\",\"{0} second ago\",\"{0} seconds ago\","
+      "\"{0} seconds ago\",\"{0} seconds ago\",\"{0} seconds ago\","
+      "\"1\",\"0\",\"now\"]");
+  for (const char *bad :
+       {"native.relativeTimePatterns('en', 'wide')",
+        "native.relativeTimePatterns('en_US', 'long')"})
+    expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
+}
+
+TEST(NativeHelpersTest, DisplayNamesHelpers) {
+  auto rt = makeRuntimeWithPluginHelpers();
+  auto str = [&](const char *src) {
+    return eval(*rt, src).getString(*rt).utf8(*rt);
+  };
+  EXPECT_EQ(
+      str("native.displayName('en', 'region', 'US', 'long')"), "United States");
+  // From the code-equal list.
+  EXPECT_EQ(str("native.displayName('en', 'region', 'US', 'short')"), "US");
+  EXPECT_EQ(
+      str("native.displayName('en', 'dialect', 'en-US', 'short')"),
+      "US English");
+  EXPECT_EQ(
+      str("native.displayName('de', 'dateTimeField', 'era', 'narrow')"), "E");
+  // No name is undefined, for a code that is not of its kind too.
+  EXPECT_EQ(
+      str("String(native.displayName('und', 'currency', 'USD', 'long'))"),
+      "undefined");
+  EXPECT_EQ(
+      str("String(native.displayName('en', 'region', 'ZZZZ', 'long'))"),
+      "undefined");
+  EXPECT_EQ(
+      str("native.localeDisplayPatterns('en').join('|')"),
+      "{0} ({1})|{0}, {1}");
+  for (const char *bad :
+       {"native.displayName('en', 'lang', 'en', 'long')",
+        "native.displayName('en', 'region', 'US', 'wide')",
+        "native.displayName('en_US', 'region', 'US', 'long')",
+        "native.localeDisplayPatterns('en_US')"})
     expectJSError([&] { eval(*rt, bad); }, "Intl internal error");
 }
 

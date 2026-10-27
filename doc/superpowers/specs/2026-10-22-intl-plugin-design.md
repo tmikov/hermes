@@ -508,12 +508,26 @@ Concatenated and compiled to bytecode, as the extensions are:
   `{__proto__: null, availableLocales, relevantExtensionKeys,
   resolutionOptionDescriptors}`, and returns the resolved options, the
   resolved locale and the resolution options;
+- `06-iterators.js`: ECMA-262's iterator protocol, which ListFormat's
+  StringListFromIterable uses, because `for-of` consults user-modifiable
+  state. GetIterator (sync) gets the method through the captured
+  `Symbol.iterator`, requires it to be callable and its result to be an
+  Object, and reads `next` once. IteratorStepValue calls `next`, requires
+  an Object, and reads `done` and then `value`; none of these errors
+  closes the iterator. IteratorCloseOnThrow reads `return` and calls it
+  unless it is undefined or null, ignores any error from either step and
+  the result, and throws the original error. `01-intrinsics.js` captures
+  `Symbol.iterator` and %Iterator.prototype% (the prototype of the
+  prototype of `[][Symbol.iterator]()`), which
+  %IntlSegmentIteratorPrototype% inherits from;
 - `07-number.js`: Intl mathematical values, ToIntlMathematicalValue,
   FormatNumericToString with ToRawPrecision and ToRawFixed, and
   ComputeExponent, which NumberFormat, PluralRules and the later phases
   share (see "Number formatting");
 - one file per constructor (`20-Locale.js`, `30-Collator.js`,
-  `40-NumberFormat.js`, `45-PluralRules.js`, `50-DateTimeFormat.js`).
+  `40-NumberFormat.js`, `45-PluralRules.js`, `50-DateTimeFormat.js`,
+  `60-ListFormat.js`, `62-RelativeTimeFormat.js`, `64-DisplayNames.js`,
+  `66-DurationFormat.js`, `68-Segmenter.js`).
   `41-number-patterns.js` holds the rest of NumberFormat:
   PartitionNumberPattern and the operations it uses, the range operations,
   the digits of the numbering systems, grouping, and the caches of the
@@ -566,6 +580,18 @@ and then uses it.
   that object. Phase 0 includes a test that Hermes supports this.
 - Brand checks are `#field in obj`.
 
+The five constructors of Phase 5, `ListFormat`, `RelativeTimeFormat`,
+`DisplayNames`, `DurationFormat` and `Segmenter`, require `new` and have
+no legacy behavior. Each has `length` 0, except `DisplayNames`, which has
+2 (`Intl.DisplayNames ( locales, options )`). Their methods are plain
+methods; none has a getter that returns a bound function. As the draft's
+ResolveOptions calls say, ResolveOptions converts their options with
+CoerceOptionsToObject for RelativeTimeFormat and with GetOptionsObject for
+the other four; DisplayNames also passes `require-options`, so `undefined`
+options throw a `TypeError` first. Only
+RelativeTimeFormat and DurationFormat have a relevant extension key,
+`nu`, with NumberFormat's `[[LocaleData]]`.
+
 **Documented deviation.** For a plain function called with `new`, Hermes
 creates `this` before the constructor runs (`createThisForConstruct_RJS`,
 `lib/VM/Callable.cpp`). When `new.target.prototype` is not an object, it
@@ -574,7 +600,7 @@ intrinsic prototype (for example `%Intl.NumberFormat.prototype%`). Only
 subclassing with a non-object `prototype` can observe this. It can be fixed
 later with a Hermes primitive that lets a JS function create its own `this`.
 This applies to `Intl.Collator` as well, and `intl/test/lit/collator-objects.js`
-pins it.
+pins it; so does the `-objects.js` test of each Phase 5 constructor.
 
 ### Legacy constructor behavior
 
@@ -655,6 +681,28 @@ of the CLDR symbols the formatter's patterns use, such as `MMMM` or `zzzz`
 (see "Date and time formatting"). The slots are attached after that, so a
 constructor that throws leaves neither. `native.dateTimeFormatLocalTime(obj,
 epochMs)` gives the local time of an instant and the text of those names.
+
+Phase 5 adds three native states:
+
+- `Intl.ListFormat`'s constructor ends with `native.listFormatInit(lf,
+  languageId, type, style)`, which attaches a `ListFormatState`
+  (`ListFormatHelpers.cpp`) that owns a `HiListFormat`: ICU4X's
+  `ListFormatter` for the type and style (see "Data", "ListFormat");
+- `Intl.Segmenter`'s constructor ends with `native.segmenterInit(segmenter,
+  languageId, granularity)`, which attaches a `SegmenterState` that owns a
+  `HiSegmenter`, ICU4X's segmenter for the granularity;
+- a Segments object gets a `SegmentsState` (`SegmenterHelpers.cpp`, owning
+  a `HiSegments`) from `native.segmentsInit(segments, segmenter, string)`
+  on the first call of its `containing`, or of `next` on one of its
+  iterators, that gets past the draft's early returns: every boundary of
+  its string, computed at once (see "Data", "Segmenter"). An iterator
+  keeps its Segments object in a private field and reads that object's
+  state, so the state lives as long as either.
+
+In each, the slots are attached before the state. A helper given an
+object without its state, or one that already has state, throws an
+internal error. `Intl.RelativeTimeFormat`, `Intl.DisplayNames` and
+`Intl.DurationFormat` attach no native state.
 
 ### Resistance to tampering
 
@@ -740,6 +788,27 @@ either:
   and default fields to CreateDateTimeFormat. Any other call creates a
   DateTimeFormat through the internal creation function, which performs
   every observable step of the constructor.
+
+The constructors of Phase 5 cooperate through four internal functions,
+which the public constructors and methods also use:
+`CreateListFormat(locales, options)` and `CreatePartsFromList(listFormat,
+list)` (`60-ListFormat.js`), `CreatePluralRules(locales, options)`
+(`45-PluralRules.js` splits its constructor into
+`initializePluralRules(pluralRules, locales, options)` and this function,
+as `40-NumberFormat.js` does) and `CreateNumberFormat`. RelativeTimeFormat
+makes its `[[NumberFormat]]` and `[[PluralRules]]` with them, and
+DurationFormat its NumberFormats and its ListFormat, from null-prototype
+option records, so neither ever reads `Intl.ListFormat`,
+`Intl.NumberFormat`, `Intl.PluralRules` or their prototypes. They cache
+in the same way, and nothing they cache is observable:
+
+- RelativeTimeFormat's parsed `relativeTimePatterns` record, per language
+  identifier and style, and DisplayNames's parsed `localeDisplayPatterns`,
+  per language identifier, are each cached in a null-prototype object, 64
+  entries per kind, emptied when full;
+- each DurationFormat keeps the internal NumberFormats it makes, keyed by
+  the options that made them, and its one ListFormat, each made on first
+  use.
 
 ### Locale matching
 
@@ -952,15 +1021,22 @@ for the same arguments.
 
 - One crate depending on `icu` 2.x, `icu_plurals` and `icu_decimal` with
   their `unstable` feature (plural ranges, exact plural operands, compact
-  decimal data), `icu_experimental` (currency data now; relative time and
-  duration later), `fixed_decimal`, `writeable` (which writes ICU4X's
-  date names), and `jiff-tzdb` for the time zone rules (see "Time zones"
-  under Data).
+  decimal data), `icu_experimental` (currency, relative time and display
+  name data), `fixed_decimal`, `writeable` (which writes ICU4X's
+  date names and list literals), `potential_utf` (the key type of
+  `icu_experimental`'s dialect names), and `jiff-tzdb` for the time zone
+  rules (see "Time zones" under Data). `icu`'s list formatter, segmenters
+  and Unicode properties serve ListFormat and Segmenter.
 - It fills the ICU4X gaps found during research that need data or
   calendar arithmetic: UTC offsets at an instant, from its own reader of
   the bundled tzdb (`tz.rs`); the CLDR date patterns and flexible day
   periods ICU4X 2.3 lacks (`date_data.rs`); and, for an instant, the
-  calendar fields and names DateTimeFormat shows (`datetime.rs`).
+  calendar fields and names DateTimeFormat shows (`datetime.rs`). Phase 5
+  adds `list.rs` (the literal text of ICU4X's list formatter),
+  `relativetime.rs` (relative time patterns), `displaynames.rs` (single
+  display names, with the calendar, field and code-equal names ICU4X
+  lacks) and `segmenter.rs` (the boundaries of a string, with workarounds
+  for three ICU4X 2.3 word segmentation bugs); see "Data".
 
   The research also listed DateTimeFormat's option-bag matching (until
   ICU4X's field-bag support, unstable on ICU4X main for 2.4, can be used)
@@ -969,7 +1045,8 @@ for the same arguments.
   engineering notation, ranges, NaN and infinity, the parts) are filled
   in JS from ICU4X's data (see "Number formatting").
 - Interface: opaque pointers (`HiCollator *`, `HiPluralRules *`,
-  `HiDateTimeFormat *`) with create, destroy and per-operation functions.
+  `HiDateTimeFormat *`, `HiListFormat *`, `HiSegmenter *`, `HiSegments *`)
+  with create, destroy and per-operation functions.
   A data lookup that gives a list of strings returns them in one
   `HiString`, separated by U+0000.
 - The C header is generated by cbindgen.
@@ -988,8 +1065,9 @@ objects on a separate finalizer thread (`finalizerExecutor_` in
 `public/hermes/Public/RuntimeConfig.h`). Therefore:
 
 - every Rust type held in a `NativeState` must be `Send`, enforced by a
-  compile-time assertion in the crate (`HiCollator`, `HiPluralRules` and
-  `HiDateTimeFormat` each have one; ICU4X's `sync` feature is enabled);
+  compile-time assertion in the crate (`HiCollator`, `HiPluralRules`,
+  `HiDateTimeFormat`, `HiListFormat`, `HiSegmenter` and `HiSegments` each
+  have one; ICU4X's `sync` feature is enabled);
 - a `NativeState` destructor frees only its own Rust object and touches no
   per-runtime cache;
 - per-runtime caches (such as the default formatters for the built-in
@@ -1009,28 +1087,37 @@ Two kinds of string cross the boundary, handled differently:
   formatted numbers and dates): UTF-8 both ways (`String::utf8`,
   `createFromUtf8`). ICU4X writes UTF-8.
 - **Arbitrary user text** (Collator and `localeCompare` inputs, case mapping
-  input, ListFormat elements, Segmenter input): copied out as UTF-16 with
-  `String::utf16` and never converted to UTF-8 in a way that could lose
-  unpaired surrogates.
+  input, a ListFormat list's last element, Segmenter input): copied out as
+  UTF-16 with `String::utf16` and never converted to UTF-8 in a way that
+  could lose unpaired surrogates from a result. Where native code reads
+  such text as UTF-8 or as characters, an unpaired surrogate is U+FFFD,
+  and no text comes back from that reading.
   - Collator uses ICU4X's UTF-16 comparison (`compare_utf16`), which reads
     an unpaired surrogate as U+FFFD. Two different unpaired surrogates
     therefore compare equal, and `compare(x, x)` is 0.
-  - Segmenter uses ICU4X's UTF-16 segmentation, and all indices are UTF-16
-    code-unit indices into the original string.
+  - Segmenter uses ICU4X's UTF-16 segmentation (`segment_utf16`) for
+    graphemes and sentences, and all indices are UTF-16 code-unit indices
+    into the original string. Word segmentation runs on UTF-8 instead,
+    because ICU4X 2.3's UTF-16 word path truncates characters above
+    U+FFFF in Chinese and Japanese runs: the input is transcoded with
+    each unpaired surrogate replaced by U+FFFD (both have Word_Break
+    Other, so no boundary moves, and both are one code unit), and the
+    boundaries are mapped back to UTF-16 indices (see "Data",
+    "Segmenter").
   - Case mapping splits the input at unpaired surrogates, maps each
     well-formed run, and passes unpaired surrogates through unchanged. Each
     run is mapped on its own, so a context rule such as the final sigma does
     not look across an unpaired surrogate. The result comes back as a
     `HiString16` (a UTF-16 buffer that C++ copies and then frees with
     `hi_string16_free`).
-  - ListFormat sends the element texts to native code, because CLDR list
-    patterns depend on them (Spanish `y` becomes `e` before a word starting
-    with an "i" sound; Spanish disjunctions and Hebrew conjunctions have
-    similar rules). Native code uses the texts only to choose the patterns, and
-    returns the literal pieces plus, for each element slot, the index of the
-    element that goes there. JS builds the result from the literal pieces and
-    the original element strings, so the output is lossless even though
-    native code never needs to return user text.
+  - ListFormat sends native code only the last element of a list, because
+    CLDR's list patterns depend on it (Spanish `y` becomes `e` before a
+    word starting with an "i" sound; Spanish disjunctions and Hebrew
+    conjunctions have similar rules), and ICU4X's conditional patterns
+    test nothing else. Native code reads an unpaired surrogate in it as
+    U+FFFD, uses it only to choose the patterns, and returns only literal
+    text. JS builds the result from the literal pieces and the original
+    element strings, so the output is lossless (see "Data", "ListFormat").
   - Tests cover unpaired surrogates and supplementary characters for each of
     these.
 
@@ -1042,17 +1129,15 @@ to copy the first string before reading the second.
 ### Parts
 
 A native `...ToParts` helper returns the formatted string and a flat array of
-integer records, four per part: `start`, `end`, `type`, `extra`.
+integer records, four per part: `start`, `end`, `type`, `extra`. No helper
+uses this format today: NumberFormat, DateTimeFormat and the constructors
+of Phase 5 build their parts in JS, as the paragraphs below describe. It
+stays the format for a later helper that needs one.
 
 - `start` and `end` are UTF-16 code-unit offsets into the returned string.
 - `type` indexes a fixed table of part type names shared by JS and native.
 - `extra` carries the per-part attribute the spec defines for that service:
   - range formatting: the `source` (`shared`, `startRange`, `endRange`);
-  - RelativeTimeFormat and DurationFormat: the `unit`, an index into a fixed
-    unit-name table, or `0` for parts that have no `unit` property. In
-    RelativeTimeFormat, every part that comes from the formatted number has
-    the unit, including literals inside the number pattern;
-    the literals of the surrounding relative-time pattern do not;
   - everything else: `0`.
 
 The C++ layer copies the native result into JS values before returning and
@@ -1092,6 +1177,12 @@ DateTimeFormat needs no native parts either: JS builds its parts, and
 the range parts with their `source`, from the patterns, the local time
 and the names native code supplies (see "Date and time formatting").
 
+No constructor of Phase 5 has a native `...ToParts` helper either.
+ListFormat's parts are the elements and the literal pieces native code
+returns. RelativeTimeFormat and DurationFormat build their parts, with
+their `unit`, from NumberFormat's parts, as NumberFormat builds its own
+(see "Data", "RelativeTimeFormat" and "DurationFormat").
+
 ### C++ JSI layer (`intl/jsi`)
 
 - An X-macro table (`NativeHelpers.def`) lists every native helper with its
@@ -1112,10 +1203,11 @@ and the names native code supplies (see "Date and time formatting").
 - Each native state type is a `jsi::NativeState` subclass that owns its
   Rust pointer and frees it in its destructor: `CollatorState`
   (`CollatorHelpers.cpp`), `PluralRulesState`
-  (`PluralRulesHelpers.cpp`) and `DateTimeFormatState`
-  (`DateTimeFormatHelpers.cpp`). The destructor may run on Hermes'
-  finalizer thread, which is why `HiCollator`, `HiPluralRules` and
-  `HiDateTimeFormat` must be `Send`.
+  (`PluralRulesHelpers.cpp`), `DateTimeFormatState`
+  (`DateTimeFormatHelpers.cpp`), `ListFormatState`
+  (`ListFormatHelpers.cpp`), and `SegmenterState` and `SegmentsState`
+  (`SegmenterHelpers.cpp`). The destructor may run on Hermes'
+  finalizer thread, which is why every Rust type they own must be `Send`.
 - The conversion tags are `Bool` (results and arguments), `Object`
   (arguments), `Utf8`, `Utf16`, `OptUtf8`, `Int`, `Double` (arguments),
   `Utf8List` (results) and `Undefined` (results). `Utf16` is lossless for
@@ -1163,6 +1255,28 @@ and the names native code supplies (see "Date and time formatting").
   value within ±8.64 × 10^15, an object without that state, and any error
   ICU4X reports while formatting a name are internal errors, so ICU4X's
   fallback text is never shown.
+- The Phase 5 helpers:
+  - `listFormatInit` and `listFormatLiterals` (`ListFormatHelpers.cpp`).
+    `listFormatLiterals(lf, isPair, last)` takes the last element as
+    `Utf16` and returns a `Utf8List` of 3 literal pieces for a pair
+    (before, between and after the elements) and 5 otherwise (before the
+    first, after the first, between two middle elements, before the last,
+    after the last); a piece may be empty;
+  - `relativeTimePatterns(languageId, style)`
+    (`RelativeTimeFormatHelpers.cpp`): for each unit from second to year,
+    the six future and six past patterns, one per plural category, then
+    the relative names (`"yesterday"`) with their offsets;
+  - `displayName(languageId, kind, code, style)`, an `OptUtf8` that is
+    `undefined` when there is no name, and
+    `localeDisplayPatterns(languageId)`, the locale pattern and separator
+    (`DisplayNamesHelpers.cpp`);
+  - `segmenterInit`, `segmentsInit`, `segmentsFindBoundary` (FindBoundary,
+    an `Int`) and `segmentsIsWordLike` (`SegmenterHelpers.cpp`). The
+    string goes to `segmentsInit` as `Utf16`;
+  - `numberSymbols` gains entry 21, the time separator, which
+    DurationFormat reads.
+
+  `NativeHelpers.def` gives the layout of each list.
 - Native code reports only internal errors, as C++ exceptions. Hermes turns a
   C++ exception thrown from a host function into an `Error` made from its own
   intrinsic, with the message `Exception in HostFunction: ...`
@@ -1356,7 +1470,7 @@ NumberFormat's internal plural-rules objects use it.
     | currency patterns (standard, accounting and their alphaNextToNumber forms), plural names, name patterns, fraction digits | the provider structs of `icu_experimental` 0.6: `CurrencyEssentialsV1`, `CurrencyExtendedDataV1`, `CurrencyPatternsDataV1`, `CurrencyFractionsV1`. They are read directly; `CurrencyFormatter` is never used, because it ignores the digit options, grouping and the locale's name patterns |
     | currency symbols and narrow symbols, and per-currency formats (`<currency type="X">`'s `<pattern>`, `<decimal>` and `<group>`) | `intl/core/data/currency-symbols.txt` |
     | plural rules, plural ranges, plural categories | ICU4X `PluralRules` and `PluralRulesWithRanges` |
-    | percent sign, exponent symbol, infinity, NaN, approximately sign, percent pattern, range pattern, currency decimal and group separators | `intl/core/data/number-symbols.txt` |
+    | percent sign, exponent symbol, infinity, NaN, approximately sign, percent pattern, range pattern, currency decimal and group separators, and (since Phase 5, for DurationFormat) the time separator | `intl/core/data/number-symbols.txt` |
     | unit patterns | `intl/core/data/units.txt` |
     | the explicit symbols and patterns of numbering systems outside a locale's own | `intl/core/data/explicit-number-systems.txt` |
     | the short (compact) currency patterns, which ICU4X 2.3 and `icu_experimental` 0.6 do not have (ICU4X's compact currency formatter puts its decimal compact patterns inside the ordinary currency patterns) | `intl/core/data/compact-currency.txt` |
@@ -2350,6 +2464,309 @@ NumberFormat's internal plural-rules objects use it.
     - **The ends of the time range.** Node 24 prints only `","` for
       `en-u-ca-chinese` `dateStyle: "full"` at 8.64 × 10^15; the plugin
       gives `"Saturday, Seventh Month 30, 275760(geng-shen)"`.
+- **ListFormat** (Phase 5). ICU4X 2.3's `ListFormatter` (`try_new_and`,
+  `try_new_or` and `try_new_unit` for the types `conjunction`,
+  `disjunction` and `unit`, with `ListLength::Wide`, `Short` and `Narrow`
+  for the styles `long`, `short` and `narrow`) has data for every locale
+  of `locales.txt`, every type and every style, and the conditional
+  patterns UTS 35 describes (Spanish `y`/`e` and `o`/`u`, Hebrew
+  `ו`/`ו‑`). Those are compiled into its data, not kept as CLDR text, and
+  they test only the last element, through the `end` and `pair` patterns.
+  ICU4X never reorders elements. So:
+  - CreatePartsFromList gives « » for no element and « element » for one,
+    without native code. For two or more it makes one call,
+    `listFormatLiterals(lf, isPair, last)`: native code formats a list of
+    empty elements (two for a pair, four otherwise) whose last element is
+    `last`, keeps the text of every top-level literal part, and returns
+    the 3 or 5 pieces (see "C++ JSI layer"). JS puts them between the
+    original element strings, repeating the middle piece between inner
+    elements. An empty piece gives no part, as the draft's PartitionPattern
+    gives none; an empty element is still an `element` part, as the draft
+    says (Node drops it).
+  - The draft's [[Templates]], and the index n of CreatePartsFromList that
+    it leaves to the implementation, are what native code chooses. The
+    slots JS keeps are [[Locale]], [[Type]] and [[Style]].
+  - Two differences from ICU4C follow ICU4X's data. In the `conjunction`
+    type, Hebrew before a non-Hebrew element is `" ו‑"` with U+2011, where
+    ICU4C and UTS 35's example have U+002D; ICU4X's rule exists for that
+    type only, so the `unit` type keeps CLDR's `"ו-"` with U+002D. And
+    Spanish `"11.000"` and `"11,5"` take `u` after an `o`-joined list (UTS
+    35's rule), where ICU4C gives `o`.
+- **RelativeTimeFormat** (Phase 5).
+  - **Data.** `icu_experimental` 0.6's 24 markers
+    `{Long,Short,Narrow}{Second,Minute,Hour,Day,Week,Month,Quarter,Year}RelativeV1`
+    (`RelativeTimePatternData`: the relative names, and the past and
+    future patterns), read with `number.rs`'s loader and plural category
+    helpers. They load for every locale of `locales.txt`, and the research
+    found them equal to CLDR 48.2's `dateFields.json` in every value, so no
+    file is generated. `relativeTimePatterns` returns them; a category the
+    locale lacks gets "other"'s pattern. The style `long` gives the draft's
+    fields `"second"` to `"year"`, and `short` and `narrow` its fields
+    `"second-short"` and so on.
+  - `[[NumberFormat]]` is `CreateNumberFormat(locale, {__proto__: null,
+    numberingSystem: nu})`, and `[[PluralRules]]`
+    `CreatePluralRules(locale, undefined)` (see "Resistance to
+    tampering"). The `nu` list of `[[LocaleData]]` is NumberFormat's.
+  - **Documented deviation: the magnitude.** The draft's
+    PartitionRelativeTimePattern formats ℝ(value) with its sign, so
+    `format(-1, "day")` would be `"-1 day ago"`. test262 and every engine
+    format the magnitude, and the past pattern carries the sense. The
+    plugin formats the absolute value, with -0 as +0, never `'negZero'`,
+    which would show `"-0"` (`format(-0, "day")` is `"0 days ago"`). The
+    plural category is ResolvePlural's for the signed value, which the
+    sign does not change.
+  - **Documented deviation: the conversion.** Step 11 of
+    PartitionRelativeTimePattern formats ℝ(value), the exact value of the
+    Number. The plugin converts the Number as NumberFormat does
+    (ToIntlMathematicalValue, which reads Number::toString), so
+    RelativeTimeFormat shows the same digits as the plugin's own
+    NumberFormat. Engines agree on large integers:
+    `format(1000000000000000100, "day")` is `"in
+    1,000,000,000,000,000,100 days"`, as in Node, although the Number is
+    exactly 1000000000000000128. They differ on some fractions:
+    `format(1.0005, "day")` is `"in 1.001 days"`, since `"1.0005"` rounds
+    half-expand to 1.001, while the exact value (1.000499999…) would round
+    to 1; V8 gives `"in 1 day"` there although its NumberFormat gives
+    1.001. DurationFormat keeps its exact integral handling.
+  - A pattern without `{0}` (ar `"قبل ثانية واحدة"`) gives one literal
+    part, as MakePartsList says. Every part of the number has the `unit`,
+    the literals inside the number pattern included; the relative time
+    pattern's own literals do not.
+  - gd's `"an-eararais"` for `format(3, "day")` with `numeric: "auto"` is
+    CLDR's name for +3 days, which the draft uses; V8 prints a number.
+- **DisplayNames** (Phase 5). `of` makes one native lookup per name, and
+  there is no native state; the draft's [[Fields]] is what the lookups
+  read.
+  - **Names.** Language, dialect, region, script and variant names come
+    from `icu_experimental` 0.6's data, read as data structs:
+    `LanguageDisplayNamesV1` (a language subtag), `LocaleDisplayNamesV1`
+    (the dialect names, keyed by `language-script` or `language-region`),
+    `RegionDisplayNamesV1`, `ScriptDisplayNamesV1` and
+    `VariantDisplayNamesV1`. Currency names come from
+    `CurrencyDisplaynameV1` (the singular display name, with the ISO code
+    as the marker attribute; Phase 3's currency data has only the plural
+    names). For language, dialect, region and script names, the style
+    `long` reads `names`, and `short` and `narrow` read `short_names`
+    (CLDR's `alt="short"`), then `names`, as V8 does. Variants have no
+    short names, and currency names have one style.
+    `long_names` and `menu_names` are never used, and neither is ICU4X's
+    `LocaleDisplayNamesFormatter`, whose separators are fixed English text
+    and which cannot report a missing part.
+  - **Names equal to their codes.** ICU4X's data leaves out every name
+    that equals its code (en's short region `"US"` and `"UN"`, the script
+    `"Thai"`). `display-names.txt` lists them as `eq` entries, and a lookup
+    that ICU4X misses gives the code when the file lists it for the
+    locale's chain, kind and style. For short and narrow the order is
+    `short_names`, the listed short entry, `names`, the listed long entry;
+    for long, `names`, then the listed long entry. An `eq` entry applies
+    only where ICU4X has no name, so a locale may inherit one for a code
+    that it names itself: `nn`'s `tiv` is "tivi" under `no`'s code-equal
+    "tiv", and `hi-Latn`'s short `US` is "America" under `en-IN`'s "US".
+    Variant codes in the file are CLDR's uppercase keys (`PINYIN`), so a
+    variant subtag is uppercased before it is looked up there.
+  - **Calendar names, date-time field names and the locale display
+    pattern** come from `display-names.txt` alone; ICU4X has none of
+    them. Only the 16 calendars of `supported.rs` and the aliases
+    `ethiopic-amete-alem` and `islamicc` have names, an alias its
+    canonical calendar's; `islamic` and `islamic-rgsa`, which CLDR names,
+    have none, because test262's `calendars-accepted-by-DisplayNames.js`
+    requires a name for exactly the supported calendars. Calendar names
+    have one style. Field names have three (CLDR's `displayName` of
+    `<field>`, `<field>-short` and `<field>-narrow`), with the draft's
+    codes mapped to CLDR's fields: `weekOfYear` is `week`, `dayPeriod`
+    `dayperiod`, `timeZoneName` `zone`, and the rest the same word.
+  - **The file.** `update-cldr-lists.py` writes `display-names.txt`
+    (252 KB) from `cldr-localenames-full` and `cldr-dates-full`, in
+    `day-periods.txt`'s layout: `locale <tag> <parent>` lines, with the
+    parents of `units.txt`, each followed by `<key>\t<value>` lines for
+    what differs from the parent chain. The keys are `ca.<calendar>` (BCP
+    47 ids; CLDR's `gregorian` is `gregory`, `ethiopic-amete-alem`
+    `ethioaa`), `f.<code>.<style>` for the 12 draft codes (`displayName`,
+    not `displayName-alt-variant`), `lp` and `ls` (`localeDisplayPattern`'s
+    `localePattern` and `localeSeparator`, with `{0}` and `{1}`), and
+    `eq.<kind>.<style>.<code>` with an empty value, for each name in
+    `languages.json`, `territories.json`, `scripts.json` and
+    `variants.json` that equals its code (`kind` is `language`, `dialect`
+    for a language key with `-`, `region`, `script` or `variant`; `style`
+    is `long`, or `short` for an `-alt-short` entry). The generator fails
+    unless `und` has `lp`, `ls` and all 36 field names and `en` names
+    every supported calendar, and unless reading every locale back gives
+    its CLDR entries, apart from the inherited `eq` entries above. The
+    entry for a locale is the first one ICU4X's `LocaleFallbacker`
+    reaches from its language identifier.
+  - **Language names are composed in JS** by UTS 35's algorithm (Part 2,
+    "Locale Display Name Algorithm"), which matched Node in all 110,160
+    cases of the research:
+    1. the code is CanonicalCodeForDisplayNames's result, split into
+       language, script, region and variants;
+    2. with `languageDisplay: "dialect"` and exactly one of script and
+       region, the dialect name of `language-script` or `language-region`
+       is looked up; on a hit, that subtag is used up. With both a script
+       and a region, or with `"standard"`, there is no dialect lookup;
+    3. otherwise the base is the language name of the language subtag;
+    4. the qualifiers are, in order, the script name, the region name and
+       each variant's name, in the instance's style (short and narrow use
+       the short names: `"English (Latin, UK)"`). In each, `(` and `)`
+       become `[` and `]`, and `（` and `）` become `［` and `］`;
+    5. the qualifiers are joined with the locale's `localeSeparator`
+       (`"{0}, {1}"`), and the base and the qualifiers with its
+       `localePattern` (`"{0} ({1})"`);
+    6. if the base or any qualifier has no name, the code has no name:
+       `of` returns the canonical code with `fallback: "code"` and
+       `undefined` with `"none"`, as the draft says (V8 gives a partial
+       name such as `"English (ZY)"`).
+  - The draft canonicalizes region, script and calendar codes before the
+    lookup, so `of("us")` with `type: "region"` is `"United States"` (V8
+    gives `undefined`). `"und"` has CLDR's name, `"Unknown language"` (V8
+    gives `undefined`).
+  - Some locales whose CLDR parent is root have no name for common codes:
+    CLDR 48.2 has none for the region `US` in 22 locales of `locales.txt`,
+    the script `Latn` in 4, the calendar `gregory` in 25 and the currency
+    `USD` in 28, and Node lacks the same names in the same locales. A Rust
+    test pins these lists; every other locale but `und` has a name for
+    `en`, `US`, `Latn`, `gregory`, `USD` and `year`.
+- **DurationFormat** (Phase 5). The draft step by step, with these
+  decisions:
+  - `[[DigitalFormat]]` is per numbering system, and the draft's
+    constructor never picks the entry of the resolved one; the plugin
+    reads the entry of `[[NumberingSystem]]`. Its
+    `[[HourMinuteSeparator]]` and `[[MinuteSecondSeparator]]` are both
+    CLDR's `timeSeparator` for the language identifier of `[[Locale]]` and
+    `[[NumberingSystem]]`, entry 21 of `numberSymbols`, as V8 shows (`da`
+    `"1.02.03"`). `update-cldr-lists.py` adds it as the last column of
+    `number-symbols.txt` (from `symbols-numberSystem-<nu>.timeSeparator`
+    of `cldr-numbers-full`) and to the explicit symbols of
+    `explicit-number-systems.txt`, and it resolves along the chain as the
+    other symbols do (see "Numbering systems" under NumberFormat). In
+    CLDR 48.2 a locale's own numbering systems have `":"`, except latn
+    `"."` in da, da-GL, en-DK, en-FI, fi, id, ms-ID, si, su and sv-FI,
+    and arabext `"٫"` in ug, ur and ur-IN. Another numbering system takes
+    the explicit value of the nearest locale of the CLDR chain, root
+    included: root's arabext `"٫"` (`en-u-nu-arabext` gives
+    `"۱٫۰۲٫۰۳"`), `"."` for arab and arabext in `no` and its children
+    (`no-u-nu-arab` `"١.٠٢.٠٣"`), and `"："` (U+FF1A) for fullwide in
+    `sv` and its children (`sv-u-nu-fullwide` `"１：０２：０３"`); every other
+    explicit value is `":"`. Where the chain has none, it is the locale's
+    latn separator (`da-u-nu-deva` `"१.०२.०३"`).
+  - `[[TwoDigitHours]]` is false for every locale. The step of
+    GetDurationUnitOptions that turns hours into `"2-digit"` when it is
+    true applies whatever the style, so a true value would pad the hours
+    of the long, short and narrow styles too. V8 never pads hours either.
+  - Every field is formatted with its exact value. ToIntegerIfIntegral
+    returns +0 for -0. An integral field becomes an Intl mathematical
+    value from the BigInt of its magnitude, never from its shortest
+    decimal string (`milliseconds: 4503599627370497000` is exactly
+    4503599627370497024 and formats so, where Node prints
+    `"…497,000 ms"`). IsValidDuration and ComputeFractionalDigits are
+    exact: the sum is a BigInt count of nanoseconds, compared with 2^53 ×
+    10^9, built from the BigInt of each integral field and BigInt literal
+    powers of ten.
+  - Numbers go through `CreateNumberFormat` and PartitionNumberPattern,
+    with null-prototype option records, and the list through
+    `CreateListFormat` and `CreatePartsFromList` (see "Resistance to
+    tampering"). The list is of type `unit`, so a Hebrew list of units
+    keeps CLDR's `"ו-"` (see "ListFormat").
+- **Segmenter** (Phase 5).
+  - **Segmenters.** `GraphemeClusterSegmenter::new()`, and
+    `SentenceSegmenter::try_new` and `WordSegmenter::try_new_dictionary`
+    with the language identifier of `[[Locale]]` as content locale (ICU4X
+    2.3 tailors only `el` sentences; passing the locale follows any later
+    data). The word segmenter is the dictionary one: CLDR's dictionary for
+    Chinese and Japanese and ICU4X's dictionaries for Thai, Lao, Khmer and
+    Burmese, as ICU4C uses. ICU4X's default word segmenter
+    (`try_new_auto`, with LSTM models for the Southeast Asian scripts) is
+    1.46 MB smaller but about 120 times slower on Thai (2.34 s against
+    19 ms for 414,000 code units of ordinary Thai text) and differs from
+    ICU4C for Lao and Burmese; correctness and speed come before size
+    (Guiding rule 2). The five dictionaries are 3,780,186 bytes of the
+    library's read-only data (2,007,110 for Chinese and Japanese,
+    1,773,076 for the other four). They were found by size: the library's
+    five largest constants match the sizes ICU4X's baked data states for
+    the dictionaries (2,007,134 and 1,773,172 bytes) within 24 bytes each.
+    The rest of the segmenters' share was not separated; in a probe binary
+    the three segmenters with their rules added 3.9 MB.
+  - **Known limitation: long unbroken runs.** ICU4X 2.3's word segmenter
+    takes time quadratic in the number of words of an unbroken run of
+    Chinese, Japanese or Thai text. It segments the run with the
+    dictionary once (`word.rs:961` for UTF-8), then after every break
+    rebuilds its vector of the breaks still pending
+    (`rule_segmenter_v1.rs:59` in `icu_segmenter` 2.3). So a crafted
+    200,000-code-unit run takes tens of seconds. Measured in the Debug
+    ASan build, through `containing`: `"我爱北京天安门".repeat(30000)` (210,000
+    code units) takes 21.9 s, and `"ก"` followed by 199,999 tone marks
+    U+0E48 (200,000 code units) takes 60 s. ICU4X 2.4 fixes it with a
+    cache that keeps the pending breaks by distance
+    (`rule_segmenter_v1.rs:21`, `:131`, `:158` in `icu_segmenter` 2.4).
+    The plugin gets the fix when it moves to ICU4X 2.4 (CLDR 49): Cargo
+    cannot mix ICU4X 2.3 and 2.4 crates (Cargo keeps one 2.x version of a
+    crate, the 2.3 and 2.4 crates require `icu_collections` and
+    `icu_locale_fallback` at their own minor version, and `icu` 2.3 itself
+    requires `icu_segmenter` 2.3). Grapheme and sentence segmentation, and
+    words in ordinary text, are not affected.
+  - **Boundaries.** ICU4X's iterators only go forward and borrow their
+    input, and the rules need unbounded left context, so native code
+    computes every boundary of a Segments object's string once (see
+    "Native state") and keeps the ascending boundaries from 0 to the
+    length, and for word granularity whether each segment is word-like:
+    4 bytes per segment, and one more per word segment, while the Segments
+    object lives. FindBoundary is a binary search.
+  - **ICU4X 2.3 word bugs** are worked around in native code, all found
+    against Node. Each goes when an ICU4X upgrade fixes it (2.4 rewrote
+    the UTF-16 path):
+    - the UTF-16 word path truncates characters above U+FFFF in Chinese
+      and Japanese runs (`word.rs:988`, `:991`), so word segmentation
+      runs on UTF-8 (see "Strings"): `"日本語𠀀テスト"` is `日本語|𠀀|テスト`,
+      as in Node;
+    - **boundaries before ignored characters.** ICU4X puts word
+      boundaries before characters that UAX #29's rule WB4 ignores
+      (Word_Break Extend, Format or ZWJ): its Thai dictionary splits the
+      tone mark U+0E48 of `"ช่"` from its base, and a soft hyphen after
+      Thai (`"ก\u00AD"`) becomes a segment of its own. Native code repairs
+      them: after ICU4X's word segmentation, a boundary at index i (0 < i
+      < length) is dropped when the code point after it has Word_Break
+      Extend, Format or ZWJ and the code point before it is not CR, LF or
+      Word_Break Newline (WB3a keeps that one), and the segments on either
+      side become one, word-like if either was. This repairs only
+      boundaries before ignored characters; it is not the whole of WB4,
+      and it uses no grapheme or Line_Break data. U+0E33, which is
+      Grapheme_Cluster_Break SpacingMark but Word_Break Other, keeps its
+      boundary (`" ำ"` is two segments, as in Node), and so does a
+      character after a Grapheme_Cluster_Break Prepend character (U+0600,
+      a space and `x` are three segments);
+    - **the word-type re-check.** A segment that ICU4X reports not
+      word-like and that ends in a code point with Word_Break Extend,
+      Format, ZWJ or Single_Quote is segmented again without all of its
+      trailing such code points, and takes the word type at the end of
+      that: a word followed by more text and ending in a mark (decomposed
+      `"café x"`, Hindi `"की एस"`, Arabic with harakat), a word that ends
+      in ZWJ even at the end of the text, and a Hebrew word that keeps
+      its apostrophe by WB7a (`"מס'"`). This set is separate from the
+      repair's: an apostrophe after a word is still a segment of its own
+      (`"x'"`, `"؀'"`). One difference from Node follows:
+      `"מס'\u0301 x"` is word-like, where ICU4C's rule status for a
+      Hebrew letter and an apostrophe does not survive the mark;
+    - **segments made only of ignored characters.** Before the repair
+      merges the word-like flags, a segment made only of Word_Break
+      Extend, Format or ZWJ code points is word-like only if one of them
+      is Ideographic: `"\u0E48"` alone, and `" \u0E48"` after the repair,
+      are not word-like, as in Node, and U+16FE4 KHITAN SMALL SCRIPT
+      FILLER, which is Extend and Ideographic, is.
+  - **Objects.** %IntlSegmentsPrototype% has `containing` (length 1) and
+    `[Symbol.iterator]` (length 0, `name` `"[Symbol.iterator]"`) and no
+    `@@toStringTag`. %IntlSegmentIteratorPrototype% inherits from
+    %Iterator.prototype% and has `next` (length 0) and the
+    `@@toStringTag` `"Segmenter String Iterator"`. Segments objects and
+    iterators are made with `ObjectCreate` of these prototypes, and their
+    slots are private fields. CreateSegmentDataObject makes one of two
+    object literals, with or without `isWordLike`, so the properties come
+    in the order `segment`, `index`, `input`, `isWordLike`.
+  - Differences from ICU4C, which the draft leaves to the
+    implementation: some Thai splits where ICU4X's dictionary lacks a word
+    (`intl/test/lit/segmenter-text.js` pins one), Korean next to Latin
+    letters and U+00B7 follows UAX #29 (`"MB가"` is one word, where ICU4C
+    splits it), `"_"` alone is word-like, and a period between a Latin
+    letter and Thai splits (`"a.ำ"` is `a|.|ำ`, where ICU4C treats Thai
+    letters as ALetter and keeps one word).
 - **Locale information** (Phase 1, the `Intl.Locale` information methods and
   Add / Remove Likely Subtags) comes from these sources:
 
@@ -2417,6 +2834,7 @@ NumberFormat's internal plural-rules objects use it.
   | Phase 2 | 6,113,960 bytes | 2,043,120 bytes |
   | Phase 3 | 9,222,880 bytes | 5,054,136 bytes |
   | Phase 4 | 14,420,328 bytes | 10,170,232 bytes |
+  | Phase 5 | 24,250,680 bytes | 19,939,248 bytes |
 
   Each build is of the phase's commit in a temporary worktree with its own
   build directory configured with `-DCMAKE_BUILD_TYPE=Release` and Clang
@@ -2439,8 +2857,15 @@ NumberFormat's internal plural-rules objects use it.
   `date-patterns.txt` and `day-periods.txt`, the tzdb's 207 KB, and 41 KB
   more bytecode. The Phase 4 row was measured the same way, together with
   a new build of the Phase 3 commit, which reproduced the Phase 3 row to
-  the byte. The share of each ICU4X data struct has not
-  been measured yet.
+  the byte. Phase 5 adds 9.83 MB (9.77 MB stripped), again mostly read-only
+  data (`.rodata` 8.4 MB to 17.0 MB, `.text` 1.07 MB to 1.20 MB,
+  `.data.rel.ro` 277 KB to 839 KB): ICU4X's display name, relative time
+  and list data, the segmenters with their 3.78 MB of dictionaries (see
+  "Segmenter"), the 252 KB of `display-names.txt`, and 30 KB more
+  bytecode. The Phase 5 row was measured the same way, together with a
+  new build of the Phase 4 commit, which reproduced the Phase 4 row to
+  the byte. Apart from the dictionaries, the share of each ICU4X data
+  struct has not been measured yet.
 - **Time zones.** ICU4X provides zone names and IANA identifiers but not the
   offset rules. The plugin bundles the tzdb in the Rust core, so offsets are
   the same on every platform and test262 results are reproducible: the
@@ -2475,8 +2900,6 @@ NumberFormat's internal plural-rules objects use it.
   build with `backzone` has Oslo's own. Node 24 gives the same as the
   plugin. ECMA-402 recommends a build with `backzone` but does not require
   one.
-- **Segmenter** uses ICU4X's default word segmenter, which includes the
-  Chinese and Japanese dictionary. Its size is measured when Segmenter lands.
 
 ## Testing
 
@@ -2636,6 +3059,13 @@ components completely: the whole public surface, including `formatToParts`,
    (Phase 3's two among them) pass.
 5. **Remaining constructors.** ListFormat, RelativeTimeFormat, DisplayNames,
    DurationFormat (built on NumberFormat and ListFormat), Segmenter.
+   Phase 5 built all of it: `Intl.ListFormat` over any iterable of
+   strings, `Intl.RelativeTimeFormat` in every numbering system
+   NumberFormat supports, `Intl.DisplayNames` for its six types,
+   `Intl.DurationFormat` on the plugin's internal NumberFormat and
+   ListFormat, and `Intl.Segmenter` with its Segments objects and Segment
+   Iterators, each with its whole surface (see "Data"). Every test262
+   test in its scope passes; none stays an expected failure.
 6. **Packaging.** Cross builds through cargo (Android ABIs, iOS and the
    other Apple targets), universal macOS, and Windows, both the plugin build
    and library loading in the loader; linking the plugin explicitly against
@@ -2658,6 +3088,10 @@ components completely: the whole public surface, including `formatToParts`,
   be substantial if ICU4X's field-bag support does not stabilize. Phase 4
   did it in JS from CLDR's patterns (see "Date and time formatting"), so
   it no longer waits on ICU4X.
+- **Word segmentation of long unbroken runs is quadratic** in ICU4X 2.3:
+  a crafted 200,000-code-unit run of Chinese or Thai text takes 22 to 60 s
+  in the Debug ASan build. It is fixed by the move to ICU4X 2.4; see
+  "Data" → Segmenter.
 - **Unstable and experimental ICU4X APIs** (`icu_experimental`, unstable
   constructors) can change between releases. `Cargo.lock` pins them; upgrades
   are deliberate.

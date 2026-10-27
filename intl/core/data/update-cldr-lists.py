@@ -8,15 +8,17 @@
 numbering-systems.txt, calendar-preferences.txt, hour-cycles.txt,
 time-zones-by-region.txt, extension-value-aliases.txt, number-symbols.txt,
 units.txt, currency-symbols.txt, explicit-number-systems.txt,
-compact-currency.txt, date-patterns.txt and day-periods.txt. The number data
-files come from the CLDR JSON npm packages cldr-core, cldr-numbers-full and
-cldr-units-full, which hold resolved locale data, and
+compact-currency.txt, date-patterns.txt, day-periods.txt and
+display-names.txt. The number data files come from the CLDR JSON npm
+packages cldr-core, cldr-numbers-full and cldr-units-full, which hold
+resolved locale data, and
 explicit-number-systems.txt from common/main/*.xml, for the explicit data of
 numbering systems that cldr-json leaves out; compact-currency.txt from both.
 date-patterns.txt comes from cldr-dates-full and the cldr-cal-*-full
 packages, and for the iso8601 calendar from common/main/*.xml along each
 locale's CLDR chain, root first (zh adds intervals of its own);
-day-periods.txt from cldr-core and cldr-dates-full.
+day-periods.txt from cldr-core and cldr-dates-full; display-names.txt from
+cldr-localenames-full and cldr-dates-full.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
 the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
@@ -54,7 +56,12 @@ CALENDAR_PACKAGES = [
 DATE_PACKAGES = ["cldr-dates-full"] + [
     f"cldr-cal-{c}-full" for c in CALENDAR_PACKAGES
 ]
-PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-units-full"] + DATE_PACKAGES
+PACKAGES = [
+    "cldr-core",
+    "cldr-numbers-full",
+    "cldr-units-full",
+    "cldr-localenames-full",
+] + DATE_PACKAGES
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -362,8 +369,9 @@ def number_symbols_lines(tree, tags):
     und) and numbering system with symbols:
     <locale> <nu> <percentSign> <exponential> <infinity> <nan>
     <approximatelySign> <percentPattern> <rangePattern> <currencyDecimal>
-    <currencyGroup>, tab-separated; the last two are empty where the locale
-    has no currency separators of its own."""
+    <currencyGroup> <timeSeparator>, tab-separated; currencyDecimal and
+    currencyGroup are empty where the locale has no currency separators of
+    its own."""
     tags = sorted(set(tags) | {"und"})
     dirs = resolve_locale_dirs(tree, tags)
     lines = []
@@ -391,6 +399,9 @@ def number_symbols_lines(tree, tags):
                     # from the decimal and group ones (de-AT, fr-CH).
                     sym.get("currencyDecimal", ""),
                     sym.get("currencyGroup", ""),
+                    # The separator of hours, minutes and seconds
+                    # (DurationFormat's digital style).
+                    sym["timeSeparator"],
                 ]
             except KeyError as e:
                 sys.exit(f"{tag} {nu}: missing {e}")
@@ -852,6 +863,7 @@ EXPLICIT_SYMBOLS = [
     "infinity",
     "nan",
     "approximatelySign",
+    "timeSeparator",
 ]
 # CLDR's marker for a value inherited from the parent locale.
 INHERITANCE_MARKER = "\u2191\u2191\u2191"
@@ -2002,6 +2014,232 @@ def parse_day_periods_lines(lines):
     return rules, locales
 
 
+# The packages of display-names.txt.
+DISPLAY_NAMES_PACKAGES = ("cldr-localenames-full", "cldr-dates-full")
+# The calendars of display-names.txt: those of date-patterns.txt but
+# CLDR's generic, which are the 16 of intl/core/src/supported.rs, as (BCP 47
+# id, CLDR's name in localeDisplayNames.types.calendar). CLDR's islamic and
+# islamic-rgsa, which ICU4X does not implement, have no line.
+DISPLAY_CALENDARS = [
+    (cal, name or cal) for cal, _, name in DATE_CALENDARS if cal != "generic"
+]
+# The date-time fields of display-names.txt: ECMA-402's codes of
+# DisplayNames type "dateTimeField", with CLDR's fields in dateFields.json.
+DISPLAY_FIELDS = [
+    ("era", "era"),
+    ("year", "year"),
+    ("quarter", "quarter"),
+    ("month", "month"),
+    ("weekOfYear", "week"),
+    ("weekday", "weekday"),
+    ("day", "day"),
+    ("dayPeriod", "dayperiod"),
+    ("hour", "hour"),
+    ("minute", "minute"),
+    ("second", "second"),
+    ("timeZoneName", "zone"),
+]
+# The styles of the field names, with the suffix of CLDR's field.
+DISPLAY_FIELD_STYLES = [("long", ""), ("short", "-short"), ("narrow", "-narrow")]
+# The files of cldr-localenames-full that display-names.txt reads for names
+# that equal their code, with the kind of name each holds. A key of
+# languages.json that has a "-" (nds-NL) is a dialect name.
+DISPLAY_CODE_KINDS = [
+    ("languages", "language"),
+    ("territories", "region"),
+    ("scripts", "script"),
+    ("variants", "variant"),
+]
+
+
+def display_name_entries(tree, d, tag):
+    """The entries of display-names.txt that the CLDR locale directory `d`
+    (of `tag`) has, as {key: value} in the order of the file: ca.<calendar>
+    for DISPLAY_CALENDARS, f.<code>.<style> for DISPLAY_FIELDS and
+    DISPLAY_FIELD_STYLES, lp and ls (localeDisplayPattern's localePattern and
+    localeSeparator, which must have {0} and {1}), then sorted
+    eq.<kind>.<style>.<code> with an empty value for each name of
+    DISPLAY_CODE_KINDS that equals its code (style long, or short for an
+    -alt-short entry; other alternates are left out). A key with no value in
+    CLDR is not there. Every name must be non-empty, with no tab or
+    newline. Returns (entries, named): named is the set of eq keys whose
+    name the locale has and that differs from the code."""
+    what = f"display names {tag}"
+    out = {}
+
+    def put(key, value):
+        check_value(value, f"{what} {key}")
+        if not value:
+            sys.exit(f"{what} {key}: empty")
+        out[key] = value
+
+    def load(name):
+        j = tree.load("cldr-localenames-full", "main", d, f"{name}.json")
+        return {} if j is None else j["main"][d]["localeDisplayNames"]
+
+    names = load("localeDisplayNames")
+    calendars = names.get("types", {}).get("calendar", {})
+    for cal, name in DISPLAY_CALENDARS:
+        if name in calendars:
+            put(f"ca.{cal}", calendars[name])
+    j = tree.load("cldr-dates-full", "main", d, "dateFields.json")
+    fields = {} if j is None else j["main"][d]["dates"]["fields"]
+    for code, field in DISPLAY_FIELDS:
+        for style, suffix in DISPLAY_FIELD_STYLES:
+            name = fields.get(field + suffix, {}).get("displayName")
+            if name is not None:
+                put(f"f.{code}.{style}", name)
+    pattern = names.get("localeDisplayPattern", {})
+    for key, cldr in (("lp", "localePattern"), ("ls", "localeSeparator")):
+        if cldr in pattern:
+            put(key, pattern[cldr])
+            for p in ("{0}", "{1}"):
+                if p not in out[key]:
+                    sys.exit(f"{what} {key}: no {p} in {out[key]!r}")
+    equal = []
+    named = set()
+    for file, kind in DISPLAY_CODE_KINDS:
+        for key, name in load(file).get(file, {}).items():
+            code, _, alt = key.partition("-alt-")
+            if alt not in ("", "short"):
+                continue
+            k = "dialect" if kind == "language" and "-" in code else kind
+            eq = f"eq.{k}.{'short' if alt else 'long'}.{code}"
+            if name == code:
+                equal.append(eq)
+            else:
+                named.add(eq)
+    for key in sorted(equal):
+        check_value(key, what)
+        if " " in key:
+            sys.exit(f"{what}: a space in {key!r}")
+        out[key] = ""
+    return out, named
+
+
+def display_names_lines(tree, tags):
+    """The lines of display-names.txt after the comments: for each locale
+    of `tags` (and und), in the order of file_parents, 'locale <tag>
+    <parent>' and '<key>\\t<value>' for each entry of display_name_entries
+    (cldr-localenames-full, cldr-dates-full) that differs from what the
+    parent chain gives; a key is read from the nearest locale of the chain
+    that has it. Exit unless und has lp, ls and every field name, en a name
+    for every calendar of DISPLAY_CALENDARS, and reading every locale back
+    gives its CLDR entries, no more and no fewer, with one exception: a
+    locale may inherit an eq entry for a code it has its own name for that
+    differs from the code (nn's "tivi" under no's code-equal "tiv",
+    hi-Latn's short "America" under en-IN's "US"). An eq entry applies
+    only where ICU4X has no name for the code, and ICU4X has the locale's
+    own name, so such an inherited entry is never used."""
+    tags = sorted(set(tags) | {"und"})
+    dirs = resolve_locale_dirs(tree, tags, DISPLAY_NAMES_PACKAGES)
+    parents, ordered = file_parents(tree, tags, dirs)
+    resolved, named = {}, {}
+    for t in ordered:
+        resolved[t], named[t] = display_name_entries(tree, dirs[t], t)
+    required = {
+        "und": ["lp", "ls"]
+        + [
+            f"f.{code}.{style}"
+            for code, _ in DISPLAY_FIELDS
+            for style, _ in DISPLAY_FIELD_STYLES
+        ],
+        "en": [f"ca.{cal}" for cal, _ in DISPLAY_CALENDARS],
+    }
+    for tag, keys in required.items():
+        if tag not in resolved:
+            sys.exit(f"display names: no {tag}")
+        missing = [k for k in keys if k not in resolved[tag]]
+        if missing:
+            sys.exit(f"display names {tag}: missing {missing}")
+
+    own = {}
+    effective = {}
+    for tag in ordered:
+        base = {} if parents[tag] == "-" else effective[parents[tag]]
+        own[tag] = {k: v for k, v in resolved[tag].items() if base.get(k) != v}
+        effective[tag] = {**base, **own[tag]}
+
+    lines = []
+    for tag in ordered:
+        lines.append(f"locale {tag} {parents[tag]}")
+        for key, value in own[tag].items():
+            lines.append(f"{key}\t{value}")
+
+    # Read the lines back as the file's reader does.
+    got = parse_display_names_lines(lines)
+    for tag in ordered:
+        if got.get(tag, ("",))[0] != parents[tag]:
+            sys.exit(f"display names {tag}: the parent does not read back")
+        entries = {}
+        t = tag
+        while t != "-":
+            for key, value in got[t][1].items():
+                entries.setdefault(key, value)
+            t = got[t][0]
+        # An inherited eq entry for a code the locale names otherwise is
+        # never used (see the docstring).
+        for key in set(entries) - set(resolved[tag]):
+            if key in named[tag]:
+                del entries[key]
+        if entries != resolved[tag]:
+            want = resolved[tag]
+            extra = sorted(set(entries) - set(want))
+            missing = sorted(set(want) - set(entries))
+            changed = sorted(
+                k for k in set(entries) & set(want) if entries[k] != want[k]
+            )
+            sys.exit(
+                f"display names {tag}: does not read back; extra {extra}, "
+                f"missing {missing}, different {changed}"
+            )
+    return lines
+
+
+def parse_display_names_lines(lines):
+    """The lines of display-names.txt (after the comments) as {tag:
+    (parent, {key: value})}. Exit on a line it cannot parse."""
+    locales = {}
+    cur = None
+    for line in lines:
+        f = line.split("\t")
+        if len(f) == 1:
+            f = line.split(" ")
+            if len(f) != 3 or f[0] != "locale" or f[1] in locales:
+                sys.exit(f"display names: unexpected line {line!r}")
+            locales[f[1]] = (f[2], {})
+            cur = locales[f[1]][1]
+        elif cur is None or len(f) != 2 or not f[0] or f[0] in cur:
+            sys.exit(f"display names: unexpected line {line!r}")
+        else:
+            cur[f[0]] = f[1]
+    return locales
+
+
+def write_display_names_file(tree, tag):
+    """Write display-names.txt from the unpacked CLDR JSON packages `tree`
+    of the release `tag`."""
+    write_lines(
+        "display-names.txt",
+        tag,
+        "DisplayNames data ICU4X lacks (cldr-localenames-full "
+        "localeDisplayNames.json, languages.json,\n# territories.json, "
+        "scripts.json and variants.json; cldr-dates-full dateFields.json): "
+        "per\n# locale 'locale <tag> <parent>', then '<key>\\t<value>' for "
+        "what differs from the parent\n# chain; a key is read from the "
+        "nearest locale of the chain that has it. Keys:\n# ca.<calendar> the "
+        "calendar names (BCP 47 ids); f.<code>.<long|short|narrow> the "
+        "date-time\n# field names (ECMA-402 codes); lp and ls "
+        "localeDisplayPattern's localePattern and\n# localeSeparator; "
+        "eq.<kind>.<long|short>.<code>, with an empty value, a name equal to "
+        "its\n# code (kind language, dialect, region, script or variant), which "
+        "applies only where ICU4X\n# has no name for the code. Codes are "
+        "CLDR's keys: variants are uppercase (PINYIN), so\n# a reader "
+        "uppercases a variant subtag before it looks one up.",
+        display_names_lines(tree, read_locales()),
+    )
+
+
 def write_date_files(tree, tag, load_xml):
     """Write date-patterns.txt and day-periods.txt from the unpacked CLDR
     JSON packages `tree` of the release `tag`, and the common/main XML files
@@ -2067,8 +2305,8 @@ def write_number_files(tree, tag, load_xml):
         "(cldr-numbers-full, numbers.json):\n"
         "# <locale>\\t<nu>\\t<percentSign>\\t<exponential>\\t<infinity>"
         "\\t<nan>\\t<approximatelySign>\\t<percentPattern>\\t<rangePattern>"
-        "\\t<currencyDecimal>\\t<currencyGroup>\n# (the last two empty where "
-        "the locale has no separators of its own for currency formats)",
+        "\\t<currencyDecimal>\\t<currencyGroup>\\t<timeSeparator>\n# "
+        "(the currency separators empty where the locale has none of its own)",
         symbols,
     )
     write_lines(
@@ -2101,7 +2339,8 @@ def write_number_files(tree, tag, load_xml):
         "cldr-json and ICU4X leave out; tab-separated:\n# per locale "
         "'locale <tag> <parent>' (its CLDR parent), then 'symbols <nu> "
         "<decimal> <group>\n# <minusSign> <plusSign> <percentSign> "
-        "<exponential> <infinity> <nan> <approximatelySign>',\n# 'percent "
+        "<exponential> <infinity> <nan> <approximatelySign>\n# "
+        "<timeSeparator>', 'percent "
         "<nu> <pattern>', 'range <nu> <pattern>' and 'currency <nu> "
         "<standard> <standardAlpha>\n# <accounting> <accountingAlpha>', an "
         "empty field for a value the locale does not have. '=standard' is\n# "
@@ -2127,8 +2366,9 @@ def write_number_files(tree, tag, load_xml):
 
 def write_json_data(tag):
     """Generate number-symbols.txt, units.txt, currency-symbols.txt,
-    explicit-number-systems.txt, compact-currency.txt, date-patterns.txt and
-    day-periods.txt, fetching each common/main XML file once."""
+    explicit-number-systems.txt, compact-currency.txt, date-patterns.txt,
+    day-periods.txt and display-names.txt, fetching each common/main XML
+    file once."""
     loaded = {}
 
     def load_xml(name):
@@ -2141,6 +2381,7 @@ def write_json_data(tag):
         tree = Tree(tmp)
         write_number_files(tree, tag, load_xml)
         write_date_files(tree, tag, load_xml)
+        write_display_names_file(tree, tag)
 
 
 def main():

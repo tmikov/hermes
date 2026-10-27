@@ -10,7 +10,8 @@
 // and @@toStringTag, ResolvePlural, PluralRuleSelect, ResolvePluralRange
 // and PluralRuleSelectRange, following the draft https://tc39.es/ecma402/
 // dated October 24, 2026. Each instance has native plural rules of its own,
-// attached by pluralRulesInit (plan decision 13).
+// attached by pluralRulesInit (plan decision 13). CreatePluralRules is the
+// internal function other constructors use (Phase 5 plan decision 8).
 
 /// %Intl.PluralRules.prototype%; set by installPluralRules.
 var PluralRulesPrototype;
@@ -191,24 +192,12 @@ function pluralRulesCompactExponent(locale, compactDisplay) {
   );
 }
 
-// Intl.PluralRules ( [ locales [ , options ] ] )
-function PluralRules(locales = undefined, options = undefined) {
-  // 1. If NewTarget is undefined, throw a TypeError exception.
-  if (new.target === undefined)
-    throw new _TypeError('Intl.PluralRules must be called with new');
-  // 2. Let pluralRules be ? OrdinaryCreateFromConstructor(NewTarget,
-  //    "%Intl.PluralRules.prototype%", « [[InitializedPluralRules]],
-  //    [[Locale]], [[Type]], [[Notation]], [[CompactDisplay]],
-  //    [[MinimumIntegerDigits]], [[MinimumFractionDigits]],
-  //    [[MaximumFractionDigits]], [[MinimumSignificantDigits]],
-  //    [[MaximumSignificantDigits]], [[RoundingType]],
-  //    [[RoundingIncrement]], [[RoundingMode]],
-  //    [[ComputedRoundingPriority]], [[TrailingZeroDisplay]] »).
-  //    Hermes created this from NewTarget before the call (design spec
-  //    "Constructors"). The slots are collected in a null-prototype record
-  //    and attached at the end, with the native plural rules, once every
-  //    value is known; nothing between can observe them.
-  var pluralRules = this;
+/// Steps 3 to 14 of Intl.PluralRules ( [ locales [ , options ] ] ), on the
+/// object pluralRules that steps 1 and 2 made. The slots are collected in a
+/// null-prototype record and attached at the end, with the native plural
+/// rules, once every value is known; nothing between can observe them.
+/// Returns pluralRules.
+function initializePluralRules(pluralRules, locales, options) {
   var slots = {__proto__: null};
   // 3. Let optionsResolution be ? ResolveOptions(%Intl.PluralRules%,
   //    %Intl.PluralRules%.[[LocaleData]], locales, options,
@@ -283,6 +272,40 @@ function PluralRules(locales = undefined, options = undefined) {
   );
   // 14. Return pluralRules.
   return pluralRules;
+}
+
+// Intl.PluralRules ( [ locales [ , options ] ] )
+function PluralRules(locales = undefined, options = undefined) {
+  // 1. If NewTarget is undefined, throw a TypeError exception.
+  if (new.target === undefined)
+    throw new _TypeError('Intl.PluralRules must be called with new');
+  // 2. Let pluralRules be ? OrdinaryCreateFromConstructor(NewTarget,
+  //    "%Intl.PluralRules.prototype%", « [[InitializedPluralRules]],
+  //    [[Locale]], [[Type]], [[Notation]], [[CompactDisplay]],
+  //    [[MinimumIntegerDigits]], [[MinimumFractionDigits]],
+  //    [[MaximumFractionDigits]], [[MinimumSignificantDigits]],
+  //    [[MaximumSignificantDigits]], [[RoundingType]],
+  //    [[RoundingIncrement]], [[RoundingMode]],
+  //    [[ComputedRoundingPriority]], [[TrailingZeroDisplay]] »).
+  //    Hermes created this from NewTarget before the call (design spec
+  //    "Constructors"); initializePluralRules attaches the slots.
+  // 3-14. The steps that resolve the slots, numbered there.
+  return initializePluralRules(this, locales, options);
+}
+
+/// The result of Construct(%Intl.PluralRules%, « locales, options ») for
+/// the plugin's own callers, such as RelativeTimeFormat (Phase 5 plan
+/// decisions 4 and 8): every step of the constructor, with NewTarget
+/// %Intl.PluralRules%, without going through any public property.
+function CreatePluralRules(locales, options) {
+  // 1-2. Let pluralRules be OrdinaryObjectCreate(
+  //      %Intl.PluralRules.prototype%).
+  // 3-14. Initialize it and return it.
+  return initializePluralRules(
+    ObjectCreate(PluralRulesPrototype),
+    locales,
+    options,
+  );
 }
 
 /// The magnitude of the value of decimalString, ASCII digits with at most

@@ -8,8 +8,8 @@
 aliases (on fixture bcp47 XML), of number-symbols.txt, units.txt and
 currency-symbols.txt (on fixture CLDR JSON), of explicit-number-systems.txt
 (on fixture common/main XML), of compact-currency.txt and date-patterns.txt
-(on both) and of day-periods.txt (on fixture CLDR JSON). Run by
-check-intl-data; no network."""
+(on both) and of day-periods.txt and display-names.txt (on fixture CLDR
+JSON). Run by check-intl-data; no network."""
 
 import importlib.util
 import json
@@ -169,6 +169,7 @@ def symbols(decimal, percent="%", infinity="∞"):
         "exponential": "E",
         "infinity": infinity,
         "nan": "NaN",
+        "timeSeparator": ":",
     }
 
 
@@ -518,10 +519,10 @@ class CldrNumberDataTest(unittest.TestCase):
         self.assertEqual(
             [l for l in lines if not l.startswith("#")],
             [
-                "ar\tarab\t%\tE\t∞\tNaN\t~\t#,##0‏%\t{0}–{1}\t\t",
-                "ar\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t",
-                "en\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t",
-                "und\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t",
+                "ar\tarab\t%\tE\t∞\tNaN\t~\t#,##0‏%\t{0}–{1}\t\t\t:",
+                "ar\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t\t:",
+                "en\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t\t:",
+                "und\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t\t:",
             ],
         )
 
@@ -531,7 +532,9 @@ class CldrNumberDataTest(unittest.TestCase):
         n["en"]["symbols-numberSystem-latn"]["currencyGroup"] = "."
         n["en"]["symbols-numberSystem-latn"]["currencyDecimal"] = "\u00b7"
         lines = gen.number_symbols_lines(self.tree(n), ["en"])
-        self.assertIn("en\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\u00b7\t.", lines)
+        self.assertIn(
+            "en\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\u00b7\t.\t:", lines
+        )
 
     def test_units_dedup_against_parent(self):
         _, locales = self.units()
@@ -592,9 +595,9 @@ class CldrNumberDataTest(unittest.TestCase):
         tree = self.tree(n, u)
         lines = gen.number_symbols_lines(tree, ["zh-HK", "zh-SG"])
         # By the tag's own likelySubtags entry.
-        self.assertIn("zh-HK\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t", lines)
+        self.assertIn("zh-HK\tlatn\t%\tE\t∞\tNaN\t~\t#,##0%\t{0}–{1}\t\t\t:", lines)
         # By the script of its language, when the tag has no entry.
-        self.assertIn("zh-SG\tlatn\t%\tE\t∞\tNaN\t~\t#,##0 %\t{0}–{1}\t\t", lines)
+        self.assertIn("zh-SG\tlatn\t%\tE\t∞\tNaN\t~\t#,##0 %\t{0}–{1}\t\t\t:", lines)
         _, locales = parse_units(
             gen.units_lines(tree, ["zh-HK", "zh-SG"], SANCTIONED)
         )
@@ -744,15 +747,17 @@ class ExplicitNumberSystemsTest(unittest.TestCase):
                 "locale\tund\t-",
                 "\t".join(
                     ["symbols", "arab", "٫", "٬", "؜-", "؜+", "٪؜", "اس"]
-                    + ["∞", "NaN", "~"]
+                    + ["∞", "NaN", "~", ":"]
                 ),
                 "percent\tarab\t#,##0%",
                 "currency\tarab\t#,##0.00\u00a0¤\t\t=standard\t",
                 "locale\tar\tund",
-                "\t".join(["symbols", "arabext", e, e, e, e, e, e, e, "ليس رقمًا", e]),
+                "\t".join(
+                    ["symbols", "arabext", e, e, e, e, e, e, e, "ليس رقمًا", e, e]
+                ),
                 "locale\ten\tund",
-                "\t".join(["symbols", "arab", e, e, e, "\u200f+", e, e, e, e, e]),
-                "\t".join(["symbols", "bali", e, e, e, e, e, e, e, "nb", e]),
+                "\t".join(["symbols", "arab", e, e, e, "\u200f+", e, e, e, e, e, e]),
+                "\t".join(["symbols", "bali", e, e, e, e, e, e, e, "nb", e, e]),
                 "percent\tarab\t#,##0\u00a0%",
                 "range\tarab\t{0}~{1}",
                 "currency\tarab\t¤#,##0.00\t¤\u00a0#,##0.00\t\t",
@@ -799,6 +804,56 @@ class ExplicitNumberSystemsTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(SystemExit, "currencyGroup"):
             self.lines({"en": group})
+
+    def test_time_separator_column(self):
+        # A locale's timeSeparator is the last column of its rows of
+        # number-symbols.txt.
+        n = {t: dict(v) for t, v in FIXTURE_NUMBERS.items()}
+        n["en"] = numbers(("latn", ".", "#,##0%"))
+        n["en"]["symbols-numberSystem-latn"]["timeSeparator"] = "."
+        n["ar"] = numbers(("arab", "٫", "#,##0‏%"), ("latn", ".", "#,##0%"))
+        n["ar"]["symbols-numberSystem-arab"]["timeSeparator"] = "٫"
+        tree = make_tree(
+            tempfile.mkdtemp(dir=self._tmp.name),
+            n,
+            FIXTURE_UNITS,
+            FIXTURE_PARENTS,
+            FIXTURE_LIKELY,
+            FIXTURE_CURRENCIES,
+        )
+        rows = {
+            tuple(l.split("\t")[:2]): l.split("\t")
+            for l in gen.number_symbols_lines(tree, ["en", "ar"])
+        }
+        self.assertEqual(rows[("en", "latn")][-1], ".")
+        self.assertEqual(rows[("ar", "arab")][-1], "٫")
+        self.assertEqual(rows[("ar", "latn")][-1], ":")
+        self.assertEqual(rows[("und", "latn")][-1], ":")
+        self.assertEqual({len(r) for r in rows.values()}, {12})
+        # A locale without one fails.
+        del n["en"]["symbols-numberSystem-latn"]["timeSeparator"]
+        tree = make_tree(
+            tempfile.mkdtemp(dir=self._tmp.name),
+            n,
+            FIXTURE_UNITS,
+            FIXTURE_PARENTS,
+            FIXTURE_LIKELY,
+            FIXTURE_CURRENCIES,
+        )
+        with self.assertRaisesRegex(SystemExit, "en latn: missing 'timeSeparator'"):
+            gen.number_symbols_lines(tree, ["en"])
+        # An explicit root timeSeparator for a numbering system reaches
+        # explicit-number-systems.txt, as the last symbol.
+        root = ROOT_XML.replace(
+            '<symbols numberSystem="latn">',
+            '<symbols numberSystem="arabext"><timeSeparator>٫</timeSeparator>'
+            '</symbols><symbols numberSystem="latn">',
+        )
+        e = ""
+        lines = self.lines({"root": root})
+        self.assertIn("\t".join(["symbols", "arabext"] + [e] * 9 + ["٫"]), lines)
+        arab = [l for l in lines if l.startswith("symbols\tarab\t")][0]
+        self.assertEqual(arab.split("\t")[-1], ":")
 
     def test_xml_file_names(self):
         self.assertEqual(gen.xml_file_name("und"), "root")
@@ -1870,6 +1925,393 @@ class DayPeriodsTest(unittest.TestCase):
         d["en-AU"] = generic_locale(names)
         with self.assertRaisesRegex(SystemExit, "tab"):
             self.lines(locales=d)
+
+
+# The date fields of CLDR's dateFields.json that display-names.txt reads, by
+# the draft's code.
+DN_FIELDS = {
+    "era": "era",
+    "year": "year",
+    "quarter": "quarter",
+    "month": "month",
+    "weekOfYear": "week",
+    "weekday": "weekday",
+    "day": "day",
+    "dayPeriod": "dayperiod",
+    "hour": "hour",
+    "minute": "minute",
+    "second": "second",
+    "timeZoneName": "zone",
+}
+# CLDR's calendar names (localeDisplayNames.types.calendar keys) of the 16
+# supported calendars, with their BCP 47 ids.
+DN_CALENDARS = {
+    "buddhist": "buddhist",
+    "chinese": "chinese",
+    "coptic": "coptic",
+    "dangi": "dangi",
+    "ethiopic-amete-alem": "ethioaa",
+    "ethiopic": "ethiopic",
+    "gregorian": "gregory",
+    "hebrew": "hebrew",
+    "indian": "indian",
+    "islamic-civil": "islamic-civil",
+    "islamic-tbla": "islamic-tbla",
+    "islamic-umalqura": "islamic-umalqura",
+    "iso8601": "iso8601",
+    "japanese": "japanese",
+    "persian": "persian",
+    "roc": "roc",
+}
+
+
+def date_fields(names, **overrides):
+    """A dateFields.json `fields` object: for each CLDR field of DN_FIELDS,
+    `names(field)` as its long, short and narrow displayName, with
+    `overrides` {"<field>[-short|-narrow]": name} over them, and fields and
+    keys display-names.txt does not read."""
+    out = {}
+    for field in DN_FIELDS.values():
+        for suffix, name in zip(("", "-short", "-narrow"), names(field)):
+            out[field + suffix] = {
+                "displayName": name,
+                "relative-type-0": "this " + field,
+            }
+    for key, name in overrides.items():
+        out[key] = dict(out.get(key, {}), displayName=name)
+    out["dayperiod"]["displayName-alt-variant"] = "am/pm"
+    out["dayOfYear"] = {"displayName": "day of year"}
+    out["weekOfMonth"] = {"displayName": "week of month"}
+    return out
+
+
+DN_PATTERN = {
+    "localePattern": "{0} ({1})",
+    "localeSeparator": "{0}, {1}",
+    "localeKeyTypePattern": "{0}: {1}",
+}
+EN_CALENDAR_NAMES = {
+    **{name: name.title() + " Calendar" for name in DN_CALENDARS},
+    "gregorian": "Gregorian Calendar",
+    "islamic": "Hijri Calendar",
+    "islamic-rgsa": "Hijri Calendar (Saudi Arabia, sighting)",
+    "iso8601-alt-variant": "ISO 8601 Weeks",
+    "core": "Minguo",
+}
+
+# und is CLDR's root, which has no names; en-AU's CLDR parent is en-001,
+# which the file does not have, so its parent in the file is en.
+FIXTURE_DISPLAY_NAMES = {
+    "und": {
+        "localeDisplayNames": {
+            "localeDisplayPattern": DN_PATTERN,
+            "codePatterns": {"language": "Language: {0}"},
+        },
+        "fields": date_fields(lambda f: (f.title(),) * 3),
+    },
+    "en": {
+        "localeDisplayNames": {
+            "localeDisplayPattern": DN_PATTERN,
+            "types": {"calendar": EN_CALENDAR_NAMES},
+        },
+        "fields": date_fields(
+            lambda f: (f, f[:2] + ".", f[:2]),
+            **{"year-short": "yr.", "year-narrow": "yr", "weekday": "day of the week"},
+        ),
+        "languages": {
+            "en": "English",
+            "en-GB": "British English",
+            "en-GB-alt-short": "UK English",
+            "fon": "fon",
+            "luo": "Luo",
+            "nds-NL": "nds-NL",
+            "yao-alt-menu": "yao",
+        },
+        "territories": {
+            "US": "United States",
+            "US-alt-short": "US",
+            "UN-alt-variant": "UN",
+            "GB": "United Kingdom",
+            "GB-alt-short": "UK",
+        },
+        "scripts": {"Thai": "Thai", "Latn": "Latin", "Cham": "cham"},
+        "variants": {"PINYIN": "PINYIN", "POSIX": "Computer"},
+    },
+    "en-AU": {
+        "localeDisplayNames": {
+            "localeDisplayPattern": DN_PATTERN,
+            "types": {
+                "calendar": dict(EN_CALENDAR_NAMES, roc="Republic of China Calendar")
+            },
+        },
+        "fields": date_fields(
+            lambda f: (f, f[:2] + ".", f[:2]),
+            **{
+                "year-short": "yr.",
+                "year-narrow": "y",
+                "weekday": "day of the week",
+            },
+        ),
+        "languages": {"en": "English", "fon": "fon", "nds-NL": "nds-NL"},
+        "territories": {"US": "United States", "US-alt-short": "US"},
+        "scripts": {"Thai": "Thai", "Latn": "Latin"},
+        "variants": {"PINYIN": "PINYIN"},
+    },
+}
+
+
+def make_display_names_tree(root, locales):
+    """Write fixture cldr-localenames-full, cldr-dates-full and cldr-core
+    files under `root` for `locales` ({dir: {"localeDisplayNames": ...,
+    "fields": ..., "languages": ...}}), and return a tree reading them."""
+    for loc, data in locales.items():
+        ldn = ["cldr-localenames-full", "package", "main", loc]
+        write_json(
+            root,
+            ldn + ["localeDisplayNames.json"],
+            {"main": {loc: {"localeDisplayNames": data["localeDisplayNames"]}}},
+        )
+        for kind in ("languages", "territories", "scripts", "variants"):
+            if kind in data:
+                write_json(
+                    root,
+                    ldn + [f"{kind}.json"],
+                    {"main": {loc: {"localeDisplayNames": {kind: data[kind]}}}},
+                )
+        write_json(
+            root,
+            ["cldr-dates-full", "package", "main", loc, "dateFields.json"],
+            {"main": {loc: {"dates": {"fields": data["fields"]}}}},
+        )
+    write_json(
+        root,
+        ["cldr-core", "package", "supplemental", "parentLocales.json"],
+        {"supplemental": {"parentLocales": {"parentLocale": FIXTURE_PARENTS}}},
+    )
+    write_json(
+        root,
+        ["cldr-core", "package", "supplemental", "likelySubtags.json"],
+        {"supplemental": {"likelySubtags": FIXTURE_LIKELY}},
+    )
+    return gen.Tree(root)
+
+
+def parse_display_names(lines):
+    """Parse display-names.txt lines: {tag: (parent, {key: value})}, the keys
+    in the file's order."""
+    out = {}
+    cur = None
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if "\t" not in line:
+            f = line.split(" ")
+            assert len(f) == 3 and f[0] == "locale", line
+            cur = out[f[1]] = (f[2], {})
+            continue
+        key, value = line.split("\t")
+        assert key not in cur[1], line
+        cur[1][key] = value
+    return out
+
+
+def read_display_name(parsed, tag, key):
+    """The value of `key` for `tag`: its own line, else its parent's, up to
+    und; None if none has one."""
+    while tag != "-":
+        parent, entries = parsed[tag]
+        if key in entries:
+            return entries[key]
+        tag = parent
+    return None
+
+
+class DisplayNamesTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def lines(self, locales=None, tags=("en", "en-AU")):
+        tree = make_display_names_tree(
+            tempfile.mkdtemp(dir=self._tmp.name),
+            FIXTURE_DISPLAY_NAMES if locales is None else locales,
+        )
+        return gen.display_names_lines(tree, list(tags))
+
+    def parsed(self, **kw):
+        return parse_display_names(self.lines(**kw))
+
+    def fixture(self, tag, **changes):
+        """FIXTURE_DISPLAY_NAMES with `tag`'s data changed by `changes`."""
+        d = dict(FIXTURE_DISPLAY_NAMES)
+        d[tag] = dict(d[tag], **changes)
+        return d
+
+    def test_display_names_calendars(self):
+        p = self.parsed()
+        en = p["en"][1]
+        self.assertEqual(en["ca.gregory"], "Gregorian Calendar")
+        self.assertEqual(en["ca.ethioaa"], "Ethiopic-Amete-Alem Calendar")
+        self.assertEqual(en["ca.islamic-civil"], "Islamic-Civil Calendar")
+        self.assertEqual(
+            sorted(k for k in en if k.startswith("ca.")),
+            sorted("ca." + c for c in DN_CALENDARS.values()),
+        )
+        for key in ("ca.gregorian", "ca.ethiopic-amete-alem", "ca.islamic"):
+            self.assertNotIn(key, en)
+        for key in ("ca.islamic-rgsa", "ca.iso8601-alt-variant", "ca.core"):
+            self.assertNotIn(key, en)
+        # Root has no calendar names, so und has no ca line.
+        self.assertFalse([k for k in p["und"][1] if k.startswith("ca.")])
+
+    def test_display_names_fields(self):
+        # displayName-alt-variant (en's dayperiod "am/pm") is not written.
+        self.assertNotIn("am/pm", "\n".join(self.lines()))
+        p = self.parsed()
+        self.assertEqual(read_display_name(p, "en", "f.year.long"), "year")
+        self.assertEqual(read_display_name(p, "en", "f.year.short"), "yr.")
+        self.assertEqual(read_display_name(p, "en", "f.year.narrow"), "yr")
+        self.assertEqual(read_display_name(p, "en", "f.weekOfYear.long"), "week")
+        self.assertEqual(read_display_name(p, "en", "f.weekOfYear.short"), "we.")
+        self.assertEqual(read_display_name(p, "en", "f.dayPeriod.long"), "dayperiod")
+        self.assertEqual(read_display_name(p, "en", "f.dayPeriod.narrow"), "da")
+        self.assertEqual(read_display_name(p, "en", "f.timeZoneName.long"), "zone")
+        self.assertEqual(read_display_name(p, "und", "f.timeZoneName.short"), "Zone")
+        self.assertEqual(
+            read_display_name(p, "en", "f.weekday.long"), "day of the week"
+        )
+        # Exactly the 12 codes in three styles; CLDR's own field names and
+        # the other fields are not written.
+        keys = {k for _, (_, e) in p.items() for k in e if k.startswith("f.")}
+        self.assertEqual(
+            keys,
+            {f"f.{c}.{s}" for c in DN_FIELDS for s in ("long", "short", "narrow")},
+        )
+
+    def test_display_names_patterns(self):
+        p = self.parsed()
+        self.assertEqual(p["und"][1]["lp"], "{0} ({1})")
+        self.assertEqual(p["und"][1]["ls"], "{0}, {1}")
+        # en's are und's, so it has no line of its own.
+        self.assertNotIn("lp", p["en"][1])
+        self.assertEqual(read_display_name(p, "en-AU", "ls"), "{0}, {1}")
+        pattern = dict(DN_PATTERN, localePattern="{0}（{1}）")
+        d = self.fixture(
+            "en",
+            localeDisplayNames=dict(
+                FIXTURE_DISPLAY_NAMES["en"]["localeDisplayNames"],
+                localeDisplayPattern=pattern,
+            ),
+        )
+        # en-AU's pattern is und's, which differs from en's, its parent's:
+        # it is written.
+        p = parse_display_names(self.lines(locales=d))
+        self.assertEqual(p["en"][1]["lp"], "{0}（{1}）")
+        self.assertEqual(p["en-AU"][1]["lp"], "{0} ({1})")
+        self.assertNotIn("ls", p["en-AU"][1])
+        # A pattern without both placeholders fails.
+        pattern = dict(DN_PATTERN, localeSeparator="{0},")
+        d = self.fixture(
+            "en",
+            localeDisplayNames=dict(
+                FIXTURE_DISPLAY_NAMES["en"]["localeDisplayNames"],
+                localeDisplayPattern=pattern,
+            ),
+        )
+        with self.assertRaisesRegex(SystemExit, r"display names en ls.*\{1\}"):
+            self.lines(locales=d)
+
+    def test_display_names_code_equal(self):
+        p = self.parsed()
+        en = p["en"][1]
+        eq = {k: v for k, v in en.items() if k.startswith("eq.")}
+        self.assertEqual(
+            eq,
+            {
+                "eq.dialect.long.nds-NL": "",
+                "eq.language.long.fon": "",
+                "eq.region.short.US": "",
+                "eq.script.long.Thai": "",
+                "eq.variant.long.PINYIN": "",
+            },
+        )
+        # A name that differs from its code ("Luo", "cham", "UK") writes
+        # nothing, and so does an alternate other than short (UN-alt-variant,
+        # yao-alt-menu).
+        # en-AU's are en's, so it has none of its own.
+        self.assertFalse([k for k in p["en-AU"][1] if k.startswith("eq.")])
+        self.assertIn("eq.region.short.US\t", self.lines())
+
+    def test_display_names_dedup(self):
+        p = self.parsed()
+        self.assertEqual(p["und"][0], "-")
+        self.assertEqual(p["en"][0], "und")
+        self.assertEqual(p["en-AU"][0], "en")
+        # en-AU differs from en in roc's name and year's narrow name only.
+        self.assertEqual(
+            p["en-AU"][1],
+            {"ca.roc": "Republic of China Calendar", "f.year.narrow": "y"},
+        )
+        # en lists only what differs from und: und's field names are
+        # capitalized, so every field name is en's own.
+        self.assertEqual(len([k for k in p["en"][1] if k.startswith("f.")]), 36)
+        # und has every key it defines in full.
+        self.assertEqual(len(p["und"][1]), 38)
+        # A child that lacks a name its parent chain gives fails.
+        names = dict(FIXTURE_DISPLAY_NAMES["en-AU"]["localeDisplayNames"])
+        cal = dict(names["types"]["calendar"])
+        del cal["roc"]
+        names["types"] = {"calendar": cal}
+        with self.assertRaisesRegex(SystemExit, "display names en-AU.*ca.roc"):
+            self.lines(locales=self.fixture("en-AU", localeDisplayNames=names))
+        # A child with its own name for a code its parent's name equals
+        # (CLDR 48.2's nn "tivi", hi-Latn short "America") inherits the eq
+        # entry, which applies only where ICU4X has no name; ICU4X has the
+        # child's.
+        territories = {"US": "United States", "US-alt-short": "USA"}
+        p = parse_display_names(
+            self.lines(locales=self.fixture("en-AU", territories=territories))
+        )
+        self.assertNotIn("eq.region.short.US", p["en-AU"][1])
+        self.assertEqual(read_display_name(p, "en-AU", "eq.region.short.US"), "")
+        # A child with no name for it at all fails, and so does one whose
+        # other style only has a name.
+        for territories in (
+            {"US": "United States"},
+            {"US": "United States", "US-alt-variant": "USA"},
+        ):
+            d = self.fixture("en-AU", territories=territories)
+            with self.assertRaisesRegex(
+                SystemExit, "display names en-AU.*eq.region.short.US"
+            ):
+                self.lines(locales=d)
+
+    def test_display_names_checks(self):
+        fields = dict(FIXTURE_DISPLAY_NAMES["und"]["fields"])
+        del fields["era-narrow"]
+        with self.assertRaisesRegex(SystemExit, "display names und.*f.era.narrow"):
+            self.lines(locales=self.fixture("und", fields=fields))
+        names = dict(FIXTURE_DISPLAY_NAMES["und"]["localeDisplayNames"])
+        del names["localeDisplayPattern"]
+        with self.assertRaisesRegex(SystemExit, "display names und.*lp"):
+            self.lines(locales=self.fixture("und", localeDisplayNames=names))
+        # en (and so en-AU) lacks a supported calendar.
+        d = dict(FIXTURE_DISPLAY_NAMES)
+        for tag in ("en", "en-AU"):
+            names = dict(d[tag]["localeDisplayNames"])
+            cal = dict(names["types"]["calendar"])
+            del cal["ethiopic-amete-alem"]
+            names["types"] = {"calendar": cal}
+            d[tag] = dict(d[tag], localeDisplayNames=names)
+        with self.assertRaisesRegex(SystemExit, "display names en.*ca.ethioaa"):
+            self.lines(locales=d)
+        # Tabs and newlines fail, and so does an empty name.
+        fields = date_fields(lambda f: (f, f[:2] + ".", f[:2]), year="ye\tar")
+        with self.assertRaisesRegex(SystemExit, "tab"):
+            self.lines(locales=self.fixture("en", fields=fields))
+        fields = date_fields(lambda f: (f, f[:2] + ".", f[:2]), year="")
+        with self.assertRaisesRegex(SystemExit, "display names en f.year.long"):
+            self.lines(locales=self.fixture("en", fields=fields))
 
 
 if __name__ == "__main__":

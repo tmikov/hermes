@@ -116,8 +116,10 @@ HERMES_INTL_HELPER(pluralCategories, Utf8List, Object)
 // percent ones ("{minusSign}{number}{percentSign}"); 18 the range pattern
 // ("{0}–{1}"); 19 and 20 the primary and secondary group sizes of percents,
 // from their own CLDR pattern (bn: 3 and 3, against 3 and 2 for decimals),
-// with entry 11 as their minimum grouping too. Bidi controls of the signs are
-// literal text of the patterns, and entries 2-4 are the bare signs.
+// with entry 11 as their minimum grouping too; 21 the time separator, CLDR's
+// timeSeparator (":"; da latn "."), which DurationFormat's digital style puts
+// between hours, minutes and seconds. Bidi controls of the signs are literal
+// text of the patterns, and entries 2-4 are the bare signs.
 // Throws if locale does not parse or nu is not a numbering system type.
 HERMES_INTL_HELPER(numberSymbols, Utf8List, Utf8, Utf8)
 // (locale, nu, currency, display, accounting) The currency patterns for an
@@ -223,3 +225,68 @@ HERMES_INTL_HELPER(
 // ASCII digits. Throws for any other epochMs, or if dateTimeFormatInit did
 // not initialize dateTimeFormat.
 HERMES_INTL_HELPER(dateTimeFormatLocalTime, Utf8List, Object, Double)
+// (listFormat, locale, type, style) Attach ICU4X's list formatter for the
+// language identifier of locale, type "conjunction", "disjunction" or
+// "unit" and style "long", "short" or "narrow" to the Intl.ListFormat
+// listFormat. Throws for any other value, if locale does not parse, if there
+// is no data, or if listFormat already has native state.
+HERMES_INTL_HELPER(listFormatInit, Undefined, Object, Utf8, Utf8, Utf8)
+// (listFormat, isPair, last) The literal text the list formatter puts around
+// the elements of a list whose last element is last (an unpaired surrogate
+// reads as U+FFFD; last only chooses a conditional pattern, such as Spanish
+// "e" before "Ibiza"): for a list of two (isPair) 0 before, 1 between and 2
+// after the elements; otherwise, for a list of three or more, 0 before the
+// first, 1 after the first, 2 between two middle elements, 3 before the last
+// and 4 after the last. A piece may be empty. Throws if listFormatInit did
+// not initialize listFormat.
+HERMES_INTL_HELPER(listFormatLiterals, Utf8List, Object, Bool, Utf16)
+// (locale, style) RelativeTimeFormat's CLDR data for the language identifier
+// of locale and style "long", "short" or "narrow": for each unit in the order
+// second, minute, hour, day, week, month, quarter, year, 0-5 the future
+// patterns and 6-11 the past patterns for zero, one, two, few, many and
+// other, in CLDR form ("in {0} days"; a pattern may lack {0}; a category the
+// locale lacks gets other's), then the number N of relative names, then N
+// pairs: the offset as a decimal string ("-1") and the name ("yesterday"),
+// in increasing offset. Throws for any other style, if locale does not
+// parse, or if there is no data.
+HERMES_INTL_HELPER(relativeTimePatterns, Utf8List, Utf8, Utf8)
+// (locale, kind, code, style) The display name of code for the language
+// identifier of locale and style "long", "short" or "narrow", by kind:
+// "language" a language subtag ("en", "und"); "dialect" a language-script or
+// language-region key, CLDR's dialect names ("en-US" is "American English");
+// "region" and "script" a region or script subtag; "variant" a lowercase
+// variant subtag; "currency" an uppercase ISO 4217 code; "calendar" one of the
+// 16 supported calendars or the alias "ethiopic-amete-alem" or "islamicc";
+// "dateTimeField" one of ECMA-402's 12 date-time field codes. Short and narrow
+// language, dialect, region and script names are CLDR's alt="short" names,
+// else the default ones; currency and calendar names have one style. The name
+// is CLDR's, with parentheses as they are ("German orthography of 1996"); a
+// name CLDR gives as the code itself ("US" for en's short region US) is the
+// code. Undefined when there is no name, including for a code that is not of
+// its kind. Throws for any other kind or style, or if locale does not parse.
+HERMES_INTL_HELPER(displayName, OptUtf8, Utf8, Utf8, Utf8, Utf8)
+// (locale) The locale display patterns of the language identifier of locale,
+// in CLDR form: 0 localePattern ("{0} ({1})"), 1 localeSeparator
+// ("{0}, {1}"). Throws if locale does not parse.
+HERMES_INTL_HELPER(localeDisplayPatterns, Utf8List, Utf8)
+// (segmenter, locale, granularity) Attach ICU4X's segmenter for granularity
+// "grapheme", "word" or "sentence", with the language identifier of locale
+// as content locale, to the Intl.Segmenter segmenter. Throws for any other
+// granularity, if locale does not parse, if there is no data, or if
+// segmenter already has native state.
+HERMES_INTL_HELPER(segmenterInit, Undefined, Object, Utf8, Utf8)
+// (segments, segmenter, string) Segment string with the segmenter of
+// segmenter and attach the result to the Segments object segments: every
+// boundary, ascending, from 0 to string.length, in UTF-16 code units, and
+// for "word" whether each segment is word-like. Throws if segmenterInit did
+// not initialize segmenter, or if segments already has native state.
+HERMES_INTL_HELPER(segmentsInit, Undefined, Object, Object, Utf16)
+// (segments, index, after) FindBoundary: the last boundary <= index (after
+// false) or the first boundary > index (after true). Throws unless 0 <=
+// index < string.length, or if segmentsInit did not initialize segments.
+HERMES_INTL_HELPER(segmentsFindBoundary, Int, Object, Int, Bool)
+// (segments, start) Whether the segment that starts at the boundary start is
+// word-like. Throws if the granularity is not "word", if start is not a
+// boundary or is string.length, or if segmentsInit did not initialize
+// segments.
+HERMES_INTL_HELPER(segmentsIsWordLike, Bool, Object, Int)

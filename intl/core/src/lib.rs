@@ -88,11 +88,15 @@ mod cldr;
 mod collator;
 mod date_data;
 mod datetime;
+mod displaynames;
 mod host;
 mod info;
+mod list;
 mod locale;
 mod number;
 mod plurals;
+mod relativetime;
+mod segmenter;
 mod supported;
 mod tz;
 mod units;
@@ -1019,6 +1023,313 @@ pub unsafe extern "C" fn hi_number_currency_digits(currency: *const u8, len: usi
         .map_or(-1, i32::from)
 }
 
+/// A list format: ICU4X's list formatter for one locale, type and style.
+/// Opaque to C++, which frees it with hi_list_format_free.
+pub struct HiListFormat(list::ListFormat);
+
+// A NativeState holding a HiListFormat can be destroyed on any thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<HiListFormat>();
+};
+
+/// Make the list format of the language identifier of `locale` (a canonical
+/// tag), `kind` ("conjunction", "disjunction" or "unit") and `style`
+/// ("long", "short" or "narrow"). Null if a string is not UTF-8, for any
+/// other value, if `locale` does not parse, or if there is no data.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_list_format_new(
+    locale: *const u8,
+    locale_len: usize,
+    kind: *const u8,
+    kind_len: usize,
+    style: *const u8,
+    style_len: usize,
+) -> *mut HiListFormat {
+    let (Some(locale), Some(kind), Some(style)) = (
+        as_str(locale, locale_len),
+        as_str(kind, kind_len),
+        as_str(style, style_len),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    match list::ListFormat::new(locale, kind, style) {
+        Some(f) => Box::into_raw(Box::new(HiListFormat(f))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free a list format from hi_list_format_new. Accepts null.
+///
+/// # Safety
+/// `format` must be null or come from hi_list_format_new, and must not be
+/// freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_list_format_free(format: *mut HiListFormat) {
+    if !format.is_null() {
+        drop(Box::from_raw(format));
+    }
+}
+
+/// The literal text around the elements of a list whose last element is the
+/// UTF-16 text `last` (an unpaired surrogate reads as U+FFFD), separated by
+/// U+0000 like every list (write_list): 3 pieces for a list of two (`pair`),
+/// before, between and after; otherwise 5, before the first, after the
+/// first, between two middle elements, before the last and after the last.
+/// Always returns true.
+///
+/// # Safety
+/// `format` must be valid; `last` must point to `last_len` readable u16
+/// units, or `last_len` must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_list_format_literals(
+    format: *const HiListFormat,
+    pair: bool,
+    last: *const u16,
+    last_len: usize,
+    out: *mut HiString,
+) -> bool {
+    debug_assert!(!format.is_null());
+    let last: &[u16] = if last_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(last, last_len)
+    };
+    write_list(out, Some((*format).0.literals(pair, last)))
+}
+
+/// A segmenter: ICU4X's segmenter for one granularity and content locale.
+/// Opaque to C++, which frees it with hi_segmenter_free.
+pub struct HiSegmenter(segmenter::Segmenter);
+
+/// The segments of one string: its boundaries, and for word granularity
+/// whether each segment is word-like. Opaque to C++, which frees it with
+/// hi_segments_free.
+pub struct HiSegments(segmenter::Segments);
+
+// A NativeState holding a HiSegmenter or a HiSegments can be destroyed on
+// any thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<HiSegmenter>();
+    assert_send::<HiSegments>();
+};
+
+/// Make the segmenter of `granularity` ("grapheme", "word" or "sentence")
+/// with the language identifier of `locale` (a canonical tag) as content
+/// locale. Null if a string is not UTF-8, for any other granularity, if
+/// `locale` does not parse, or if there is no data.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segmenter_new(
+    locale: *const u8,
+    locale_len: usize,
+    granularity: *const u8,
+    granularity_len: usize,
+) -> *mut HiSegmenter {
+    let (Some(locale), Some(granularity)) = (
+        as_str(locale, locale_len),
+        as_str(granularity, granularity_len),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    match segmenter::Segmenter::new(locale, granularity) {
+        Some(s) => Box::into_raw(Box::new(HiSegmenter(s))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free a segmenter from hi_segmenter_new. Accepts null.
+///
+/// # Safety
+/// `segmenter` must be null or come from hi_segmenter_new, and must not be
+/// freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segmenter_free(segmenter: *mut HiSegmenter) {
+    if !segmenter.is_null() {
+        drop(Box::from_raw(segmenter));
+    }
+}
+
+/// Segment the UTF-16 text `text` (it may have unpaired surrogates) with
+/// `segmenter`: every boundary, in UTF-16 code units. The segments borrow
+/// neither `segmenter` nor `text`. Null if `text_len` is above i32::MAX, so
+/// that every index fits in an int.
+///
+/// # Safety
+/// `segmenter` must be valid; `text` must point to `text_len` readable u16
+/// units, or `text_len` must be 0.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segments_new(
+    segmenter: *const HiSegmenter,
+    text: *const u16,
+    text_len: usize,
+) -> *mut HiSegments {
+    debug_assert!(!segmenter.is_null());
+    if i32::try_from(text_len).is_err() {
+        return std::ptr::null_mut();
+    }
+    let text: &[u16] = if text_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(text, text_len)
+    };
+    Box::into_raw(Box::new(HiSegments((*segmenter).0.segment(text))))
+}
+
+/// Free segments from hi_segments_new. Accepts null.
+///
+/// # Safety
+/// `segments` must be null or come from hi_segments_new, and must not be
+/// freed twice.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segments_free(segments: *mut HiSegments) {
+    if !segments.is_null() {
+        drop(Box::from_raw(segments));
+    }
+}
+
+/// FindBoundary: the last boundary at or before `index` (`after` false) or
+/// the first boundary after it (`after` true); -1 unless 0 <= `index` <
+/// the length of the string.
+///
+/// # Safety
+/// `segments` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segments_find_boundary(
+    segments: *const HiSegments,
+    index: i32,
+    after: bool,
+) -> i32 {
+    debug_assert!(!segments.is_null());
+    let Ok(index) = u32::try_from(index) else {
+        return -1;
+    };
+    // Every boundary fits in an i32 (hi_segments_new).
+    (*segments)
+        .0
+        .find_boundary(index, after)
+        .map_or(-1, |b| b as i32)
+}
+
+/// Whether the segment that starts at the boundary `start` is word-like,
+/// in `*out`. False, leaving `*out` alone, if the granularity is not word,
+/// or if `start` is not a boundary or is the length of the string.
+///
+/// # Safety
+/// `segments` must be valid; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_segments_is_word_like(
+    segments: *const HiSegments,
+    start: i32,
+    out: *mut bool,
+) -> bool {
+    debug_assert!(!segments.is_null());
+    let Some(word_like) = u32::try_from(start)
+        .ok()
+        .and_then(|start| (*segments).0.is_word_like(start))
+    else {
+        return false;
+    };
+    *out = word_like;
+    true
+}
+
+/// RelativeTimeFormat's data for the language identifier of `locale` (a
+/// canonical tag) and `style` ("long", "short" or "narrow"): when it
+/// returns true, `out` is the entries of relativetime::patterns, separated
+/// by U+0000. False if a string is not UTF-8, for any other style, if
+/// `locale` does not parse, or if there is no data.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0; `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_relative_time_patterns(
+    locale: *const u8,
+    locale_len: usize,
+    style: *const u8,
+    style_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let (Some(locale), Some(style)) = (as_str(locale, locale_len), as_str(style, style_len)) else {
+        *out = HiString::EMPTY;
+        return false;
+    };
+    write_list(out, relativetime::patterns(locale, style))
+}
+
+/// A DisplayNames name of `code` for the language identifier of `locale` (a
+/// canonical tag), by `kind` and `style`, as displaynames::name documents.
+/// When it returns true, `*found` says whether there is a name, and `out` is
+/// the name, or empty without one. False, with `*found` false, if a string
+/// is not UTF-8, for any other kind or style, or if `locale` does not parse.
+///
+/// # Safety
+/// Each string must point to its length of readable bytes, or the length
+/// must be 0; `found` and `out` must be valid for writes.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn hi_display_name(
+    locale: *const u8,
+    locale_len: usize,
+    kind: *const u8,
+    kind_len: usize,
+    code: *const u8,
+    code_len: usize,
+    style: *const u8,
+    style_len: usize,
+    found: *mut bool,
+    out: *mut HiString,
+) -> bool {
+    let result = match (
+        as_str(locale, locale_len),
+        as_str(kind, kind_len),
+        as_str(code, code_len),
+        as_str(style, style_len),
+    ) {
+        (Some(locale), Some(kind), Some(code), Some(style)) => {
+            displaynames::name(locale, kind, code, style)
+        }
+        _ => None,
+    };
+    let Some(result) = result else {
+        *found = false;
+        *out = HiString::EMPTY;
+        return false;
+    };
+    *found = write_out(out, result);
+    true
+}
+
+/// The locale display patterns of the language identifier of `locale` (a
+/// canonical tag): when it returns true, `out` is localePattern and
+/// localeSeparator in CLDR's form, separated by U+0000. False if `locale`
+/// is not UTF-8 or does not parse.
+///
+/// # Safety
+/// As hi_locale_canonicalize.
+#[no_mangle]
+pub unsafe extern "C" fn hi_locale_display_patterns(
+    locale: *const u8,
+    len: usize,
+    out: *mut HiString,
+) -> bool {
+    write_list(
+        out,
+        as_str(locale, len)
+            .and_then(displaynames::locale_patterns)
+            .map(Vec::from),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1169,6 +1480,215 @@ mod tests {
     }
 
     #[test]
+    fn ffi_list_format() {
+        let make = |locale: &[u8], kind: &[u8], style: &[u8]| unsafe {
+            hi_list_format_new(
+                locale.as_ptr(),
+                locale.len(),
+                kind.as_ptr(),
+                kind.len(),
+                style.as_ptr(),
+                style.len(),
+            )
+        };
+        let literals = |f: *const HiListFormat, pair, last: &[u16]| {
+            let mut out = HiString::EMPTY;
+            assert!(unsafe {
+                hi_list_format_literals(f, pair, last.as_ptr(), last.len(), &mut out)
+            });
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            s
+        };
+        let es = make(b"es", b"conjunction", b"long");
+        assert!(!es.is_null());
+        assert_eq!(literals(es, true, &[]), "\0 y \0");
+        let ibiza: Vec<u16> = "Ibiza".encode_utf16().collect();
+        assert_eq!(literals(es, true, &ibiza), "\0 e \0");
+        assert_eq!(literals(es, false, &ibiza), "\0, \0, \0 e \0");
+        unsafe { hi_list_format_free(es) };
+        unsafe { hi_list_format_free(std::ptr::null_mut()) };
+        assert!(make(b"en_US", b"conjunction", b"long").is_null());
+        assert!(make(b"en", b"and", b"long").is_null());
+        assert!(make(b"en", b"unit", b"wide").is_null());
+        assert!(make(&[0xff], b"unit", b"long").is_null());
+        assert!(make(b"en", &[0xff], b"long").is_null());
+        assert!(make(b"en", b"unit", &[0xff]).is_null());
+    }
+
+    #[test]
+    fn ffi_segmenter() {
+        let make = |locale: &[u8], granularity: &[u8]| unsafe {
+            hi_segmenter_new(
+                locale.as_ptr(),
+                locale.len(),
+                granularity.as_ptr(),
+                granularity.len(),
+            )
+        };
+        let word = make(b"en", b"word");
+        assert!(!word.is_null());
+        // "a\ud800b c": the indices are UTF-16 code units.
+        let text = [0x61u16, 0xD800, 0x62, 0x20, 0x63];
+        let s = unsafe { hi_segments_new(word, text.as_ptr(), text.len()) };
+        assert!(!s.is_null());
+        // The segments do not borrow the segmenter.
+        unsafe { hi_segmenter_free(word) };
+        let find = |index, after| unsafe { hi_segments_find_boundary(s, index, after) };
+        assert_eq!(find(0, false), 0);
+        assert_eq!(find(0, true), 1);
+        assert_eq!(find(1, true), 2);
+        assert_eq!(find(4, false), 4);
+        assert_eq!(find(4, true), 5);
+        assert_eq!(find(5, false), -1);
+        assert_eq!(find(-1, true), -1);
+        assert_eq!(find(i32::MIN, false), -1);
+        let word_like = |start| {
+            let mut out = false;
+            unsafe { hi_segments_is_word_like(s, start, &mut out) }.then_some(out)
+        };
+        assert_eq!(word_like(0), Some(true));
+        assert_eq!(word_like(1), Some(false));
+        assert_eq!(word_like(3), Some(false));
+        assert_eq!(word_like(4), Some(true));
+        assert_eq!(word_like(5), None);
+        assert_eq!(word_like(-1), None);
+        unsafe { hi_segments_free(s) };
+        unsafe { hi_segments_free(std::ptr::null_mut()) };
+
+        let grapheme = make(b"en", b"grapheme");
+        let empty = unsafe { hi_segments_new(grapheme, std::ptr::null(), 0) };
+        assert_eq!(unsafe { hi_segments_find_boundary(empty, 0, true) }, -1);
+        let mut out = true;
+        assert!(!unsafe { hi_segments_is_word_like(empty, 0, &mut out) });
+        assert!(out);
+        unsafe { hi_segments_free(empty) };
+        let text = [0x61u16, 0x62];
+        let s = unsafe { hi_segments_new(grapheme, text.as_ptr(), text.len()) };
+        assert_eq!(unsafe { hi_segments_find_boundary(s, 0, true) }, 1);
+        assert!(!unsafe { hi_segments_is_word_like(s, 0, &mut out) });
+        unsafe { hi_segments_free(s) };
+        // Longer than i32::MAX: the pointer is never read.
+        let too_long =
+            unsafe { hi_segments_new(grapheme, std::ptr::NonNull::dangling().as_ptr(), 1 << 31) };
+        assert!(too_long.is_null());
+        unsafe { hi_segmenter_free(grapheme) };
+        unsafe { hi_segmenter_free(std::ptr::null_mut()) };
+
+        let sentence = make(b"el", b"sentence");
+        assert!(!sentence.is_null());
+        unsafe { hi_segmenter_free(sentence) };
+        assert!(make(b"en", b"line").is_null());
+        assert!(make(b"en_US", b"word").is_null());
+        assert!(make(&[0xff], b"word").is_null());
+        assert!(make(b"en", &[0xff]).is_null());
+    }
+
+    #[test]
+    fn ffi_relative_time_patterns() {
+        let patterns = |locale: &[u8], style: &[u8]| {
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_relative_time_patterns(
+                    locale.as_ptr(),
+                    locale.len(),
+                    style.as_ptr(),
+                    style.len(),
+                    &mut out,
+                )
+            };
+            if !ok {
+                assert!(out.data.is_null());
+                return None;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(s.split('\0').map(str::to_owned).collect::<Vec<_>>())
+        };
+        // en long second: 12 patterns, then the one relative name "now".
+        let en = patterns(b"en", b"long").unwrap();
+        assert_eq!(en[5], "in {0} seconds");
+        assert_eq!(en[11], "{0} seconds ago");
+        assert_eq!(&en[12..15], ["1", "0", "now"]);
+        // minute: en has no zero category, so zero gets other's pattern.
+        assert_eq!(&en[15..17], ["in {0} minutes", "in {0} minute"]);
+        assert_eq!(patterns(b"en", b"wide"), None);
+        assert_eq!(patterns(b"en_US", b"long"), None);
+        assert_eq!(patterns(&[0xff], b"long"), None);
+        assert_eq!(patterns(b"en", &[0xff]), None);
+    }
+
+    #[test]
+    fn ffi_display_names() {
+        // (accepted, found, name)
+        let name = |locale: &[u8], kind: &[u8], code: &[u8], style: &[u8]| {
+            let mut found = true;
+            let mut out = HiString::EMPTY;
+            let ok = unsafe {
+                hi_display_name(
+                    locale.as_ptr(),
+                    locale.len(),
+                    kind.as_ptr(),
+                    kind.len(),
+                    code.as_ptr(),
+                    code.len(),
+                    style.as_ptr(),
+                    style.len(),
+                    &mut found,
+                    &mut out,
+                )
+            };
+            if !found {
+                assert!(out.data.is_null());
+            }
+            let s = if out.data.is_null() {
+                String::new()
+            } else {
+                let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+                String::from_utf8(s.to_vec()).unwrap()
+            };
+            unsafe { hi_string_free(out) };
+            (ok, found, s)
+        };
+        let named = |s: &str| (true, true, s.to_owned());
+        assert_eq!(name(b"en", b"region", b"US", b"short"), named("US"));
+        assert_eq!(
+            name(b"en", b"currency", b"USD", b"long"),
+            named("US Dollar")
+        );
+        assert_eq!(name(b"de", b"dateTimeField", b"era", b"narrow"), named("E"));
+        let none = (true, false, String::new());
+        assert_eq!(name(b"en", b"region", b"ZZZZ", b"long"), none);
+        assert_eq!(name(b"und", b"currency", b"USD", b"long"), none);
+        let rejected = (false, false, String::new());
+        assert_eq!(name(b"en", b"lang", b"en", b"long"), rejected);
+        assert_eq!(name(b"en", b"region", b"US", b"wide"), rejected);
+        assert_eq!(name(b"en_US", b"region", b"US", b"long"), rejected);
+        assert_eq!(name(&[0xff], b"region", b"US", b"long"), rejected);
+        assert_eq!(name(b"en", &[0xff], b"US", b"long"), rejected);
+        assert_eq!(name(b"en", b"region", &[0xff], b"long"), rejected);
+        assert_eq!(name(b"en", b"region", b"US", &[0xff]), rejected);
+
+        let patterns = |locale: &[u8]| {
+            let mut out = HiString::EMPTY;
+            let ok = unsafe { hi_locale_display_patterns(locale.as_ptr(), locale.len(), &mut out) };
+            if !ok {
+                assert!(out.data.is_null());
+                return None;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let s = String::from_utf8(s.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(s)
+        };
+        assert_eq!(patterns(b"en").as_deref(), Some("{0} ({1})\0{0}, {1}"));
+        assert_eq!(patterns(b"en_US"), None);
+        assert_eq!(patterns(&[0xff]), None);
+    }
+
+    #[test]
     fn ffi_number_data() {
         /// Call a list function and split its result at U+0000.
         fn take(ok: bool, out: HiString) -> Option<Vec<String>> {
@@ -1188,8 +1708,9 @@ mod tests {
             take(ok, out)
         };
         let en = symbols(b"en", b"latn").unwrap();
-        assert_eq!(en.len(), 21);
+        assert_eq!(en.len(), 22);
         assert_eq!((en[0].as_str(), en[18].as_str()), (".", "{0}–{1}"));
+        assert_eq!(en[21], ":");
         assert_eq!(symbols(b"en_US", b"latn"), None);
         assert_eq!(symbols(&[0xff], b"latn"), None);
         assert_eq!(symbols(b"en", &[0xff]), None);

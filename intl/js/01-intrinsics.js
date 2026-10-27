@@ -24,6 +24,7 @@ var _RangeError = RangeError;
 var _Symbol = Symbol;
 var SymbolToPrimitive = Symbol.toPrimitive;
 var SymbolToStringTag = Symbol.toStringTag;
+var SymbolIterator = Symbol.iterator;
 var _BigInt = BigInt;
 var DateNow = Date.now;
 var DatePrototypeGetTime = Date.prototype.getTime;
@@ -49,6 +50,11 @@ var TypedArrayPrototypeGetLength = ObjectGetOwnPropertyDescriptor(
   TypedArrayPrototype,
   'length',
 ).get;
+/// %Iterator.prototype% (ECMA-262 27.1.3.3): the prototype of
+/// %ArrayIteratorPrototype%, the prototype of an array iterator.
+var IteratorPrototype = ObjectGetPrototypeOf(
+  ObjectGetPrototypeOf([][SymbolIterator]()),
+);
 
 /// s.indexOf(search, from) through the captured method. This is ECMA-262
 /// 6.1.4.1 StringIndexOf, with -1 for not-found.
@@ -85,6 +91,26 @@ function ToObject(v) {
     throw new _TypeError('Cannot convert undefined or null to object');
   // 2-8. Wrap a primitive in a new wrapper object; return an object as is.
   return _Object(v);
+}
+
+/// Whether v is an Object.
+function isObject(v) {
+  // 1. Return whether v is an Object: typeof gives "object" for a non-null
+  //    object and "function" for a callable one.
+  return (typeof v === 'object' && v !== null) || typeof v === 'function';
+}
+
+// ECMA-262 7.3.10 GetMethod ( V, P )
+function GetMethod(V, P) {
+  // 1. Let func be ? GetV(V, P).
+  var func = V[P];
+  // 2. If func is either undefined or null, return undefined.
+  if (func === undefined || func === null) return undefined;
+  // 3. If IsCallable(func) is false, throw a TypeError exception.
+  if (typeof func !== 'function')
+    throw new _TypeError('Property is not a function');
+  // 4. Return func.
+  return func;
 }
 
 // ECMA-262 7.2.1 RequireObjectCoercible ( arg ). name, when given, is the

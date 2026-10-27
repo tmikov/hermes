@@ -281,6 +281,84 @@ inline std::vector<std::string> pluralRulesCategories(
   return takeList(out);
 }
 
+/// The list format for the language identifier of \p locale (canonical),
+/// \p type ("conjunction", "disjunction" or "unit") and \p style ("long",
+/// "short" or "narrow"); null for any other value, if \p locale does not
+/// parse, or if there is no data. The caller frees it with
+/// hi_list_format_free.
+inline HiListFormat *listFormatNew(
+    std::string_view locale,
+    std::string_view type,
+    std::string_view style) {
+  return hi_list_format_new(
+      bytes(locale),
+      locale.size(),
+      bytes(type),
+      type.size(),
+      bytes(style),
+      style.size());
+}
+
+/// The literal text \p format puts around the elements of a list of two
+/// (\p pair) or more elements whose last element is \p last: the 3 or 5
+/// entries hi_list_format_literals documents.
+inline std::vector<std::string> listFormatLiterals(
+    const HiListFormat *format,
+    bool pair,
+    std::u16string_view last) {
+  HiString out;
+  hi_list_format_literals(
+      format,
+      pair,
+      reinterpret_cast<const uint16_t *>(last.data()),
+      last.size(),
+      &out);
+  return takeList(out);
+}
+
+/// The segmenter of \p granularity ("grapheme", "word" or "sentence") with
+/// the language identifier of \p locale (canonical) as content locale; null
+/// for any other granularity, if \p locale does not parse, or if there is no
+/// data. The caller frees it with hi_segmenter_free.
+inline HiSegmenter *segmenterNew(
+    std::string_view locale,
+    std::string_view granularity) {
+  return hi_segmenter_new(
+      bytes(locale), locale.size(), bytes(granularity), granularity.size());
+}
+
+/// The segments of \p text by \p segmenter; null if \p text is longer than
+/// INT_MAX code units. The caller frees them with hi_segments_free.
+inline HiSegments *segmentsNew(
+    const HiSegmenter *segmenter,
+    std::u16string_view text) {
+  return hi_segments_new(
+      segmenter, reinterpret_cast<const uint16_t *>(text.data()), text.size());
+}
+
+/// FindBoundary in \p segments: the last boundary at or before \p index, or
+/// with \p after the first boundary after it. nullopt unless 0 <= \p index <
+/// the length of the string.
+inline std::optional<int>
+segmentsFindBoundary(const HiSegments *segments, int index, bool after) {
+  int32_t boundary = hi_segments_find_boundary(segments, index, after);
+  if (boundary < 0)
+    return std::nullopt;
+  return boundary;
+}
+
+/// Whether the segment of \p segments that starts at the boundary \p start
+/// is word-like. nullopt if the granularity is not word, or if \p start is
+/// not a boundary or is the length of the string.
+inline std::optional<bool> segmentsIsWordLike(
+    const HiSegments *segments,
+    int start) {
+  bool wordLike;
+  if (!hi_segments_is_word_like(segments, start, &wordLike))
+    return std::nullopt;
+  return wordLike;
+}
+
 /// NumberFormat's symbols and decimal and percent patterns for the language
 /// identifier of \p locale (canonical) and the numbering system \p nu: the
 /// 23 entries hi_number_symbols documents. nullopt if \p locale does not
@@ -398,6 +476,58 @@ inline std::optional<std::vector<std::string>> unitPatterns(
           bytes(width),
           width.size(),
           &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// RelativeTimeFormat's CLDR data for \p locale and \p style ("long",
+/// "short" or "narrow"): the entries hi_relative_time_patterns documents.
+/// nullopt for any other style, if \p locale does not parse, or if there is
+/// no data.
+inline std::optional<std::vector<std::string>> relativeTimePatterns(
+    std::string_view locale,
+    std::string_view style) {
+  HiString out;
+  if (!hi_relative_time_patterns(
+          bytes(locale), locale.size(), bytes(style), style.size(), &out))
+    return std::nullopt;
+  return takeList(out);
+}
+
+/// A DisplayNames name of \p code for \p locale (canonical), \p kind and
+/// \p style, as hi_display_name documents: the outer nullopt for any other
+/// kind or style or if \p locale does not parse, the inner one when there is
+/// no name.
+inline std::optional<std::optional<std::string>> displayName(
+    std::string_view locale,
+    std::string_view kind,
+    std::string_view code,
+    std::string_view style) {
+  bool found;
+  HiString out;
+  if (!hi_display_name(
+          bytes(locale),
+          locale.size(),
+          bytes(kind),
+          kind.size(),
+          bytes(code),
+          code.size(),
+          bytes(style),
+          style.size(),
+          &found,
+          &out))
+    return std::nullopt;
+  if (!found)
+    return std::optional<std::string>();
+  return std::optional<std::string>(takeString(out));
+}
+
+/// The locale display patterns of \p locale (canonical): localePattern and
+/// localeSeparator in CLDR's form. nullopt if \p locale does not parse.
+inline std::optional<std::vector<std::string>> localeDisplayPatterns(
+    std::string_view locale) {
+  HiString out;
+  if (!hi_locale_display_patterns(bytes(locale), locale.size(), &out))
     return std::nullopt;
   return takeList(out);
 }
