@@ -1826,6 +1826,8 @@ CallResult<HermesValue> typedArrayPrototypeJoin(void *, Runtime &runtime) {
   // Final size of the resultant string.
   // Its safe to multiply as overflow check is done above
   SafeUInt32 size(sepLength * (len - 1));
+  // Whether the separator, if used, and every element string are ASCII.
+  bool allASCII = len < 2 || lv.sep->isASCII();
 
   // Storage for the strings for each element.
   auto arrRes = JSArray::create(runtime, len, 0);
@@ -1854,6 +1856,7 @@ CallResult<HermesValue> typedArrayPrototypeJoin(void *, Runtime &runtime) {
       }
       auto stringPtr = vmcast<StringPrimitive>(lv.elem.getHermesValue());
       size.add(stringPtr->getStringLength());
+      allASCII &= stringPtr->isASCII();
       if (LLVM_UNLIKELY(
               JSArray::setElementAt(
                   lv.strings,
@@ -1866,7 +1869,7 @@ CallResult<HermesValue> typedArrayPrototypeJoin(void *, Runtime &runtime) {
   }
 
   // Allocate the complete result.
-  auto builder = StringBuilder::createStringBuilder(runtime, size);
+  auto builder = StringBuilder::createStringBuilder(runtime, size, allASCII);
   if (builder == ExecutionStatus::EXCEPTION) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -2229,6 +2232,8 @@ CallResult<HermesValue> typedArrayPrototypeToLocaleString(
 
   // Final size of the result string. Initialize to account for the separators.
   SafeUInt32 size(len - 1);
+  // Whether every element string is ASCII; the separator is.
+  bool allASCII = true;
 
   struct : public Locals {
     PinnedValue<JSArray> strings;
@@ -2296,13 +2301,14 @@ CallResult<HermesValue> typedArrayPrototypeToLocaleString(
               ExecutionStatus::EXCEPTION))
         return ExecutionStatus::EXCEPTION;
       size.add(lv.elementStr->getStringLength());
+      allASCII &= lv.elementStr->isASCII();
     } else {
       return runtime.raiseTypeError("toLocaleString() not callable");
     }
     gcScope.flushToMarker(marker);
   }
 
-  auto builder = StringBuilder::createStringBuilder(runtime, size);
+  auto builder = StringBuilder::createStringBuilder(runtime, size, allASCII);
   if (builder == ExecutionStatus::EXCEPTION) {
     return ExecutionStatus::EXCEPTION;
   }
