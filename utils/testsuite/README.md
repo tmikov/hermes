@@ -61,7 +61,7 @@ given).
 Hermes has no `Intl` of its own, so a normal run skips every test under
 `test262/test/intl402`, with or without `--test-skiplist`, and the skiplist has
 no entries for them. Run them in Intl plugin mode (`--intl-plugin`, see
-`intl/README.md`), which ignores the skiplist for intl402.
+`intl/doc/Testing.md`), which ignores the skiplist for intl402.
 
 After it finishes, all passed tests included in the skiplist config file will be
 printed, and you can tell the runner to remove these tests from the config by

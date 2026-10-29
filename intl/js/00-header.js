@@ -12,9 +12,9 @@
 // completion value of the compiled bytecode is the setup function in
 // 99-footer.js, which intl/jsi/Plugin.cpp calls once per runtime.
 //
-// Follow the rules in "Writing plugin JS" in intl/README.md: captured
-// intrinsics only, no spread or for-of, listPush instead of indexed stores,
-// null-prototype descriptors.
+// Follow the rules in "Writing plugin JS" in intl/doc/Development.md:
+// captured intrinsics only, no spread or for-of, listPush instead of indexed
+// stores, null-prototype descriptors.
 (function () {
 'use strict';
 

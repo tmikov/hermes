@@ -57,7 +57,7 @@ function nameSymbolListOf(data) {
   // 1. If data has the List, return it.
   if (data.symbolList !== undefined) return data.symbolList;
   // 2. Split data.symbols at each space, without String.prototype.split
-  //    (README rule 2).
+  //    (rule 2 of intl/doc/Development.md).
   var list = [];
   var symbols = data.symbols;
   var start = 0;

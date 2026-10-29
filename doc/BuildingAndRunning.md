@@ -24,7 +24,7 @@ configure fails and names the option. Configure with
 `-DHERMES_BUILD_INTL=OFF` for a build without Rust; Hermes then has no
 `Intl`, and `toLocaleString` and the other locale-sensitive built-ins give
 Hermes's own results. On Windows the option is off by default. See
-[the plugin's README](../intl/README.md) for details. The option
+[Building the Intl plugin](../intl/doc/Building.md) for details. The option
 `HERMES_ENABLE_INTL`, which enabled Hermes's former built-in `Intl`, is
 deprecated and ignored.
 

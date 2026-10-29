@@ -4,7 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 # The Android smoke test (smoke.cpp): it links libhermesvm.so and libjsi.so,
-# as an app does, and is run on a device or emulator (intl/README.md).
+# as an app does, and is run on a device or emulator
+# (intl/doc/Testing.md).
 set(HERMES_ENABLE_EH ON)
 set(HERMES_ENABLE_RTTI ON)
 

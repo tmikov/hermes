@@ -10,8 +10,8 @@
 // October 24, 2026 that read iterables (StringListFromIterable). Section
 // numbers are from the https://tc39.es/ecma262/ draft of the same date. The
 // protocol is written out here because for-of consults user-modifiable
-// state (README rule 2); every Get and Call on the iterable, the iterator
-// and its results is one the spec performs.
+// state (rule 2 of intl/doc/Development.md); every Get and Call on the
+// iterable, the iterator and its results is one the spec performs.
 
 /// The value IteratorStepValue returns for ~done~: a plugin-private object,
 /// so no iterator can yield it.

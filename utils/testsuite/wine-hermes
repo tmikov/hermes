@@ -5,8 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 # Run utils/test_runner.py's hermes under Wine: a Windows build's hermes.exe,
-# for plugin-mode test262 on Linux (intl/README.md, "Running the Windows
-# build under Wine").
+# for plugin-mode test262 on Linux (intl/doc/Building.md, "test262 under
+# Wine").
 #
 #   ln -s <checkout>/utils/testsuite/wine-hermes <bin dir>/hermes
 #   WINE_HERMES_DIR=<windows build>/bin python3 utils/test_runner.py \

@@ -9,7 +9,7 @@
 // from libhermesvm.so and JSI from libjsi.so, as an app does, creates a
 // runtime with the default configuration (so default resolution finds the
 // plugin and the defaults come from the device), and prints a few Intl
-// results. intl/README.md describes the layouts it is run in.
+// results. intl/doc/Testing.md describes the layouts it is run in.
 //
 // Without the plugin there is no Intl: it prints "typeof Intl: undefined"
 // and the results of two of Hermes's own locale fallbacks that need no JVM

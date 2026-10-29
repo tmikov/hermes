@@ -6,8 +6,8 @@
 # A CMake toolchain file that builds Hermes for Windows on Linux with
 # Microsoft's own compiler, linker and assemblers (cl, link, lib, ml64 or
 # armasm64, rc, mt), run under Wine through the wrapper scripts of msvc-wine
-# (https://github.com/mstorsjo/msvc-wine). See "Building with Microsoft's
-# compiler under Wine" in intl/README.md.
+# (https://github.com/mstorsjo/msvc-wine). See "Cross-building for Windows
+# on Linux" in intl/doc/Building.md.
 #
 #   cmake -G Ninja -B build-win \
 #     -DCMAKE_TOOLCHAIN_FILE=utils/windows-cross/msvc-wine.cmake \

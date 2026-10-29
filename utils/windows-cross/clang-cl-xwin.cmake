@@ -6,7 +6,7 @@
 # A CMake toolchain file that cross-compiles Hermes for Windows (the MSVC
 # ABI) on Linux, with clang-cl, lld-link and the MSVC C runtime, C++ library
 # and Windows SDK that xwin (https://github.com/Jake-Shadle/xwin) downloads.
-# See "Cross-building for Windows on Linux" in intl/README.md.
+# See "Cross-building for Windows on Linux" in intl/doc/Building.md.
 #
 #   cmake -G Ninja -B build-win \
 #     -DCMAKE_TOOLCHAIN_FILE=utils/windows-cross/clang-cl-xwin.cmake \

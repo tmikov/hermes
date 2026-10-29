@@ -7,8 +7,8 @@
 
 // A test app that loads Hermes from the hermes-android AAR the way React
 // Native does (Java, SoLoader, prefab), to check that default resolution
-// finds the Intl plugin in an app. See intl/README.md, "On an Android
-// device".
+// finds the Intl plugin in an app. See intl/doc/Testing.md, "The test
+// app".
 
 pluginManagement {
   repositories {

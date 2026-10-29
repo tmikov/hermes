@@ -38,9 +38,10 @@ function listPush(list, v) {
 }
 
 /// Replace the element at index i of list with v without consulting
-/// Array.prototype (README rule 3). For an index listPush created, a[i] = v
-/// would find the own data property and run no setter, but defining the
-/// property keeps the rule by letter and does not depend on that.
+/// Array.prototype (rule 3 of intl/doc/Development.md). For an index
+/// listPush created, a[i] = v would find the own data property and run no
+/// setter, but defining the property keeps the rule by letter and does not
+/// depend on that.
 function listSet(list, i, v) {
   // 1. Perform ! CreateDataPropertyOrThrow(list, i, v).
   CreateDataPropertyOrThrow(list, i, v);

@@ -1978,8 +1978,8 @@ NumberFormat's internal plural-rules objects use it.
     in the same form as `units.txt`, with each pattern's digits written as
     one `0` so that consecutive magnitudes share a line, and the generator
     checks it the same way. `intl/core/data/LICENSE` is the Unicode License
-    V3, which covers every CLDR-derived file there. `intl/README.md`
-    describes the formats. The five files are 0.94 MB, 0.78 MB of it
+    V3, which covers every CLDR-derived file there. Each file's header
+    comment describes its format. The five files are 0.94 MB, 0.78 MB of it
     `units.txt` and 39 KB `compact-currency.txt`.
   - **Lookups.** Native data is looked up by the language identifier of
     `[[Locale]]` (the `-u-` keywords are already in the slots) and the
@@ -2372,8 +2372,8 @@ NumberFormat's internal plural-rules objects use it.
     The generator checks that every locale and calendar reads back to its
     CLDR data. Lookups work as for NumberFormat: by the language
     identifier of `[[Locale]]`, whose entry is the first one ICU4X's
-    `LocaleFallbacker` reaches from it. `intl/README.md` describes the
-    formats.
+    `LocaleFallbacker` reaches from it. Each file's header comment
+    describes its format.
   - **Time zone identifiers.** The draft's CreateDateTimeFormat stores
     the primary identifier (`Asia/Calcutta` is `Asia/Kolkata`, `Etc/UTC`
     is `UTC`), and so does the plugin. test262's `canonical-tz` tests come
@@ -3512,13 +3512,13 @@ NumberFormat's internal plural-rules objects use it.
       `Intl.Segmenter` in Phase 6, and since Phase 7 it reports
       `typeof Intl: undefined` and the results of Hermes's own fallbacks.
     - Plugin-mode test262 on the device through `utils/testsuite/adb-hermes`
-      (`intl/README.md`), x86_64 natively and arm64 under translation:
+      (`intl/doc/Testing.md`), x86_64 natively and arm64 under translation:
       both give the host's totals (2696 pass, 18 js-fail, 0 problems).
     - armeabi-v7a and x86 are built and checked (exports, `NEEDED`,
       alignment) but not run: the image has no 32-bit ABIs. No physical
       device was used.
-  - **Apple platforms**, by hand on a Mac (`intl/README.md` has the
-    commands):
+  - **Apple platforms**, by hand on a Mac (`intl/doc/Testing.md` has
+    the commands):
     - per-slice link checks of both frameworks (`lipo`, `vtool`, `otool`,
       `nm -m`);
     - the smoke host `hermes-intl-apple-smoke` (`intl/test/apple/`) in the
@@ -3547,7 +3547,7 @@ NumberFormat's internal plural-rules objects use it.
     debug ABI bits rejected before any call into it, the JSI contract
     fixture, the defaults Wine reports, `IntlPluginUnitTests.exe`'s
     `DefaultsTest.*`, and plugin-mode test262 with the host's totals
-    (through `utils/testsuite/wine-hermes`, `intl/README.md`).
+    (through `utils/testsuite/wine-hermes`, `intl/doc/Building.md`).
     Wine 9's own `msvcp140.dll` makes Hermes executables hang
     intermittently, with or without the plugin; with Microsoft's
     `msvcp140.dll` (`WINEDLLOVERRIDES=msvcp140=n`) there is no hang, so

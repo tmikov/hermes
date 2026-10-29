@@ -50,8 +50,9 @@ hence `-DHERMES_BUILD_SHARED_JSI=ON` above. To build without the plugin,
 and without Rust, pass `-DHERMES_BUILD_INTL=OFF` instead; Hermes then has
 no `Intl`. On the device, `Intl` needs the plugin pushed along with the
 binaries and the libraries they load; `utils/testsuite/adb-hermes setup`,
-described in [the plugin's README](../intl/README.md), collects them. The
-README also covers the other platforms.
+described in [Testing the Intl plugin](../intl/doc/Testing.md), collects
+them. [Building the Intl plugin](../intl/doc/Building.md) covers the other
+platforms.
 
 ## Emscripten
 
