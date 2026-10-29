@@ -77,6 +77,8 @@ android {
         arguments "-DIMPORT_HOST_COMPILERS=${hermesUtils.hermesC}"
         arguments "-DHERMES_SLOW_DEBUG=False"
         arguments "-DHERMES_ENABLE_INTL=True"
+        // Tests the built-in Intl, not the plugin; removed in Phase 7.
+        arguments "-DHERMES_BUILD_INTL=OFF"
         targets "jsijni", "jsijniepi", "hermesvm"
       }
     }

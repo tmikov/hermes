@@ -16,6 +16,17 @@
 #include <CoreFoundation/CoreFoundation.h>
 #elif defined(__ANDROID__)
 #include <sys/system_properties.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <climits>
+#include <cwchar>
+#include <iterator>
 #else
 #include <unistd.h>
 #include <climits>
@@ -24,7 +35,7 @@
 namespace hermes_intl {
 namespace {
 
-#if !defined(__APPLE__)
+#if !defined(__APPLE__) && !defined(_WIN32)
 /// Append TZ to \p out if it is set. A set but empty TZ means UTC, as it
 /// does to the C library that Date's local time comes from: glibc treats
 /// TZ="" as UTC (`env TZ= date +%Z` prints "Universal"), and so does the
@@ -36,7 +47,7 @@ void addTimeZoneEnv(std::vector<std::string> &out, const HostEnvironment &env) {
 }
 #endif
 
-#if !defined(__APPLE__) && !defined(__ANDROID__)
+#if !defined(__APPLE__) && !defined(__ANDROID__) && !defined(_WIN32)
 /// Append the variable \p name to \p out if it is set and not empty. POSIX
 /// treats an empty locale variable as unset.
 void addEnv(
@@ -81,6 +92,57 @@ std::string toUtf8(CFStringRef s) {
 }
 #endif
 
+#if defined(_WIN32)
+/// The \p len UTF-16 units at \p s as UTF-8; "" if they are not valid
+/// UTF-16.
+std::string toUtf8(const wchar_t *s, size_t len) {
+  if (len == 0 || len > INT_MAX)
+    return "";
+  int n = static_cast<int>(len);
+  int size = ::WideCharToMultiByte(
+      CP_UTF8, WC_ERR_INVALID_CHARS, s, n, nullptr, 0, nullptr, nullptr);
+  if (size <= 0)
+    return "";
+  std::string result(size, '\0');
+  if (::WideCharToMultiByte(
+          CP_UTF8,
+          WC_ERR_INVALID_CHARS,
+          s,
+          n,
+          result.data(),
+          size,
+          nullptr,
+          nullptr) != size)
+    return "";
+  return result;
+}
+
+/// The NUL-terminated \p s as UTF-8.
+std::string toUtf8(const wchar_t *s) {
+  return toUtf8(s, std::wcslen(s));
+}
+
+/// The user's region from GetUserDefaultGeoName (an ISO 3166 code or a UN
+/// M.49 number), or "" if there is none. The function exists from Windows
+/// 10 1709, so it is looked up at run time: the plugin still loads on older
+/// systems, which get the territory 001 zone.
+std::string userRegion() {
+  using GetUserDefaultGeoNameFn = int(WINAPI *)(LPWSTR, int);
+  HMODULE kernel32 = ::GetModuleHandleW(L"kernel32.dll");
+  if (!kernel32)
+    return "";
+  auto getUserDefaultGeoName =
+      reinterpret_cast<GetUserDefaultGeoNameFn>(reinterpret_cast<void *>(
+          ::GetProcAddress(kernel32, "GetUserDefaultGeoName")));
+  if (!getUserDefaultGeoName)
+    return "";
+  wchar_t buf[16];
+  int n = getUserDefaultGeoName(buf, static_cast<int>(std::size(buf)));
+  // n counts the terminating NUL.
+  return n > 1 ? toUtf8(buf, n - 1) : "";
+}
+#endif
+
 /// \p tags as a comma-separated list of quoted strings, for messages.
 std::string quoteList(const std::vector<std::string> &tags) {
   std::string out;
@@ -94,6 +156,20 @@ std::string quoteList(const std::vector<std::string> &tags) {
 
 } // namespace
 
+std::string windowsLocaleCandidate(std::string_view name) {
+  // A sort order follows the locale after an underscore, which no locale
+  // name contains otherwise.
+  return std::string(name.substr(0, name.find('_')));
+}
+
+std::string localeFromCandidates(const std::vector<std::string> &candidates) {
+  for (const std::string &raw : candidates) {
+    if (auto tag = core::localeFromHost(raw))
+      return std::move(*tag);
+  }
+  return "en-US";
+}
+
 std::vector<std::string> hostLocaleCandidates(const HostEnvironment &env) {
   std::vector<std::string> out;
 #if defined(__APPLE__)
@@ -106,6 +182,15 @@ std::vector<std::string> hostLocaleCandidates(const HostEnvironment &env) {
         out.push_back(std::move(language));
     }
     CFRelease(languages);
+  }
+#elif defined(_WIN32)
+  // The user's regional format ("Region" in Settings), as ICU uses.
+  (void)env;
+  wchar_t name[LOCALE_NAME_MAX_LENGTH];
+  if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0) {
+    std::string candidate = windowsLocaleCandidate(toUtf8(name));
+    if (!candidate.empty())
+      out.push_back(std::move(candidate));
   }
 #elif defined(__ANDROID__)
   (void)env;
@@ -134,6 +219,20 @@ std::vector<std::string> hostTimeZoneCandidates(const HostEnvironment &env) {
       out.push_back(std::move(name));
     CFRelease(zone);
   }
+#elif defined(_WIN32)
+  // The registry key name of the system zone, which CLDR's windowsZones
+  // maps; StandardName is localized. The user's region picks a territory's
+  // own row.
+  (void)env;
+  DYNAMIC_TIME_ZONE_INFORMATION info{};
+  if (::GetDynamicTimeZoneInformation(&info) != TIME_ZONE_ID_INVALID) {
+    // The key is NUL-terminated unless it fills the array.
+    std::string key = toUtf8(
+        info.TimeZoneKeyName,
+        ::wcsnlen(info.TimeZoneKeyName, std::size(info.TimeZoneKeyName)));
+    if (auto zone = core::timeZoneFromWindows(key, userRegion()))
+      out.push_back(std::move(*zone));
+  }
 #elif defined(__ANDROID__)
   // bionic's own order (libc/tzcode/bionic.cpp): TZ, then the property.
   addTimeZoneEnv(out, env);
@@ -152,11 +251,7 @@ std::vector<std::string> hostTimeZoneCandidates(const HostEnvironment &env) {
 }
 
 std::string detectDefaultLocale(const HostEnvironment &env) {
-  for (const std::string &raw : hostLocaleCandidates(env)) {
-    if (auto tag = core::localeFromHost(raw))
-      return std::move(*tag);
-  }
-  return "en-US";
+  return localeFromCandidates(hostLocaleCandidates(env));
 }
 
 std::string detectDefaultTimeZone(const HostEnvironment &env) {

@@ -15,6 +15,11 @@
 //   FAKE_THROWING_INSTALL   install throws
 //   FAKE_REJECT_DEFAULTS    resolve_defaults reports an error
 //   FAKE_NEEDS_DEP          use a function from libfake_intl_dep.so
+//                           (fake_intl_dep.dll on Windows)
+//   FAKE_DEBUG_ABI_BITS     record _ITERATOR_DEBUG_LEVEL 2 and the debug C
+//                           runtime in the flags, whatever this build uses,
+//                           and report any call of resolve_defaults or
+//                           install on stderr
 
 #include "hermes/BCGen/HBC/BytecodeVersion.h"
 #include "hermes/Public/IntlPlugin.h"
@@ -22,6 +27,7 @@
 #include <jsi/jsi.h>
 
 #include <atomic>
+#include <cstdio>
 #include <string>
 
 #ifndef FAKE_INTERFACE_DELTA
@@ -29,6 +35,12 @@
 #endif
 #ifndef FAKE_BYTECODE_DELTA
 #define FAKE_BYTECODE_DELTA 0
+#endif
+
+#ifdef _WIN32
+#define FAKE_EXPORT __declspec(dllexport)
+#else
+#define FAKE_EXPORT __attribute__((visibility("default")))
 #endif
 
 using namespace facebook;
@@ -41,6 +53,9 @@ std::atomic<int> detections{0};
 /// Fill empty locales with "x-detected-<n>" and an empty time zone with
 /// "Fake/Detected", or reject everything in the FAKE_REJECT_DEFAULTS variant.
 std::string resolveDefaults(hermes_intl_config *config) {
+#ifdef FAKE_DEBUG_ABI_BITS
+  std::fprintf(stderr, "fake plugin: resolve_defaults was called\n");
+#endif
 #ifdef FAKE_REJECT_DEFAULTS
   (void)config;
   return "fake plugin rejects every default";
@@ -109,6 +124,9 @@ void installContractChecks(jsi::Runtime &rt) {
 /// {locales, timeZone, detections}, or throw in the FAKE_THROWING_INSTALL
 /// variant.
 void install(jsi::Runtime &rt, const hermes_intl_config *config) {
+#ifdef FAKE_DEBUG_ABI_BITS
+  std::fprintf(stderr, "fake plugin: install was called\n");
+#endif
 #ifdef FAKE_THROWING_INSTALL
   throw jsi::JSINativeException("fake plugin setup failure");
 #endif
@@ -127,16 +145,20 @@ void install(jsi::Runtime &rt, const hermes_intl_config *config) {
   rt.global().setProperty(rt, "__fakeIntlPlugin", info);
 }
 
-/// The entry's flags: this build's JSI_UNSTABLE setting, flipped in the
-/// FAKE_FLIP_FLAGS variant.
+/// The entry's flags: this build's, with the JSI_UNSTABLE flag flipped in
+/// the FAKE_FLIP_FLAGS variant, and the MSVC Debug bits in the
+/// FAKE_DEBUG_ABI_BITS variant.
 uint32_t flags() {
-#ifdef JSI_UNSTABLE
-  uint32_t f = HERMES_INTL_FLAG_JSI_UNSTABLE;
-#else
-  uint32_t f = 0;
-#endif
+  uint32_t f = HERMES_INTL_BUILD_FLAGS;
 #ifdef FAKE_FLIP_FLAGS
   f ^= HERMES_INTL_FLAG_JSI_UNSTABLE;
+#endif
+#ifdef FAKE_DEBUG_ABI_BITS
+  f = (f &
+       ~(HERMES_INTL_FLAG_ITERATOR_DEBUG_LEVEL_MASK |
+         HERMES_INTL_FLAG_DEBUG_CRT)) |
+      (2u << HERMES_INTL_FLAG_ITERATOR_DEBUG_LEVEL_SHIFT) |
+      HERMES_INTL_FLAG_DEBUG_CRT;
 #endif
   return f;
 }
@@ -154,8 +176,7 @@ const hermes_intl_entry kEntry{
 
 #ifndef FAKE_NO_ENTRY
 /// The plugin's entry point; null in the FAKE_NULL_ENTRY variant.
-extern "C" __attribute__((visibility("default"))) const hermes_intl_entry *
-hermes_intl_get_entry() {
+extern "C" FAKE_EXPORT const hermes_intl_entry *hermes_intl_get_entry() {
 #ifdef FAKE_NULL_ENTRY
   return nullptr;
 #else
@@ -165,10 +186,10 @@ hermes_intl_get_entry() {
 #endif
 
 #ifdef FAKE_NEEDS_DEP
-/// Defined in libfake_intl_dep.so.
+/// Defined in libfake_intl_dep.so (fake_intl_dep.dll on Windows).
 extern "C" int fake_intl_dep();
 /// A real use of fake_intl_dep, so the linker keeps the dependency.
-extern "C" __attribute__((visibility("default"))) int fake_intl_use_dep() {
+extern "C" FAKE_EXPORT int fake_intl_use_dep() {
   return fake_intl_dep();
 }
 #endif

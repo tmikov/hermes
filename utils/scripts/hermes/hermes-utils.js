@@ -102,18 +102,24 @@ function createHermesPrebuiltArtifactsTarball(
   return tarballFilename;
 }
 
+// The universal XCFrameworks the tarball must contain: Hermes and its Intl
+// plugin.
+const HERMES_XCFRAMEWORKS = ["hermesvm", "hermesintl"];
+
 function validateHermesFrameworksExist(destrootDir /*: string */) {
-  if (
-    !fs.existsSync(
-      path.join(
-        destrootDir,
-        "Library/Frameworks/universal/hermesvm.xcframework"
+  for (const framework of HERMES_XCFRAMEWORKS) {
+    if (
+      !fs.existsSync(
+        path.join(
+          destrootDir,
+          `Library/Frameworks/universal/${framework}.xcframework`
+        )
       )
-    )
-  ) {
-    throw new Error(
-      "Error: Hermes universal XCFramework not found. Are you sure Hermes has been built?"
-    );
+    ) {
+      throw new Error(
+        `Error: Hermes universal XCFramework ${framework}.xcframework not found. Are you sure Hermes has been built?`
+      );
+    }
   }
 }
 

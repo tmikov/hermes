@@ -151,6 +151,19 @@ inline std::optional<std::string> timeZoneFromHost(std::string_view raw) {
   return callOptional(hi_time_zone_from_host, raw);
 }
 
+/// A Windows time zone key name and the user's region ("" for none) to a
+/// primary IANA name: the region's own row of CLDR's windowsZones, else the
+/// territory 001 row; nullopt if the key is unknown.
+inline std::optional<std::string> timeZoneFromWindows(
+    std::string_view id,
+    std::string_view region) {
+  HiString out;
+  if (!hi_time_zone_from_windows(
+          bytes(id), id.size(), bytes(region), region.size(), &out))
+    return std::nullopt;
+  return takeString(out);
+}
+
 /// A case-insensitive IANA name to its primary identifier.
 inline std::optional<std::string> canonicalizeTimeZone(std::string_view name) {
   return callOptional(hi_time_zone_canonicalize, name);

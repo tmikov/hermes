@@ -30,12 +30,32 @@ Pod::Spec.new do |spec|
   spec.source_files        = "destroot/include/**/*.h"
   spec.header_mappings_dir = "destroot/include"
 
-  spec.ios.vendored_frameworks = "destroot/Library/Frameworks/universal/hermesvm.xcframework"
-  spec.visionos.vendored_frameworks = "destroot/Library/Frameworks/universal/hermesvm.xcframework"
-  spec.tvos.vendored_frameworks = "destroot/Library/Frameworks/universal/hermesvm.xcframework"
-  spec.osx.vendored_frameworks = "destroot/Library/Frameworks/universal/hermesvm.xcframework"
+  # Hermes and its Intl plugin. The app embeds both; Hermes finds the plugin
+  # next to hermesvm.framework when it creates a runtime, and uses its
+  # built-in Intl when the plugin is absent.
+  frameworks = [
+    "destroot/Library/Frameworks/universal/hermesvm.xcframework",
+    "destroot/Library/Frameworks/universal/hermesintl.xcframework",
+  ]
+  spec.ios.vendored_frameworks = frameworks
+  spec.visionos.vendored_frameworks = frameworks
+  spec.tvos.vendored_frameworks = frameworks
+  spec.osx.vendored_frameworks = frameworks
 
   spec.xcconfig            = { "CLANG_CXX_LANGUAGE_STANDARD" => "c++17", "CLANG_CXX_LIBRARY" => "compiler-default", "GCC_PREPROCESSOR_DEFINITIONS" => "HERMES_ENABLE_DEBUGGER=1" }
+
+  # CocoaPods links every vendored framework, but nothing in the app refers to
+  # the plugin: Hermes loads it with dlopen. The link is weak, so the app
+  # still launches when the plugin is missing: removed from the app, or
+  # without the app's architecture. The tvOS and visionOS simulator plugins
+  # are arm64 only, but their xcframework slices list x86_64 and have
+  # hermesvm's slice names (utils/intl-xcframework-sim-slices.py), so an
+  # x86_64 simulator build copies and embeds them; the linker ignores them
+  # for x86_64, and an x86_64 process finds no usable plugin, which Hermes
+  # treats as no plugin.
+  spec.user_target_xcconfig = {
+    "OTHER_LDFLAGS" => "$(inherited) -weak_framework hermesintl",
+  }
 
   unless ENV['hermes-artifact-url']
     spec.prepare_command = <<-EOS

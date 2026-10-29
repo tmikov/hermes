@@ -228,6 +228,31 @@ pub unsafe extern "C" fn hi_time_zone_from_host(
     write_out(out, as_str(raw, len).and_then(host::time_zone_from_host))
 }
 
+/// A Windows time zone key name (`TimeZoneKeyName`) and the user's region
+/// (empty for none) to a primary IANA name, by CLDR's windowsZones table:
+/// the region's own row, else the territory 001 row. False if the key is
+/// unknown or either argument is not UTF-8.
+///
+/// # Safety
+/// `id` must point to `id_len` readable bytes, `region` to `region_len`
+/// readable bytes, and `out` must be valid for writes.
+#[no_mangle]
+pub unsafe extern "C" fn hi_time_zone_from_windows(
+    id: *const u8,
+    id_len: usize,
+    region: *const u8,
+    region_len: usize,
+    out: *mut HiString,
+) -> bool {
+    let result = match (as_str(id, id_len), as_str(region, region_len)) {
+        (Some(id), Some(region)) => {
+            host::time_zone_from_windows(id, Some(region).filter(|r| !r.is_empty()))
+        }
+        _ => None,
+    };
+    write_out(out, result)
+}
+
 /// A case-insensitive IANA name to its primary identifier.
 ///
 /// # Safety
@@ -1976,6 +2001,39 @@ mod tests {
         assert!(make(b"en", &[0xff], b"UTC", b"").is_null());
         assert!(make(b"en", b"gregory", &[0xff], b"").is_null());
         assert!(make(b"en", b"gregory", b"UTC", &[0xff]).is_null());
+    }
+
+    #[test]
+    fn ffi_maps_windows_time_zones() {
+        let call = |id: &[u8], region: &[u8]| {
+            let mut out = HiString::EMPTY;
+            if !unsafe {
+                hi_time_zone_from_windows(
+                    id.as_ptr(),
+                    id.len(),
+                    region.as_ptr(),
+                    region.len(),
+                    &mut out,
+                )
+            } {
+                assert!(out.data.is_null());
+                return None;
+            }
+            let result = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+            let result = String::from_utf8(result.to_vec()).unwrap();
+            unsafe { hi_string_free(out) };
+            Some(result)
+        };
+        let pst = b"Pacific Standard Time";
+        assert_eq!(call(pst, b"").as_deref(), Some("America/Los_Angeles"));
+        assert_eq!(call(pst, b"CA").as_deref(), Some("America/Vancouver"));
+        assert_eq!(
+            call(b"India Standard Time", b"US").as_deref(),
+            Some("Asia/Kolkata")
+        );
+        assert_eq!(call(b"Mars Standard Time", b""), None);
+        assert_eq!(call(&[0xff], b""), None);
+        assert_eq!(call(pst, &[0xff]), None);
     }
 
     #[test]

@@ -4,15 +4,21 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-# Builds Hermes Apple frameworks for all platforms (iOS, macOS, tvOS, visionOS,
-# Mac Catalyst) and combines them into a single universal xcframework.
+# Builds the Hermes Apple frameworks, hermesvm.framework and the Intl plugin's
+# hermesintl.framework, for all platforms (iOS, macOS, tvOS, visionOS, Mac
+# Catalyst) and combines each into a universal xcframework.
 #
 # Usage:
-#   ./build-apple-framework.sh                   # build all platforms + universal xcframework
+#   ./build-apple-framework.sh                   # build all platforms + universal xcframeworks
 #   ./build-apple-framework.sh <platform>        # build a single platform (e.g. macosx, iphoneos)
-#   ./build-apple-framework.sh build_framework   # combine already-built slices into xcframework
+#   ./build-apple-framework.sh build_framework   # combine already-built slices into xcframeworks
 #   ./build-apple-framework.sh build_hermesc     # build host hermesc compiler
 #   ./build-apple-framework.sh prepare_dest_root # assemble destroot from pre-built slices
+#   ./build-apple-framework.sh rust_targets <platform>  # print the Rust targets a platform needs
+#
+# The Intl plugin needs Rust (https://rustup.rs), 1.95 or newer for tvOS and
+# visionOS, with the standard library of each target the platform needs:
+#   rustup target add $(./utils/build-apple-framework.sh rust_targets <platform>)
 
 if [ "$CI" ]; then
   set -x
@@ -27,9 +33,15 @@ BUILD_TYPE=${BUILD_TYPE:-Debug}
 HERMES_PATH="$CURR_SCRIPT_DIR/.."
 HERMES_COMPILER_PACKAGE_PATH="$HERMES_PATH/npm/hermes-compiler"
 
-NUM_CORES=$(sysctl -n hw.ncpu)
+NUM_CORES=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN)
 
 PLATFORMS=("macosx" "iphoneos" "iphonesimulator" "catalyst" "xros" "xrsimulator" "appletvos" "appletvsimulator")
+
+# The frameworks each platform builds: Hermes and the Intl plugin.
+FRAMEWORKS=("hermesvm" "hermesintl")
+
+# Set by create_framework once it has checked Rust for every platform.
+RUST_CHECKED=""
 
 if [[ -z "$JSI_PATH" ]]; then
   JSI_PATH="$HERMES_PATH/API/jsi"
@@ -95,6 +107,86 @@ function get_deployment_target {
     else # tvOS and iOS use the same deployment target
       echo "$(get_ios_deployment_target)"
     fi
+}
+
+# Print the Rust target triples the Intl plugin's core is built for on
+# platform $1, from the mapping the CMake build uses
+# (cmake/modules/HermesIntl.cmake). The tvOS and visionOS simulators get
+# only arm64: Rust has no supported x86_64 target there.
+function get_rust_targets {
+  local archs
+  archs=$(get_architecture "$1") || { echo >&2 "$archs"; exit 1; }
+  cmake -DHERMES_APPLE_TARGET_PLATFORM="$1" \
+    -DCMAKE_OSX_ARCHITECTURES="$archs" \
+    -P "$HERMES_PATH/utils/intl-rust-targets.cmake"
+}
+
+# The directories rustup installs cargo in, $CARGO_HOME/bin and
+# ~/.cargo/bin, one per line. An Xcode build phase, or any build started
+# outside a login shell, may not have them on PATH. CMake looks there too
+# (hermes_intl_find_cargo in cmake/modules/HermesIntl.cmake).
+function cargo_dirs {
+  if [[ -n "$CARGO_HOME" ]]; then
+    echo "$CARGO_HOME/bin"
+  fi
+  if [[ -n "$HOME" && "$HOME/.cargo" != "$CARGO_HOME" ]]; then
+    echo "$HOME/.cargo/bin"
+  fi
+}
+
+# Print the path of cargo: the one on PATH, else the first in cargo_dirs; or
+# nothing if there is none.
+function find_cargo {
+  local dir
+  if command -v cargo; then
+    return
+  fi
+  while IFS= read -r dir; do
+    if [[ -x "$dir/cargo" ]]; then
+      echo "$dir/cargo"
+      return
+    fi
+  done < <(cargo_dirs)
+}
+
+# Check, before anything is built, that cargo is installed and has the
+# standard library of each Rust target platform $1 needs, and exit with the
+# commands that fix it if not. rustc is the one next to cargo, as in the
+# CMake build, else the one on PATH.
+function check_rust_for_platform {
+  local targets cargo rustc searched sep dir sysroot missing=() t
+  targets=$(get_rust_targets "$1") || exit 1
+  cargo=$(find_cargo)
+  if [[ -z "$cargo" ]]; then
+    searched="on PATH"
+    sep=" or in "
+    while IFS= read -r dir; do
+      searched="$searched$sep$dir"
+      sep=" or "
+    done < <(cargo_dirs)
+    echo >&2 "error: the Intl plugin (hermesintl.framework) needs Rust, but cargo was not found $searched."
+    echo >&2 "Install Rust from https://rustup.rs, then run: rustup target add $targets"
+    exit 1
+  fi
+  rustc="$(dirname "$cargo")/rustc"
+  if [[ ! -x "$rustc" ]]; then
+    rustc=rustc
+  fi
+  # From intl/core, so that a rustup toolchain override there applies.
+  sysroot=$(cd "$HERMES_PATH/intl/core" && "$rustc" --print sysroot) || {
+    echo >&2 "error: 'rustc --print sysroot' failed; check the Rust installation."
+    exit 1
+  }
+  for t in $targets; do
+    if [[ ! -d "$sysroot/lib/rustlib/$t/lib" ]]; then
+      missing+=("$t")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo >&2 "error: the Intl plugin for $1 needs the Rust standard library for: ${missing[*]}"
+    echo >&2 "Run: rustup target add ${missing[*]}"
+    exit 1
+  fi
 }
 
 # Build host hermes compiler for internal bytecode
@@ -174,11 +266,13 @@ function configure_apple_framework {
     popd > /dev/null || exit 1
 }
 
+# $1: platform, $2: framework name (hermesvm or hermesintl)
 function generate_dSYM {
     TARGET_PLATFORM="$1"
+    FRAMEWORK="$2"
 
-    DSYM_PATH="$PWD/build_$TARGET_PLATFORM/lib/hermesvm.framework.dSYM"
-    xcrun dsymutil "$PWD/build_$TARGET_PLATFORM/lib/hermesvm.framework/hermesvm" --out "$DSYM_PATH"
+    DSYM_PATH="$PWD/build_$TARGET_PLATFORM/lib/$FRAMEWORK.framework.dSYM"
+    xcrun dsymutil "$PWD/build_$TARGET_PLATFORM/lib/$FRAMEWORK.framework/$FRAMEWORK" --out "$DSYM_PATH"
     mkdir -p "$PWD/destroot/Library/Frameworks/$TARGET_PLATFORM"
     cp -R "$DSYM_PATH" "$PWD/destroot/Library/Frameworks/$TARGET_PLATFORM"
 }
@@ -186,6 +280,11 @@ function generate_dSYM {
 # Utility function to build an Apple framework for a single platform
 # $1: platform, $2: architectures, $3: deployment target
 function build_apple_framework {
+  # create_framework checks every platform before it builds the first.
+  if [[ -z "$RUST_CHECKED" ]]; then
+    check_rust_for_platform "$1"
+  fi
+
   # Only build host HermesC if no file found at $IMPORT_HERMESC_PATH
   build_host_hermesc_if_needed
 
@@ -198,9 +297,11 @@ function build_apple_framework {
 
   pushd "$HERMES_PATH" > /dev/null || exit 1
     mkdir -p "destroot/Library/Frameworks/$1"
-    cmake --build "./build_$1" --target hermesvm -j "${NUM_CORES}"
-    cp -R "./build_$1"/lib/hermesvm.framework* "destroot/Library/Frameworks/$1"
-    generate_dSYM "$1"
+    cmake --build "./build_$1" --target "${FRAMEWORKS[@]}" -j "${NUM_CORES}"
+    for framework in "${FRAMEWORKS[@]}"; do
+      cp -R "./build_$1/lib/$framework.framework"* "destroot/Library/Frameworks/$1"
+      generate_dSYM "$1" "$framework"
+    done
 
     # In a MacOS build, also produce the hermes and hermesc CLI tools.
     if [[ $1 == macosx ]]; then
@@ -228,7 +329,9 @@ function prepare_dest_root_for_ci {
   mkdir -p  "destroot/bin"
   for platform in "${PLATFORMS[@]}"; do
     mkdir -p "destroot/Library/Frameworks/$platform"
-    cp -R "./build_$platform/lib/hermesvm.framework"* "destroot/Library/Frameworks/$platform"
+    for framework in "${FRAMEWORKS[@]}"; do
+      cp -R "./build_$platform/lib/$framework.framework"* "destroot/Library/Frameworks/$platform"
+    done
   done
 
   cp "./build_macosx/bin/"* "destroot/bin"
@@ -247,41 +350,68 @@ function prepare_dest_root_for_ci {
   cp "$JSI_PATH"/jsi/*.h destroot/include/jsi
 }
 
-# Accepts an array of frameworks and will place all of
-# the architectures into an universal folder and then remove
-# the merged frameworks from destroot
+# Accepts an array of platforms and will place all of the architectures of
+# each framework (hermesvm, hermesintl) into an xcframework in an universal
+# folder and then remove the merged frameworks from destroot
 function create_universal_framework {
   pushd "$HERMES_PATH/destroot/Library/Frameworks" > /dev/null || exit 1
 
   local platforms=("$@")
-  local args=""
+  local created=1
 
-  echo "Creating universal framework for platforms: ${platforms[*]}"
-
-  for i in "${!platforms[@]}"; do
-    local platform="${platforms[$i]}"
-    local hermes_framework_path="${platform}/hermesvm.framework"
-    args+="-framework $hermes_framework_path "
-  done
+  echo "Creating universal frameworks for platforms: ${platforms[*]}"
 
   mkdir -p universal
-  # shellcheck disable=SC2086
-  if xcodebuild -create-xcframework $args -output "universal/hermesvm.xcframework"
+  for framework in "${FRAMEWORKS[@]}"; do
+    local args=""
+    for i in "${!platforms[@]}"; do
+      local platform="${platforms[$i]}"
+      args+="-framework ${platform}/${framework}.framework "
+    done
+
+    # shellcheck disable=SC2086
+    if ! xcodebuild -create-xcframework $args -output "universal/${framework}.xcframework"
+    then
+      created=0
+    fi
+  done
+
+  # The plugin's tvOS and visionOS simulator slices are arm64 only. Make them
+  # list x86_64 and take hermesvm's slice names, so that an app's x86_64
+  # simulator build through CocoaPods finds and embeds them; an x86_64
+  # process then finds no usable plugin, which the loader treats as none.
+  if [[ $created == 1 ]] &&
+    ! python3 "$HERMES_PATH/utils/intl-xcframework-sim-slices.py" universal/hermesintl.xcframework
   then
-    # # Remove the thin hermesvm.frameworks that are now part of the universal
-    # XCFramework
+    created=0
+  fi
+
+  if [[ $created == 1 ]]; then
+    # Remove the thin frameworks that are now part of the universal
+    # XCFrameworks
     for platform in "${platforms[@]}"; do
       rm -r "$platform"
     done
   fi
 
   popd > /dev/null || exit 1
+  if [[ $created != 1 ]]; then
+    echo >&2 "error: could not create every universal XCFramework (${FRAMEWORKS[*]})"
+    return 1
+  fi
+}
+
+# Succeed if every framework's universal XCFramework exists in destroot.
+function universal_frameworks_exist {
+  for framework in "${FRAMEWORKS[@]}"; do
+    [[ -d "destroot/Library/Frameworks/universal/$framework.xcframework" ]] || return 1
+  done
 }
 
 # Build a single framework for a given platform
 # $1 is the target to build (e.g. iphoneos, macosx, etc.)
 function build_framework {
-  if [ ! -d destroot/Library/Frameworks/universal/hermesvm.xcframework ]; then
+  if ! universal_frameworks_exist; then
     deployment_target=$(get_deployment_target "$1")
     architecture=$(get_architecture "$1")
     build_apple_framework "$1" "$architecture" "$deployment_target"
@@ -292,7 +422,7 @@ function build_framework {
 
 # Combine already-built slices into a universal xcframework
 function build_universal_framework {
-    if [ ! -d destroot/Library/Frameworks/universal/hermesvm.xcframework ]; then
+    if ! universal_frameworks_exist; then
         create_universal_framework "${PLATFORMS[@]}"
     else
         echo "Skipping; Clean \"destroot\" to rebuild".
@@ -301,7 +431,12 @@ function build_universal_framework {
 
 # Build all platforms sequentially then combine into a universal xcframework
 function create_framework {
-    if [ ! -d destroot/Library/Frameworks/universal/hermesvm.xcframework ]; then
+    if ! universal_frameworks_exist; then
+        # Check Rust for every platform before building any of them.
+        for platform in "${PLATFORMS[@]}"; do
+            check_rust_for_platform "$platform"
+        done
+        RUST_CHECKED=1
         for platform in "${PLATFORMS[@]}"; do
             build_framework "$platform"
         done
@@ -320,6 +455,8 @@ elif [[ $1 == "build_hermesc" ]]; then
   build_host_hermesc_if_needed
 elif [[ $1 == "prepare_dest_root" ]]; then
   prepare_dest_root_for_ci
+elif [[ $1 == "rust_targets" ]]; then
+  get_rust_targets "$2"
 else
   build_framework "$1"
 fi

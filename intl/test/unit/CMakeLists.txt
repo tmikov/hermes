@@ -47,8 +47,13 @@ endif()
 
 # Kept apart from IntlPluginUnitTests: it replaces the global operator new and
 # delete to make an allocation fail, which must not touch the other tests.
-add_unittest(HermesIntlUnitTests IntlRustCoreAllocTests
-  RustCoreAllocTest.cpp)
-target_include_directories(IntlRustCoreAllocTests PRIVATE
-  ${PROJECT_SOURCE_DIR}/intl/jsi)
-target_link_libraries(IntlRustCoreAllocTests hermesIntlCore)
+# It calls std::aligned_alloc and is meant for LeakSanitizer on a host, so it
+# is not built for Android, whose bionic has aligned_alloc only from API 28
+# (Hermes builds for 24), nor for Windows, whose C library has none.
+if(NOT ANDROID AND NOT WIN32)
+  add_unittest(HermesIntlUnitTests IntlRustCoreAllocTests
+    RustCoreAllocTest.cpp)
+  target_include_directories(IntlRustCoreAllocTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/intl/jsi)
+  target_link_libraries(IntlRustCoreAllocTests hermesIntlCore)
+endif()

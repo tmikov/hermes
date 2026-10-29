@@ -24,8 +24,10 @@ constructors: `Intl.ListFormat`, `Intl.RelativeTimeFormat`,
 has `getCanonicalLocales`, `supportedValuesOf`, `Locale`, `Collator`,
 `NumberFormat`, `PluralRules`, `DateTimeFormat`, `ListFormat`,
 `RelativeTimeFormat`, `DisplayNames`, `DurationFormat` and `Segmenter`.
-Later phases package it for the other platforms and delete Hermes's old
-`Intl` (see "Phasing" in the spec).
+Phase 6 packaged it for Android (in the AAR), the Apple platforms
+(`hermesintl.xcframework` and the podspec) and Windows (cross-built on
+Linux and tested under Wine; the native Windows checks are still to be
+run). Phase 7 deletes Hermes's old `Intl` (see "Phasing" in the spec).
 
 ## Layout
 
@@ -35,7 +37,7 @@ Later phases package it for the other platforms and delete Hermes's old
 | `core/src/lib.rs` | The C interface. |
 | `core/src/locale.rs` | Well-formedness, canonicalization, `[[AvailableLocales]]`, lookup, the default-locale reduction. |
 | `core/src/info.rs` | The lookups behind the `Intl.Locale` information methods: calendars, hour cycles, time zones, week data, text direction, numbering system and collations. |
-| `core/src/host.rs` | Turning host settings (POSIX locale names, `TZ`, `/etc/localtime`) into ECMA-402 values. |
+| `core/src/host.rs` | Turning host settings (POSIX locale names, `TZ`, `/etc/localtime`, Windows time zone keys) into ECMA-402 values. |
 | `core/src/supported.rs` | The lists behind `Intl.supportedValuesOf`. |
 | `core/src/collator.rs` | The ICU4X collator for a set of resolved Collator options, and the locale defaults. |
 | `core/src/casemap.rs` | Upper and lower case mapping of UTF-16 text, split at unpaired surrogates. |
@@ -83,6 +85,8 @@ Later phases package it for the other platforms and delete Hermes's old
 | `jsi/StringHelpers.cpp` | The `caseMap` helper. |
 | `test/lit/` | Lit tests of the real plugin; `test/lit/js/` tests the JS shared operations in isolation, and `test/lit/Inputs/` holds files the tests use, such as `datetime-locales.js`: the 40 locales and the `formatMatcher: "basic"` check that `datetime-format-locales.js` and its `-2`, `-3` and `-4` parts share, a quarter of the locales each, so that lit runs them in parallel, and `datetime-fields.js`: the check that best fit keeps every requested field, which `datetime-format-fields-1.js` to `-10.js` run, one locale each. |
 | `test/unit/` | `HermesIntlUnitTests`: gtests for detection, `resolveDefaults`, and the objects `Plugin.cpp` passes to setup (in a real runtime). On Apple platforms also `IntlDefaultsProbe`, which prints what detection finds, for `test/lit/apple-defaults.js`. |
+| `test/android/` | `hermes-intl-android-smoke`, built only for Android, and `app/`, a test app that loads Hermes from the AAR. |
+| `test/apple/` | `hermes-intl-apple-smoke`, built only in Apple framework builds, and `podapp/`, a CocoaPods consumer app with `run-podapp.sh`. |
 | `test/test262-expectations.txt` | The test262 tests expected to fail, each with a reason. |
 
 The plugin never includes Hermes internals. Code here includes only
@@ -91,38 +95,242 @@ generated `hermes_intl_core.h`; `test/unit/` is the one exception.
 
 ## Building
 
-The CMake option `HERMES_BUILD_INTL` controls the plugin. It is `ON` by
-default for host builds on Linux and single-architecture macOS, and needs a
-Rust toolchain, 1.88 or newer (the MSRV of `icu` 2.3). Without one,
-configure fails and names the option; `-DHERMES_BUILD_INTL=OFF` gives a
-Rust-free build.
+The CMake option `HERMES_BUILD_INTL` controls the plugin. It needs a Rust
+toolchain, 1.88 or newer (the MSRV of `icu` 2.3), or 1.95 or newer for
+tvOS and visionOS. Without one, configure fails and names the option;
+`-DHERMES_BUILD_INTL=OFF` gives a Rust-free build. Configure uses the
+`cargo` on `PATH`, else the one in `$CARGO_HOME/bin` or `~/.cargo/bin`,
+where rustup installs it (a Gradle daemon or an Xcode build launched from
+the GUI does not get the shell's `PATH`), and the `rustc` next to it.
 
-For cross builds (Android, iOS and the other Apple targets, Emscripten),
-Windows, multi-architecture macOS, and macOS with a single
-`CMAKE_OSX_ARCHITECTURES` other than the one cargo builds for, the option
-defaults to `OFF`, and turning it on is a configure error until Phase 6 of
-the spec. Configure then prints why the option is off, unless it was set
-explicitly. Multi-config generators (Xcode, Visual Studio) are not supported
-yet either.
+It is `ON` by default for Linux and macOS hosts (universal macOS
+included), Android and every Apple target platform. It is `OFF` by default
+on Windows until a native Windows build is verified; it can be turned on
+there (see below). Emscripten is not supported: configure refuses the
+option there. A build that has no Rust target mapping (another Android
+ABI, Apple platform or architecture, Win32, MinGW, another cross build)
+defaults to `OFF`, and `HERMES_INTL_RUST_TARGET` can name the triples.
+Configure prints why the option is off, unless it was set explicitly. In
+a build directory where the option still has the default configure
+recorded, it follows a new default when reconfigured.
 
-CMake runs `cargo build --locked`; `core/Cargo.lock` is committed. The
-output is `<build>/lib/libhermesintl.so` on Linux and
-`<build>/lib/libhermesintl.dylib` on macOS, next to `libhermesvm`.
+CMake maps the build to Rust target triples (`hermes_intl_rust_targets` in
+`cmake/modules/HermesIntl.cmake`; the spec's "Build" section has the
+table) and runs `cargo build --locked --target <triple>` for each;
+`core/Cargo.lock` is committed. The Rust standard library of each triple
+must be installed, and configure says which `rustup target add` is
+missing. Two Apple architectures are combined with `lipo`.
+Multi-configuration generators work: Debug uses cargo's dev profile, every
+other configuration `--release`. A cross build (and any Apple build whose
+`hermesc` cannot run on the build machine) compiles the plugin's
+JavaScript with the host's `hermesc`, so it needs
+`-DIMPORT_HOST_COMPILERS=<host build>/ImportHostCompilers.cmake`.
 
-The library links no JSI provider. Its JSI references stay undefined and
-bind, when it is loaded, to the JSI code the host already exports: every
-Hermes tool that creates runtimes exports its dynamic symbols
-(`hermes_export_dynamic_symbols` in `cmake/modules/Hermes.cmake`), and
-`libhermesvm` exports JSI. The plugin itself exports only
-`hermes_intl_get_entry`. It must be built with the same `JSI_UNSTABLE`
-setting as Hermes, and it works only with the Hermes it was built with. The
-loader checks the bytecode and interface versions and the `JSI_UNSTABLE`
-setting.
+The output is `<build>/lib/libhermesintl.so` on Linux and Android and
+`<build>/lib/libhermesintl.dylib` on macOS, next to `libhermesvm`;
+`hermesintl.framework` next to `hermesvm.framework` in an Apple framework
+build (`<build>/lib`, or `<build>/lib/<Config>` under a multi-configuration
+generator); and otherwise, on Windows and under multi-configuration
+generators, the tools' directory
+(`bin` or `bin/<Config>`), with a copy next to a shared `libhermesvm` or
+`hermesvm.dll`.
+
+How the plugin gets JSI depends on the build:
+
+- In Linux and macOS host builds it links no JSI provider. Its JSI
+  references stay undefined and bind, when it is loaded, to the JSI code
+  the host already exports: every Hermes tool that creates runtimes exports
+  its dynamic symbols (`hermes_export_dynamic_symbols` in
+  `cmake/modules/Hermes.cmake`), and `libhermesvm` exports JSI.
+- On Android it links `libjsi.so` (so `HERMES_BUILD_SHARED_JSI` must be on).
+- In Apple framework builds it links `hermesvm.framework`.
+- On Windows it links its own static copy of JSI (see below).
+
+The plugin itself exports only `hermes_intl_get_entry`. It must be built
+with the same `JSI_UNSTABLE` setting as Hermes, and it works only with the
+Hermes it was built with. The loader checks the bytecode and interface
+versions and the `JSI_UNSTABLE` setting (and, on Windows, the C runtime
+settings).
 
 On macOS, a host signed with the hardened runtime rejects a plugin that is
 not signed with the host's Team ID, and Hermes reports that as a fatal
 error. Sign the plugin with the host's Team ID, or give the host the
 `com.apple.security.cs.disable-library-validation` entitlement.
+
+### Android
+
+The Hermes Android build (`android/build.gradle.kts`) builds the plugin
+with `-DHERMES_BUILD_INTL=ON`, and the AAR carries
+`jni/<abi>/libhermesintl.so` for arm64-v8a, armeabi-v7a, x86 and x86_64,
+next to `libhermesvm.so`. It needs rustup and the four targets:
+
+```
+rustup target add aarch64-linux-android armv7-linux-androideabi \
+  i686-linux-android x86_64-linux-android
+```
+
+A CMake build with the NDK toolchain works the same way: give it
+`-DIMPORT_HOST_COMPILERS=<host build>/ImportHostCompilers.cmake` and
+`-DHERMES_BUILD_SHARED_JSI=ON` (the plugin links `libjsi.so`), and build
+`hermesintl`. Each cargo command gets the NDK's compiler and archiver for
+its triple.
+
+### Apple platforms
+
+`utils/build-apple-framework.sh` builds `hermesvm.framework` and
+`hermesintl.framework` for each slice and makes
+`destroot/Library/Frameworks/universal/hermesvm.xcframework` and
+`hermesintl.xcframework`. Before building a slice it checks for cargo
+(in the same places as CMake) and the slice's Rust targets;
+`utils/build-apple-framework.sh rust_targets <platform>` prints them, for
+example `rustup target add
+$(utils/build-apple-framework.sh rust_targets iphonesimulator)`. The tvOS
+and visionOS simulator slices of the plugin are arm64 only, since Rust has
+no supported x86_64 target there. Their
+xcframework slices still list x86_64 and carry hermesvm's slice names
+(`utils/intl-xcframework-sim-slices.py`), so that CocoaPods builds that
+include x86_64 copy them and an x86_64 process finds no usable plugin,
+which Hermes treats as no plugin. A second run on Xcode 27.1 showed that
+the tvOS x86_64 build embeds the plugin and has no load command for it;
+an x86_64 simulator process at run time has not run (the spec's
+"Phasing", item 6).
+
+Hermes cannot be generated with CMake's Xcode generator (upstream's
+`InternalBytecode.js` custom command is attached to two targets, which the
+Xcode new build system rejects), so the multi-configuration Apple framework
+layout is verified with Ninja Multi-Config.
+
+`hermes-engine.podspec` vendors both xcframeworks and links the plugin
+weakly (`-weak_framework hermesintl`), so an app still launches with the
+plugin deleted from it. React Native's own podspec, in the `react-native`
+repository, needs the same two changes before React Native apps get the
+plugin, and React Native's builds of Hermes from source need Rust or
+`-DHERMES_BUILD_INTL=OFF` (the spec's "Packaging" has both).
+
+In an app, Hermes finds `hermesintl.framework` next to
+`hermesvm.framework` (see "How Hermes finds the plugin"). The plugin
+framework links `hermesvm.framework` and finds it through its rpath
+(`@loader_path/..`, or `@loader_path/../../..` in a macOS or Catalyst
+bundle).
+
+### Cross-building for Windows on Linux
+
+`utils/windows-cross/clang-cl-xwin.cmake` is a CMake toolchain file that
+builds Hermes and the plugin for Windows (x64 or arm64, MSVC ABI) on Linux
+with clang-cl, lld-link and the MSVC C runtime, C++ library and Windows SDK
+that [xwin](https://github.com/Jake-Shadle/xwin) downloads. It needs:
+
+- an LLVM release, 19 or newer (the MSVC 14.44 headers reject older Clang),
+  for `clang-cl`, `lld-link`, `llvm-lib`, `llvm-rc`, `llvm-mt` and
+  `llvm-ml64`;
+- xwin 0.10.0 (`cargo install xwin --version 0.10.0 --locked`) and one
+  splat per architecture, with Microsoft's license accepted and the MSVC
+  CRT 14.44 and Windows SDK 10.0.26100 pinned (the version options are
+  global, so they go before `splat`; another CRT also needs
+  `HERMES_MSVC_VERSION` changed to match):
+
+  ```bash
+  xwin --accept-license --crt-version 14.44.17.14 --sdk-version 10.0.26100 \
+    --arch x86_64 splat --include-debug-libs --output ~/.xwin
+  xwin --accept-license --crt-version 14.44.17.14 --sdk-version 10.0.26100 \
+    --arch aarch64 splat --include-debug-libs --output ~/.xwin-aarch64
+  ```
+- the Rust target: `rustup target add x86_64-pc-windows-msvc` (or
+  `aarch64-pc-windows-msvc`);
+- a host build of Hermes, whose `hermesc` compiles the bytecode.
+
+```bash
+cmake -G Ninja -B build-win -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=utils/windows-cross/clang-cl-xwin.cmake \
+  -DHERMES_LLVM_BIN_DIR=$HOME/opt/LLVM-23.1.4-Linux-X64/bin \
+  -DIMPORT_HOST_COMPILERS=<host build>/ImportHostCompilers.cmake \
+  -DHERMES_BUILD_INTL=ON -DJSI_UNSTABLE=ON -DHERMES_ENABLE_NAPI=OFF
+cmake --build build-win --target hermes hermes-jsi-shared hermesvm hermesintl
+```
+
+For arm64, add
+`-DHERMES_WINDOWS_ARCH=arm64 -DHERMES_XWIN_DIR=$HOME/.xwin-aarch64`.
+`HERMES_ENABLE_NAPI=OFF` leaves out the Node-API test addons, whose import
+libraries share names, which Ninja rejects on Windows. Release builds
+run under Wine; Debug builds use the debug C runtime DLLs, which neither
+Wine nor xwin provides, so they only compile and link here.
+
+On Windows the plugin is `hermesintl.dll`, in `bin/` next to the tools (in
+`bin/<Config>` with a multi-configuration generator), with a copy next to
+`hermesvm.dll`. It exports only `hermes_intl_get_entry` and links its own
+copy of JSI, since no Hermes module exports JSI; MSVC's runtime matches C++
+types across modules by name. It needs the C runtime DLL (`/MD` or `/MDd`):
+configure fails with a static runtime. The loader rejects a plugin whose
+`_ITERATOR_DEBUG_LEVEL` or debug/release C runtime differs from Hermes's.
+
+No native Visual Studio build has been run yet, and the shared-type
+matching has been checked only under Wine. The spec's "Phasing" lists
+what a Windows machine has to check before `HERMES_BUILD_INTL` defaults
+to `ON` there.
+
+### Running the Windows build under Wine
+
+Release builds run under Wine 9 (`apt install wine wine64`). Two things
+are needed:
+
+- **Microsoft's `msvcp140.dll`.** With Wine's own `msvcp140.dll`, Hermes
+  executables now and then hang at exit after printing their output, with
+  or without the plugin, and always after heavy allocation. Copy
+  Microsoft's x64 `msvcp140.dll` of the build's toolset, 14.44 (the file
+  the Microsoft Visual C++ Redistributable installs), next to
+  `hermes.exe`. Phase 6 used such a copy taken from an existing
+  installation; installing the redistributable in the Wine prefix to get
+  the file was not tried. Run with `WINEDLLOVERRIDES=msvcp140=n`, which
+  makes Wine load it.
+  With it, no run hung in Phase 6's tests, plugin-mode test262 included.
+- **stdin from `/dev/null`.** `hermes-jsi-shared.exe` waits on a terminal
+  stdin under Wine.
+
+```bash
+cp <msvcp140.dll> build-win/bin/
+WINEDLLOVERRIDES=msvcp140=n wine build-win/bin/hermes.exe test.js </dev/null
+WINEDLLOVERRIDES=msvcp140=n WINEPATH='Z:<absolute build-win>\lib' \
+  wine build-win/bin/hermes-jsi-shared.exe test.js </dev/null
+```
+
+`hermes.exe` finds `bin/hermesintl.dll` next to it; `hermes-jsi-shared.exe`
+finds the copy next to `lib/hermesvm.dll`, which `WINEPATH` makes
+loadable. A fatal error exits with status 29 under Wine. The defaults come
+from the locale and zone Wine derives from the Unix `LC_ALL` (or `LANG`)
+and `TZ`, which may not be the zone you expect: Wine picks the first
+Windows zone whose rules match, so `TZ=UTC` becomes `Greenwich Standard
+Time` (`Atlantic/Reykjavik`).
+
+Plugin-mode test262 runs under Wine through `utils/testsuite/wine-hermes`.
+Linked as `hermes` into a directory given to `test_runner.py -b`, it runs
+`$WINE_HERMES_DIR/hermes.exe` with Wine, with absolute Unix paths in its
+arguments (`-Xintl-plugin-path=` included) turned into `Z:` paths, stdin
+from `/dev/null`, and `WINEDLLOVERRIDES=msvcp140=n`; it refuses to run
+without `msvcp140.dll` next to `hermes.exe`. From the checkout's root:
+
+```bash
+mkdir -p /tmp/wine-bin
+ln -sf $PWD/utils/testsuite/wine-hermes /tmp/wine-bin/hermes
+T=<test262>/test
+WINE_HERMES_DIR=$PWD/build-win/bin python3 utils/test_runner.py \
+  --intl-plugin $PWD/build-win/bin/hermesintl.dll \
+  --intl-expectations intl/test/test262-expectations.txt \
+  -b /tmp/wine-bin \
+  $T/intl402 \
+  $T/built-ins/String/prototype/localeCompare \
+  $T/built-ins/String/prototype/toLocaleLowerCase \
+  $T/built-ins/String/prototype/toLocaleUpperCase \
+  $T/built-ins/Number/prototype/toLocaleString \
+  $T/built-ins/BigInt/prototype/toLocaleString \
+  $T/built-ins/Array/prototype/toLocaleString \
+  $T/built-ins/TypedArray/prototype/toLocaleString \
+  $T/built-ins/Date/prototype/toLocaleString \
+  $T/built-ins/Date/prototype/toLocaleDateString \
+  $T/built-ins/Date/prototype/toLocaleTimeString
+```
+
+These are the directories `check-intl-test262` runs. With Microsoft's
+`msvcp140.dll` the results match the host's.
 
 ## How Hermes finds the plugin
 
@@ -133,43 +341,71 @@ For each new runtime, unless `EnableIntlPlugin` is false:
    1. a plugin the embedder registered with `hermes::registerIntlPlugin`
       before creating any runtime (the way to use a statically linked
       plugin);
-   2. `libhermesintl.{so,dylib}` in the directory of the Hermes library or
-      executable;
-   3. if that directory is named `bin`, the same name in `../lib`;
-   4. except on Apple platforms, the default library search path.
+   2. `libhermesintl.{so,dylib}` (`hermesintl.dll` on Windows) in the
+      directory of the Hermes library or executable;
+   3. if that directory is named `bin` (in any case on Windows), the same
+      name in `../lib`;
+   4. on Apple platforms, when that directory is a framework
+      (`<p>/<name>.framework`, or `<p>/<name>.framework/Versions/<v>`),
+      `<p>/hermesintl.framework/hermesintl`: the plugin framework next to
+      the Hermes framework, as an app embeds them;
+   5. only with glibc, musl and bionic, the default library search path.
 
-Apple platforms stop after step 3. dyld's error for a library name without
-a path cannot reliably tell a missing library from a broken one: older dyld
+Step 5 is left out everywhere else. With other C libraries, and on
+Windows, a failure to load a bare name cannot be told apart from a missing
+library. On Apple platforms, dyld's error for a library name without a
+path cannot reliably tell a missing library from a broken one: older dyld
 says only `image not found`, and hardened or sandboxed processes get policy
 reasons such as `relative path not allowed in hardened program`. Treating
 those as "broken" would abort every runtime in such an app. Such a name also
 makes dyld search the current directory, where anyone who controls it could
-plant a library. On Apple platforms, keep the plugin next to the Hermes code,
-register it, or set `IntlPluginPath`.
+plant a library. On these platforms, keep the plugin next to the Hermes
+code, register it, or set `IntlPluginPath`.
+
+On Apple platforms a step 2 to 4 library that has no code for the running
+architecture counts as absent, so resolution goes on, and after the last
+step there is no plugin. The loader recognises this only when dyld4's
+whole message is its list of files tried (`dlopen(<path>, 0x<flags>):
+tried: '<file>' (<reason>), ...`) and the entry for exactly that library
+gives the reason "mach-o file, but is an incompatible architecture" or
+"fat file, but missing compatible architecture". A dependency's failure
+(such as `hermesvm.framework` lacking the architecture), any other reason,
+and older loaders' wordings stay fatal. macOS shows this for an x86_64
+process with an arm64-only plugin; an x86_64 process in the tvOS or
+visionOS simulator, whose plugins are arm64 only, is expected to behave the
+same; the message texts were checked verbatim on Xcode 27.1, but an x86_64
+simulator process has not run (the spec's "Phasing", item 6).
+Given as `IntlPluginPath`, the same library is fatal.
 
 `IntlPluginPath` goes to `dlopen` as given. On Linux and Android, a name
 without a slash is looked up on the library search path, not in the current
 directory. dyld also searches the current directory for such a name, so on
-Apple platforms give a path.
+Apple platforms give a path. On Windows the path is UTF-8; a relative path
+is made absolute against the current directory, and a bare name is looked
+up in the application directory, System32 and `AddDllDirectory`
+directories only, never the current directory or `PATH`. Windows loads the
+plugin with its own directory searched for its imports.
 
 Errors:
 
 | Situation | Result |
 |---|---|
 | `EnableIntlPlugin` is false | no plugin |
-| Default resolution finds nothing (on Apple platforms the search path is not tried) | no plugin, silently |
-| A library exists but cannot be loaded, lacks `hermes_intl_get_entry`, or has a mismatched version or `JSI_UNSTABLE` setting | fatal, naming the library and the reason |
+| Default resolution finds nothing (the search path is tried only with glibc, musl and bionic) | no plugin, silently |
+| On Apple platforms, a library found by default resolution has no code for the running architecture | treated as absent |
+| A library exists but cannot be loaded, lacks `hermes_intl_get_entry`, or has a mismatched version or `JSI_UNSTABLE` setting (or, on Windows, C runtime settings) | fatal, naming the library and the reason |
 | A registered entry has a mismatched version or `JSI_UNSTABLE` setting | fatal |
 | `IntlPluginPath` is set and anything goes wrong | fatal |
 | An explicit default locale or time zone is invalid | fatal |
 | `registerIntlPlugin` is called after the default plugin was resolved | fatal |
 | Setup throws | fatal |
 
-On Windows and Emscripten only `registerIntlPlugin` works until Phase 6;
-setting `IntlPluginPath` there is fatal.
+On Emscripten Hermes loads no plugin library, permanently: only
+`registerIntlPlugin` works, and setting `IntlPluginPath` is fatal. The
+Hermes build does not build the plugin for Emscripten.
 
 A Worker gets the same plugin as its parent, with the parent's resolved
-default locales and time zone.
+default locales and time zone, and the parent's finalizer thread runner.
 
 ## Configuration
 
@@ -186,8 +422,12 @@ compiled by `shermes`: on their own command line, or through
 only the old, built-in implementation.
 
 When a default is not given, the plugin detects it from the host:
-`LC_ALL`/`LC_MESSAGES`/`LANG` and `TZ`/`/etc/localtime` on Linux, and
-CoreFoundation on macOS. The spec's "Default locale and time zone" section
+`LC_ALL`/`LC_MESSAGES`/`LANG` and `TZ`/`/etc/localtime` on Linux;
+CoreFoundation on Apple platforms; the `persist.sys.locale` and
+`ro.product.locale` properties, and `TZ` then `persist.sys.timezone`, on
+Android; `GetUserDefaultLocaleName` and the Windows time zone (mapped to
+IANA through CLDR's `windowsZones`, with the user's region) on Windows,
+where `TZ` is not read. The spec's "Default locale and time zone" section
 lists every source and how odd values are normalized.
 
 ## Testing
@@ -233,6 +473,120 @@ a loader error, or an internal error of the plugin is always a failure. A
 listed test that passes is also a failure, so the list only shrinks. So is
 an entry for a test that the run covers but that got no result in that
 mode, because it was skipped or runs only in the other mode.
+
+### On an Android device
+
+`utils/testsuite/adb-hermes` runs plugin-mode test262 on a device or
+emulator. It compiles each test with the host's `hermes` (bytecode is
+portable) and runs it with an Android build's `hermes` through `adb`. Build
+`hermes` and `hermesintl` for the device's ABI, and the host Hermes the
+cross build's `IMPORT_HOST_COMPILERS` came from, then:
+
+```
+utils/testsuite/adb-hermes setup <android build> <host build> <bin dir>
+python3 utils/test_runner.py -b <bin dir> \
+  --intl-plugin <android build>/lib/libhermesintl.so \
+  --intl-expectations intl/test/test262-expectations.txt \
+  <test262>/test/intl402 <the built-ins paths from check-intl-test262>
+```
+
+`setup` empties and fills `/data/local/tmp/adb-hermes` (`ADB_HERMES_DIR`,
+which must be a directory under `/data/local/tmp/`) with `hermes`, the
+plugin and the libraries they need, looking for them in the build, the NDK
+and the directories in `ADB_HERMES_LIB_PATH` (add the one with
+`libfbjni.so`), and makes `<bin dir>/hermes`, which the runner runs.
+`ANDROID_SERIAL` picks the device, which needs the `timeout` command (toybox
+has it on current Android). A run the runner times out keeps going on the
+device until `ADB_HERMES_TIMEOUT` (600 seconds by default), since adb does
+not stop it. The results must match the host's. The ARM translation of an
+x86_64 emulator ignores `LD_LIBRARY_PATH`, so for arm64 binaries there
+configure the Android build with
+`-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,<ADB_HERMES_DIR>/lib`.
+
+`hermes-intl-android-smoke` (`test/android/`, built only for Android)
+creates a runtime through `libhermesvm.so` with default resolution and
+prints a few `Intl` results and the detected defaults; with `--maps` it
+also prints where the plugin's code was mapped from. Run it with the
+plugin next to `libhermesvm.so`, with the plugin only on
+`LD_LIBRARY_PATH`, and with every library in an APK-style zip, loaded with
+`LD_LIBRARY_PATH=<apk>!/lib/<abi>`. The zip must store the libraries
+uncompressed and 16 KB aligned (`zip -0`, then `zipalign -P 16 -f 4`), as
+AGP does.
+
+`test/android/app/` is a test app that loads Hermes from the AAR through
+SoLoader, as React Native does, with the libraries left in the APK
+(`extractNativeLibs=false`), and logs what the plugin gives it (tag
+`HermesIntlApp`). Build the AAR, wrap it in a local Maven repository, and
+build the app against it, from the checkout's root (`$PWD`); Gradle writes
+`build/` there:
+
+```
+export ANDROID_HOME=<Android SDK> HERMES_WS_DIR=$PWD
+android/gradlew -p android :assembleRelease
+intl/test/android/app/make-maven-repo.sh \
+  build/outputs/aar/hermes-engine-release.aar /tmp/hermes-maven
+android/gradlew -p intl/test/android/app assembleDebug \
+  -PhermesMavenRepo=/tmp/hermes-maven \
+  -PhermesJniLibs=$PWD/build/intermediates/cmake/release/obj
+adb install -r \
+  intl/test/android/app/build/outputs/apk/debug/hermes-intl-test-app-debug.apk
+adb logcat -c
+adb shell am start -W -n com.facebook.hermes.intlapp/.MainActivity
+adb logcat -d -s HermesIntlApp:I
+```
+
+`hermesJniLibs` is the release build's CMake output; the app packages and
+links only its `<abi>/libjsi.so`, which the AAR leaves out because React
+Native supplies it. Every other Hermes library comes from the AAR. The app
+builds x86_64 only unless given `-PhermesAbis=<abi>,...`. The log should
+show `Intl.Segmenter: function`, `number: 1.234,5`, the default locale and
+time zone, and the plugin's code mapped from `base.apk`. Without
+`libhermesintl.so` in the APK it shows `Intl.Segmenter: undefined`.
+
+### On Apple platforms
+
+These run by hand on a Mac with Xcode, rustup and the Apple targets
+(`utils/build-apple-framework.sh rust_targets <platform>`), and CocoaPods
+for the consumer app.
+
+- **A universal macOS host build** runs `check-intl` like any host build:
+  configure with `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` and the usual
+  test262 directory. To run test262 under Rosetta, give `test_runner.py
+  -b` a directory whose `hermes` runs `arch -x86_64 <build>/bin/hermes
+  "$@"`.
+- **The slices and xcframeworks:** with `BUILD_TYPE=Release` (the slices
+  are then MinSizeRel), `utils/build-apple-framework.sh <platform>` for
+  each slice, then `utils/build-apple-framework.sh build_framework`.
+- **The smoke host:** after a slice is built, `cmake --build
+  build_<platform> --target hermes-intl-apple-smoke`. It creates a runtime
+  with the default configuration, prints `Intl.Segmenter: function` and a
+  few results when the plugin loaded (`undefined` when not), and prints
+  the image paths of hermesvm and hermesintl. Its rpaths find the
+  frameworks in the build tree (`../lib`) and in an app layout
+  (`Frameworks/` next to the executable, or `../Frameworks`). For a
+  simulator, run it with `xcrun simctl spawn <device> <path>`; to test
+  default detection there, set `AppleLanguages` with `xcrun simctl spawn
+  <device> defaults write -g AppleLanguages -array de-DE`, and the zone
+  with `SIMCTL_CHILD_TZ=<zone>`.
+- **The hermes-ios tarball**, from the checkout's root:
+
+  ```
+  node -e 'console.log(require("./utils/scripts/hermes/hermes-utils")
+    .createHermesPrebuiltArtifactsTarball(process.cwd(), "Release",
+      "<out dir>", true))'
+  ```
+- **The CocoaPods consumer app:** `intl/test/apple/podapp/run-podapp.sh
+  <tarball> <ios|tvos> <arm64|x86_64|"arm64 x86_64"> [--remove-plugin]`
+  builds the app against the tarball through this repository's podspec,
+  runs it on a new simulator, and prints its load commands (the plugin
+  must be `LC_LOAD_WEAK_DYLIB`) and what it reports. With
+  `--remove-plugin` it must still launch and report `Intl.Segmenter:
+  undefined`.
+- **`pod lib lint`:** `env "hermes-artifact-url=file://<tarball>" pod lib
+  lint hermes-engine.podspec --platforms=ios,tvos,macos --allow-warnings`,
+  and the same with `--platforms=visionos`. With Xcode 27.1 or later, the
+  macOS lint fails because the podspec's macOS minimum (10.15) is below
+  Xcode's 12.0, so lint `--platforms=ios,tvos` there.
 
 ### Updating the expectations
 

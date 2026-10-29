@@ -7,7 +7,9 @@
 //! "Default locale and time zone" in the spec.
 
 use crate::locale::resolve_default;
+use icu::locale::subtags::Region;
 use icu::time::zone::iana::IanaParserExtended;
+use icu::time::zone::WindowsParser;
 use icu::time::TimeZone;
 
 /// A POSIX locale name (lang[_TERRITORY][.codeset][@modifier]) or an Apple
@@ -112,6 +114,27 @@ pub fn primary_time_zone(canonical: &str) -> &str {
     }
 }
 
+/// A Windows time zone key name (`TimeZoneKeyName` of
+/// `GetDynamicTimeZoneInformation`, such as "Pacific Standard Time") to its
+/// primary IANA identifier, by CLDR's windowsZones table. `region` is the
+/// user's region (`GetUserDefaultGeoName`), which selects a territory's own
+/// row ("Pacific Standard Time" in CA is America/Vancouver); with no region,
+/// an unparsable one, or one that has no row for the zone, the territory
+/// `001` row is used. None if the table does not know the key.
+pub fn time_zone_from_windows(id: &str, region: Option<&str>) -> Option<String> {
+    let parser = WindowsParser::new();
+    let region = region.and_then(|r| Region::try_from_str(r).ok());
+    // ICU4X looks up the exact (key, region) pair, so a region with no row
+    // for this zone falls back to the 001 row here.
+    let zone = parser
+        .parse(id, region)
+        .or_else(|| parser.parse(id, None))?;
+    IanaParserExtended::new()
+        .iter()
+        .find(|entry| entry.time_zone == zone)
+        .map(|entry| primary_time_zone(entry.canonical).to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +237,94 @@ mod tests {
         ];
         for (raw, want) in cases {
             assert_eq!(time_zone_from_host(raw).as_deref(), want, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn windows_time_zones() {
+        let cases = [
+            ("Pacific Standard Time", None, Some("America/Los_Angeles")),
+            ("India Standard Time", None, Some("Asia/Kolkata")),
+            ("UTC", None, Some("UTC")),
+            // A territory's own row.
+            (
+                "Pacific Standard Time",
+                Some("CA"),
+                Some("America/Vancouver"),
+            ),
+            (
+                "Pacific Standard Time",
+                Some("ca"),
+                Some("America/Vancouver"),
+            ),
+            (
+                "Eastern Standard Time",
+                Some("US"),
+                Some("America/New_York"),
+            ),
+            // The region has no row for this zone: the 001 row.
+            ("India Standard Time", Some("US"), Some("Asia/Kolkata")),
+            ("W. Europe Standard Time", Some("JP"), Some("Europe/Berlin")),
+            // Not a region at all: the 001 row.
+            (
+                "Pacific Standard Time",
+                Some("not a region"),
+                Some("America/Los_Angeles"),
+            ),
+            (
+                "Pacific Standard Time",
+                Some(""),
+                Some("America/Los_Angeles"),
+            ),
+            // A UN M.49 code, which GetUserDefaultGeoName can return.
+            (
+                "Pacific Standard Time",
+                Some("419"),
+                Some("America/Los_Angeles"),
+            ),
+            // Keys are case-sensitive in the table, as in the registry's
+            // names.
+            ("pacific standard time", None, None),
+            ("Mars Standard Time", None, None),
+            ("", None, None),
+            ("Pacific Standard Time/CA", None, None),
+        ];
+        for (id, region, want) in cases {
+            assert_eq!(
+                time_zone_from_windows(id, region).as_deref(),
+                want,
+                "{id:?} {region:?}"
+            );
+        }
+    }
+
+    /// Every key of CLDR 48.2's windowsZones that has a territory 001 row
+    /// maps to a primary IANA identifier (Review Focus 5).
+    #[test]
+    fn every_windows_zone_maps_to_a_primary_identifier() {
+        use icu::time::provider::windows::TimezoneIdentifiersWindowsV1;
+        use icu::time::provider::Baked;
+        use icu_provider::prelude::*;
+        let response: DataResponse<TimezoneIdentifiersWindowsV1> =
+            DataProvider::<TimezoneIdentifiersWindowsV1>::load(&Baked, Default::default())
+                .expect("windowsZones data");
+        let keys: Vec<String> = response
+            .payload
+            .get()
+            .map
+            .iter()
+            .filter_map(|(key, _)| key.strip_suffix("/001").map(str::to_owned))
+            .collect();
+        // cldr-core 48.2.0's windowsZones.json has 139 territory 001 rows.
+        assert_eq!(keys.len(), 139);
+        for key in &keys {
+            let zone = time_zone_from_windows(key, None)
+                .unwrap_or_else(|| panic!("{key:?} maps to nothing"));
+            assert_eq!(
+                time_zone_canonicalize(&zone).as_deref(),
+                Some(zone.as_str()),
+                "{key:?} maps to {zone:?}, which is not a primary identifier"
+            );
         }
     }
 }

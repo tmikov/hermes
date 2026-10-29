@@ -6,12 +6,21 @@
 # Compiles intl/js to Hermes bytecode and dumps it as IntlBytecode.inc for
 # intl/jsi/IntlBytecode.cpp. Same scheme as API/hermes/extensions.
 
+# hermesc_EXE names a target, so the command below runs the executable with
+# its suffix and from its per-configuration directory, and DEPENDS makes
+# both the file and the target dependencies.
 if(IMPORT_HOST_COMPILERS)
   file(TO_CMAKE_PATH "${IMPORT_HOST_COMPILERS}" IMPORT_HOST_COMPILERS_CMAKE)
   include(${IMPORT_HOST_COMPILERS_CMAKE})
   set(hermesc_EXE imported-hermesc)
+elseif(TARGET hermesc)
+  set(hermesc_EXE hermesc)
 else()
-  set(hermesc_EXE ${HERMES_TOOLS_OUTPUT_DIR}/hermesc)
+  message(FATAL_ERROR
+    "HERMES_BUILD_INTL needs hermesc to compile the plugin's JavaScript. "
+    "Configure with -DHERMES_ENABLE_TOOLS=ON, with "
+    "-DIMPORT_HOST_COMPILERS=<host build>/ImportHostCompilers.cmake, or "
+    "with -DHERMES_BUILD_INTL=OFF.")
 endif()
 
 # 00-header.js first and 99-footer.js last; name order between them.
@@ -46,8 +55,3 @@ add_custom_command(
 
 add_custom_target(hermesIntlBytecode
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/IntlBytecode.inc)
-# The custom command depends on hermesc by path; make the target order
-# explicit too, for generators that do not track files across targets.
-if(NOT IMPORT_HOST_COMPILERS)
-  add_dependencies(hermesIntlBytecode hermesc)
-endif()

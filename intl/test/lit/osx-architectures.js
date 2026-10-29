@@ -5,17 +5,24 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// The check that turns the plugin off by default, and makes an explicit
-// HERMES_BUILD_INTL=ON fatal, on macOS when CMAKE_OSX_ARCHITECTURES is one
-// architecture other than cargo's host (cmake/modules/HermesIntl.cmake).
+// The Rust triples of a macOS host build (cmake/modules/HermesIntl.cmake):
+// one per CMAKE_OSX_ARCHITECTURES entry, whatever the Mac's own
+// architecture, or the host triple from `cargo -vV` when it is empty.
 // It is plain CMake, so it runs on every platform.
 // RUN: %cmake -P %S/Inputs/osx-architectures.cmake 2>&1 | %FileCheck --match-full-lines %s
-// CHECK: [arm64] [host: aarch64-apple-darwin]: OFF
-// CHECK-NEXT: [x86_64] [host: aarch64-apple-darwin]: ON
-// CHECK-NEXT: [arm64] [host: x86_64-apple-darwin]: ON
-// CHECK-NEXT: [x86_64] [host: x86_64-apple-darwin]: OFF
-// Several architectures are the caller's other check.
-// CHECK-NEXT: [arm64;x86_64] [host: aarch64-apple-darwin]: OFF
-// CHECK-NEXT: [] [host: aarch64-apple-darwin]: OFF
-// No host line: nothing to compare with.
-// CHECK-NEXT: [arm64] []: OFF
+// CHECK: [] [host: aarch64-apple-darwin]: [aarch64-apple-darwin] []
+// CHECK-NEXT: [arm64] [host: aarch64-apple-darwin]: [aarch64-apple-darwin] []
+// CHECK-NEXT: [x86_64] [host: aarch64-apple-darwin]: [x86_64-apple-darwin] []
+// CHECK-NEXT: [arm64;x86_64] [host: aarch64-apple-darwin]: [aarch64-apple-darwin;x86_64-apple-darwin] []
+// CHECK-NEXT: [x86_64;arm64] [host: aarch64-apple-darwin]: [x86_64-apple-darwin;aarch64-apple-darwin] []
+// CHECK-NEXT: [] [host: x86_64-apple-darwin]: [x86_64-apple-darwin] []
+// CHECK-NEXT: [arm64] [host: x86_64-apple-darwin]: [aarch64-apple-darwin] []
+// CHECK-NEXT: [x86_64] [host: x86_64-apple-darwin]: [x86_64-apple-darwin] []
+// CHECK-NEXT: [arm64;x86_64] [host: x86_64-apple-darwin]: [aarch64-apple-darwin;x86_64-apple-darwin] []
+// CHECK-NEXT: [x86_64;arm64] [host: x86_64-apple-darwin]: [x86_64-apple-darwin;aarch64-apple-darwin] []
+// No host line: no triple; intl/CMakeLists.txt reports the missing cargo.
+// CHECK-NEXT: [] [host: ]: [] []
+// CHECK-NEXT: [arm64;x86_64] [host: ]: [aarch64-apple-darwin;x86_64-apple-darwin] []
+// A host line with trailing spaces at the end of the output.
+// CHECK-NEXT: [] [host: x86_64-apple-darwin]: [x86_64-apple-darwin] []
+

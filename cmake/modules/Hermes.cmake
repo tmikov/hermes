@@ -144,6 +144,49 @@ function(add_hermes_library name)
   endif()
 endfunction(add_hermes_library)
 
+# Make shared library \p name an Apple framework bundle (name.framework)
+# with the bundle identifier \p identifier, the project's version, and the
+# minimum OS version of HERMES_APPLE_TARGET_PLATFORM in its Info.plist. CMake
+# picks the layout: a shallow bundle (Info.plist at the root) for the
+# embedded SDKs, a deep one (Versions/<v>/Resources/Info.plist) for macOS and
+# Mac Catalyst. Two frameworks in one app must not share an identifier.
+function(hermes_apple_framework name identifier)
+  set_target_properties(${name} PROPERTIES
+    FRAMEWORK TRUE
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION}
+    FRAMEWORK_VERSION ${PROJECT_VERSION_MAJOR}
+    MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
+    MACOSX_FRAMEWORK_BUNDLE_VERSION ${PROJECT_VERSION}
+    MACOSX_FRAMEWORK_IDENTIFIER ${identifier}
+  )
+  # Define the deployment target in the frameworks metadata
+  if(HERMES_APPLE_TARGET_PLATFORM MATCHES "iphone")
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:${name}>/Info.plist
+    )
+  elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "appletv")
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:${name}>/Info.plist
+    )
+  elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "catalyst")
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:${name}>/Resources/Info.plist
+    )
+  elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "macos")
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:${name}>/Resources/Info.plist
+    )
+  elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "xr")
+    if(CMAKE_VERSION VERSION_LESS 3.28.4)
+      message("VisionOS Simulator requires CMake version >= 3.28.4")
+    endif()
+
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:${name}>/Info.plist
+    )
+  endif()
+endfunction(hermes_apple_framework)
 
 function(add_hermes_executable name)
   cmake_parse_arguments(ARG "" "" "LINK_OBJLIBS;LINK_LIBS" ${ARGN})

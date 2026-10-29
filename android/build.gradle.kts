@@ -232,9 +232,14 @@ android {
             // We intentionally build Hermes with Intl support only. This is to simplify
             // the build setup and to avoid overcomplicating the build-type matrix.
             "-DHERMES_ENABLE_INTL=True",
+            // The ICU4X-based Intl plugin, libhermesintl.so, which Hermes loads from
+            // beside libhermesvm.so or the app's library path. It needs Rust and the
+            // Android targets (rustup target add aarch64-linux-android
+            // armv7-linux-androideabi i686-linux-android x86_64-linux-android).
+            "-DHERMES_BUILD_INTL=ON",
         )
 
-        targets("hermesvm")
+        targets("hermesvm", "hermesintl")
       }
     }
 

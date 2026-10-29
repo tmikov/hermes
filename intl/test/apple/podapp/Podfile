@@ -1,0 +1,18 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+# The CocoaPods consumer app of the Intl plugin (run-podapp.sh): hermes-engine
+# from the repository's podspec, whose source is the hermes-ios tarball named
+# by the hermes-artifact-url environment variable.
+
+target 'PodApp-iOS' do
+  platform :ios, '15.1'
+  pod 'hermes-engine', :podspec => ENV.fetch('HERMES_PODSPEC')
+end
+
+target 'PodApp-tvOS' do
+  platform :tvos, '15.1'
+  pod 'hermes-engine', :podspec => ENV.fetch('HERMES_PODSPEC')
+end

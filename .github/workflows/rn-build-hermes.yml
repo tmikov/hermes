@@ -170,6 +170,19 @@ jobs:
       - name: Print Artifacts Directory
         shell: bash
         run: ls -lR ./android/ios-artifacts/artifacts/
+      - name: Install Rust and its Android targets (publish-artifacts.js builds the AAR)
+        shell: bash
+        run: |
+          # The Intl plugin (libhermesintl.so, HERMES_BUILD_INTL) in the AAR
+          # needs Rust 1.88 or newer and the std of each Android ABI's target.
+          if ! command -v rustup; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
       - name: Publish artifacts
         shell: bash
         run: |

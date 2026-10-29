@@ -13,7 +13,9 @@ set(LLVM_ENABLE_RTTI ON)
 # reject DLLs with unresolved symbols, and the only consumers of
 # these addons (NapiModuleLoadTest and the dlopen-based lit tests)
 # are disabled on Windows anyway, so skip building them entirely.
-if(NOT WIN32)
+# The same goes for Android, whose NDK links shared libraries with
+# --no-undefined, and where these tests do not run.
+if(NOT WIN32 AND NOT ANDROID)
   # Build a test NAPI addon as a shared library for module loading tests.
   # The addon is compiled against the NAPI headers only — it does NOT
   # link against the Hermes VM. NAPI symbols are resolved at load time
@@ -122,8 +124,9 @@ set(napi_test_sources
 )
 
 # NapiModuleLoadTest exercises dlopen-based native addon loading,
-# which is stubbed out on Windows. Skip the test there.
-if(NOT WIN32)
+# which is stubbed out on Windows. Skip the test there, and on Android,
+# which has no test addon (above).
+if(NOT WIN32 AND NOT ANDROID)
   list(APPEND napi_test_sources NapiModuleLoadTest.cpp)
 endif()
 
@@ -156,8 +159,8 @@ target_compile_definitions(NapiTests PRIVATE
 )
 
 # Pass the test addon path so NapiModuleLoadTest can find it.
-# Both the addon and the test are skipped on Windows.
-if(NOT WIN32)
+# Both the addon and the test are skipped on Windows and Android.
+if(NOT WIN32 AND NOT ANDROID)
   add_dependencies(NapiTests napi_test_addon)
   target_compile_definitions(NapiTests PRIVATE
     NAPI_TEST_ADDON_PATH="$<TARGET_FILE:napi_test_addon>"

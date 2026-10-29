@@ -35,6 +35,19 @@ jobs:
       - name: Set artifacts version
         shell: bash
         run: node ./utils/scripts/hermes/set-artifacts-version.js --build-type ${{ inputs.release-type }}
+      - name: Install Rust and its Android targets
+        shell: bash
+        run: |
+          # The Intl plugin (libhermesintl.so, HERMES_BUILD_INTL) in the AAR
+          # needs Rust 1.88 or newer and the std of each Android ABI's target.
+          if ! command -v rustup; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
       - name: Build android
         shell: bash
         run: |

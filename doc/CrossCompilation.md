@@ -27,6 +27,7 @@ cmake ~/fbsource/xplat/static_h \
   -DHERMES_UNICODE_LITE=ON \
   -DIMPORT_HOST_COMPILERS=~/static_h/build_release/ImportHostCompilers.cmake \
   -DHERMES_ENABLE_DEBUGGER=OFF \
+  -DHERMES_BUILD_SHARED_JSI=ON \
   -DANDROID_ABI=arm64-v8a -G Ninja
 ```
 
@@ -41,6 +42,19 @@ conversion, normalization, collation and date formatting -- is
 self-contained, and the ICU-backed Intl backend has been removed.
 `-DHERMES_ENABLE_INTL=ON` is now supported only on Apple and Android,
 which have their own native Intl implementations.
+
+The Intl plugin, `libhermesintl.so`, which `HERMES_BUILD_INTL` builds,
+by default for Android, is written in Rust: the build runs cargo for the
+ABI's Rust target, whose standard library must be installed (`rustup
+target add aarch64-linux-android` for arm64-v8a), and compiles the
+plugin's JavaScript with the host compiler from `IMPORT_HOST_COMPILERS`.
+On Android the plugin links `libjsi.so`, hence
+`-DHERMES_BUILD_SHARED_JSI=ON` above. To build without the plugin, and
+without Rust, pass `-DHERMES_BUILD_INTL=OFF` instead. On the device, the
+plugin must be pushed along with the binaries and the libraries they
+load; `utils/testsuite/adb-hermes setup`, described in [the plugin's
+README](../intl/README.md), collects them. The README also covers the
+other platforms.
 
 ## Emscripten
 

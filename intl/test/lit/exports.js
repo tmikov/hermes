@@ -6,8 +6,10 @@
  */
 
 // The plugin exports exactly one defined global symbol, its entry point:
-// nothing from the Rust core and no C++ inline or template instances.
-// RUN: %nm_defined_globals %intl_plugin > %t.syms
+// nothing from the Rust core and no C++ inline or template instances. A
+// Windows DLL's export table is listed by name (Inputs/coff-exports.py).
+// RUN: %list_exports %intl_plugin > %t.syms
 // RUN: count 1 < %t.syms
-// RUN: %FileCheck --match-full-lines -DENTRY=%intl_entry_symbol %s < %t.syms
-// CHECK: {{[0-9a-f]+}} T [[ENTRY]]
+// RUN: %FileCheck --match-full-lines --check-prefix=%exports_prefix -DENTRY=%intl_entry_symbol %s < %t.syms
+// NM: {{[0-9a-f]+}} T [[ENTRY]]
+// COFF: [[ENTRY]]

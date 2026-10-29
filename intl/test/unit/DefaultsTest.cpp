@@ -10,13 +10,17 @@
 
 #include <gtest/gtest.h>
 
-#include <unistd.h>
 #include <cstdio>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
+
+#if defined(__linux__) && !defined(__ANDROID__)
+// mkdtemp, symlink, unlink and rmdir, for LocaltimeFile.
+#include <unistd.h>
+#endif
 
 using namespace hermes_intl;
 
@@ -298,6 +302,48 @@ TEST(DefaultsTest, ExplicitLocaleDuplicatesAreCollapsed) {
   EXPECT_EQ(resolveDefaults(&config, fakeHost({})), "");
   EXPECT_EQ(
       config.default_locales, (std::vector<std::string>{"en-US", "fr", "en"}));
+}
+
+// The pure helpers of the Windows branch, which run on every host.
+
+TEST(DefaultsTest, WindowsLocaleNameLosesItsSortSuffix) {
+  EXPECT_EQ(windowsLocaleCandidate("de-DE_phoneb"), "de-DE");
+  EXPECT_EQ(windowsLocaleCandidate("es-ES_tradnl"), "es-ES");
+  EXPECT_EQ(windowsLocaleCandidate("zh-CN_stroke"), "zh-CN");
+  EXPECT_EQ(windowsLocaleCandidate("sr-Latn-RS"), "sr-Latn-RS");
+  EXPECT_EQ(windowsLocaleCandidate(""), "");
+  EXPECT_EQ(
+      localeFromCandidates({windowsLocaleCandidate("de-DE_phoneb")}), "de-DE");
+  EXPECT_EQ(
+      localeFromCandidates({windowsLocaleCandidate("sr-Latn-RS")}),
+      "sr-Latn-RS");
+}
+
+TEST(DefaultsTest, WindowsPseudoLocaleFallsBackToEnUS) {
+  for (const char *name : {"qps-ploc", "qps-ploca", "qps-plocm"}) {
+    EXPECT_EQ(windowsLocaleCandidate(name), name);
+    EXPECT_EQ(localeFromCandidates({windowsLocaleCandidate(name)}), "en-US")
+        << name;
+  }
+}
+
+TEST(DefaultsTest, LocaleFromCandidatesTakesTheFirstUsable) {
+  EXPECT_EQ(localeFromCandidates({"garbage!!", "fr_FR", "de_DE"}), "fr-FR");
+  EXPECT_EQ(localeFromCandidates({}), "en-US");
+}
+
+TEST(DefaultsTest, WindowsTimeZoneKeys) {
+  EXPECT_EQ(
+      core::timeZoneFromWindows("Pacific Standard Time", "").value_or(""),
+      "America/Los_Angeles");
+  EXPECT_EQ(
+      core::timeZoneFromWindows("Pacific Standard Time", "CA").value_or(""),
+      "America/Vancouver");
+  EXPECT_EQ(
+      core::timeZoneFromWindows("India Standard Time", "US").value_or(""),
+      "Asia/Kolkata");
+  EXPECT_EQ(core::timeZoneFromWindows("UTC", "").value_or(""), "UTC");
+  EXPECT_FALSE(core::timeZoneFromWindows("Mars Standard Time", ""));
 }
 
 /// Detection against the real host, with a default-constructed

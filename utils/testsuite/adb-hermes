@@ -1,0 +1,206 @@
+#!/bin/bash
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Run utils/test_runner.py's hermes on an Android device or emulator, for
+# plugin-mode test262 (intl/README.md, "On an Android device").
+#
+#   adb-hermes setup <android build> <host build> <bin dir>
+#
+# pushes <android build>/bin/hermes, its plugin and the libraries they need
+# to the device, and makes <bin dir>/hermes, a link to this script that
+# test_runner.py runs as its hermes (-b <bin dir>). Compiling (-emit-binary)
+# runs <host build>/bin/hermes on the host, since bytecode is portable; every
+# other run copies its input file to the device and runs the device's hermes
+# there, with the device's plugin in place of any -Xintl-plugin-path and the
+# caller's TZ. The exit status and output are the device process's. The
+# device needs the timeout command (toybox has it on current Android).
+#
+# Environment:
+#   ANDROID_SERIAL       the device, when more than one is attached (adb's
+#                        own variable);
+#   ADB_HERMES_DIR       the directory on the device, which setup empties,
+#                        so it must be under /data/local/tmp/ (default
+#                        /data/local/tmp/adb-hermes);
+#   ADB_HERMES_LIB_PATH  setup only: more directories, separated by ':', to
+#                        look for the libraries the device files need, such
+#                        as the one holding libfbjni.so;
+#   ADB_HERMES_TIMEOUT   the seconds after which the device kills a run
+#                        (default 600, longer than test_runner.py's own
+#                        timeout).
+
+set -u
+ADB=${ADB:-adb}
+
+die() {
+  echo "adb-hermes: $*" >&2
+  exit 125
+}
+
+# Push host file $1 to device path $2, or die with adb's message.
+push() {
+  local out
+  out=$($ADB push "$1" "$2" 2>&1) || die "cannot push $1 to $2: $out"
+}
+
+# Print $@ quoted for the device's shell.
+q() {
+  printf '%q ' "$@"
+}
+
+# Print the value of variable $2 in CMakeCache.txt of build $1.
+cache_var() {
+  sed -n "s/^$2:[A-Z]*=//p" "$1/CMakeCache.txt" | head -n1
+}
+
+# setup <android build> <host build> <bin dir>
+setup() {
+  [ $# -eq 3 ] ||
+    die "usage: adb-hermes setup <android build> <host build> <bin dir>"
+  local abuild=$1 hbuild=$2 bindir=$3
+  [ -f "$abuild/CMakeCache.txt" ] || die "$abuild is not a CMake build"
+  [ -x "$hbuild/bin/hermes" ] || die "no $hbuild/bin/hermes"
+  local ndk abi
+  ndk=$(cache_var "$abuild" ANDROID_NDK)
+  abi=$(cache_var "$abuild" ANDROID_ABI)
+  [ -n "$ndk" ] && [ -n "$abi" ] || die "$abuild is not an Android build"
+  # The NDK's host tag: darwin-x86_64 on every Mac, linux-x86_64 on Linux.
+  local host
+  case "$(uname -s)" in
+    Linux) host=linux-x86_64 ;;
+    Darwin) host=darwin-x86_64 ;;
+    *) die "no NDK host tag for $(uname -s)" ;;
+  esac
+  local tools=$ndk/toolchains/llvm/prebuilt/$host
+  [ -x "$tools/bin/llvm-readelf" ] || die "no $tools/bin/llvm-readelf"
+  local triple
+  case "$abi" in
+    arm64-v8a) triple=aarch64-linux-android ;;
+    armeabi-v7a) triple=arm-linux-androideabi ;;
+    x86) triple=i686-linux-android ;;
+    x86_64) triple=x86_64-linux-android ;;
+    *) die "unknown ANDROID_ABI $abi" ;;
+  esac
+  local search=("$abuild/lib" "$abuild/jsi" "$tools/sysroot/usr/lib/$triple")
+  local extra
+  IFS=: read -ra extra <<<"${ADB_HERMES_LIB_PATH:-}"
+  search+=("${extra[@]}")
+
+  # The files to push: hermes, the plugin, and every library they need,
+  # recursively, that is not part of the platform.
+  local files=("$abuild/bin/hermes" "$abuild/lib/libhermesintl.so")
+  local i=0 f f2 lib dir found
+  while [ $i -lt ${#files[@]} ]; do
+    f=${files[$i]}
+    [ -f "$f" ] || die "no $f"
+    for lib in $("$tools/bin/llvm-readelf" -d "$f" |
+        sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+      case "$lib" in
+        libc.so | libm.so | libdl.so | liblog.so | libandroid.so) continue ;;
+      esac
+      found=
+      for dir in "${search[@]}"; do
+        if [ -n "$dir" ] && [ -f "$dir/$lib" ]; then
+          found=$dir/$lib
+          break
+        fi
+      done
+      [ -n "$found" ] ||
+        die "cannot find $lib, which $f needs;" \
+          "add its directory to ADB_HERMES_LIB_PATH"
+      local seen=
+      for f2 in "${files[@]}"; do
+        [ "$f2" = "$found" ] && seen=1
+      done
+      [ -n "$seen" ] || files+=("$found")
+    done
+    i=$((i + 1))
+  done
+
+  local dev=${ADB_HERMES_DIR:-/data/local/tmp/adb-hermes}
+  # Setup deletes it, so only a directory of its own under /data/local/tmp.
+  case "$dev" in
+    /data/local/tmp/*[!/]*) ;;
+    *) die "ADB_HERMES_DIR '$dev' must be a directory under /data/local/tmp/" ;;
+  esac
+  case "/$dev/" in
+    */../* | */./*) die "ADB_HERMES_DIR '$dev' must not contain . or .." ;;
+  esac
+  $ADB shell "rm -rf $(q "$dev") &&
+    mkdir -p $(q "$dev/bin" "$dev/lib" "$dev/t")" ||
+    die "cannot create $dev on the device"
+  push "$abuild/bin/hermes" "$dev/bin/hermes"
+  for f in "${files[@]:1}"; do
+    push "$f" "$dev/lib/"
+    echo "pushed $(basename "$f")"
+  done
+
+  mkdir -p "$bindir" || die "cannot create $bindir"
+  ln -sf "$(readlink -f "$0")" "$bindir/hermes"
+  {
+    printf 'HOST_HERMES=%q\n' "$(readlink -f "$hbuild/bin/hermes")"
+    printf 'DEV=%q\n' "$dev"
+    printf 'SERIAL=%q\n' "${ANDROID_SERIAL:-}"
+  } >"$bindir/adb-hermes.conf"
+  echo "run: python3 utils/test_runner.py -b $bindir" \
+    "--intl-plugin $abuild/lib/libhermesintl.so ..."
+}
+
+# Run hermes with arguments "$@", on the host to compile, else on the device.
+run() {
+  local conf
+  conf=$(dirname "$0")/adb-hermes.conf
+  [ -f "$conf" ] || die "no $conf; run adb-hermes setup first"
+  local HOST_HERMES DEV SERIAL
+  # shellcheck disable=SC1090
+  . "$conf"
+  [ -n "$SERIAL" ] && export ANDROID_SERIAL=${ANDROID_SERIAL:-$SERIAL}
+  local a
+  for a in "$@"; do
+    [ "$a" = -emit-binary ] && exec "$HOST_HERMES" "$@"
+  done
+  local args=() src= file=
+  for a in "$@"; do
+    case "$a" in
+      -Xintl-plugin-path=*)
+        args+=("-Xintl-plugin-path=$DEV/lib/libhermesintl.so")
+        ;;
+      -*) args+=("$a") ;;
+      *)
+        if [ -z "$src" ] && [ -f "$a" ]; then
+          src=$a
+          file=$DEV/t/$$-$RANDOM-$(basename "$a")
+          args+=("$file")
+        else
+          args+=("$a")
+        fi
+        ;;
+    esac
+  done
+  [ -n "$src" ] && push "$src" "$file"
+  local envs
+  envs="LD_LIBRARY_PATH=$(q "$DEV/lib")"
+  [ -n "${TZ+x}" ] && envs="$envs TZ=$(q "$TZ")"
+  # When test_runner.py times a run out it kills this process, which is adb
+  # by then (exec below), but adbd does not stop the device's shell or
+  # hermes when the connection goes. So the device's own timeout ends a
+  # run that outlives ADB_HERMES_TIMEOUT, and the shell then removes the
+  # pushed file (the trap), as it does when hermes ends normally.
+  local cmd
+  cmd="$envs timeout -k 10 $(q "${ADB_HERMES_TIMEOUT:-600}")"
+  cmd="$cmd $(q "$DEV/bin/hermes" "${args[@]}")"
+  if [ -n "$file" ]; then
+    cmd="trap $(q "rm -f $(q "$file")") EXIT HUP INT TERM; $cmd"
+  fi
+  # exec, so that the runner killing this process on a timeout kills adb.
+  exec $ADB shell "$cmd"
+}
+
+if [ "${1:-}" = setup ]; then
+  shift
+  setup "$@"
+else
+  run "$@"
+fi

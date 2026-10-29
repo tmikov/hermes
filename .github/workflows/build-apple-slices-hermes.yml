@@ -29,6 +29,19 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup xcode
         uses: ./.github/actions/setup-xcode
+      - name: Install Rust and the ${{ matrix.slice }} targets
+        shell: bash
+        run: |
+          # The Intl plugin (hermesintl.framework) needs Rust 1.95 or newer
+          # (tvOS and visionOS) and the std of each target of the slice.
+          if ! command -v rustup; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add $(./utils/build-apple-framework.sh rust_targets "${{ matrix.slice }}")
       - name: Restore HermesC Artifact
         uses: actions/download-artifact@v4
         with:
@@ -52,21 +65,23 @@ jobs:
           echo "Moving from build_$SLICE to $FINAL_PATH"
           mv build_"$SLICE" "$FINAL_PATH"
 
-          # check whether everything is there
-          if [[ -d "$FINAL_PATH/lib/hermesvm.framework" ]]; then
-            echo "Successfully built hermesvm.framework for $SLICE in $FLAVOR"
-          else
-            echo "Failed to built hermesvm.framework for $SLICE in $FLAVOR"
-            exit 1
-          fi
+          # check whether everything is there: Hermes and the Intl plugin
+          for FRAMEWORK in hermesvm hermesintl; do
+            if [[ -d "$FINAL_PATH/lib/$FRAMEWORK.framework" ]]; then
+              echo "Successfully built $FRAMEWORK.framework for $SLICE in $FLAVOR"
+            else
+              echo "Failed to built $FRAMEWORK.framework for $SLICE in $FLAVOR"
+              exit 1
+            fi
 
-          if [[ -d "$FINAL_PATH/lib/hermesvm.framework.dSYM" ]]; then
-            echo "Successfully built hermesvm.framework.dSYM for $SLICE in $FLAVOR"
-          else
-            echo "Failed to built hermesvm.framework.dSYM for $SLICE in $FLAVOR"
-            echo "Please try again"
-            exit 1
-          fi
+            if [[ -d "$FINAL_PATH/lib/$FRAMEWORK.framework.dSYM" ]]; then
+              echo "Successfully built $FRAMEWORK.framework.dSYM for $SLICE in $FLAVOR"
+            else
+              echo "Failed to built $FRAMEWORK.framework.dSYM for $SLICE in $FLAVOR"
+              echo "Please try again"
+              exit 1
+            fi
+          done
       - name: Compress slices to preserve Symlinks
         shell: bash
         run: |

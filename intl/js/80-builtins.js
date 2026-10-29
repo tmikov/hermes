@@ -8,8 +8,7 @@
 // ECMA-402 "Locale Sensitive Functions of the ECMAScript Language
 // Specification": the versions of the locale-sensitive built-ins that
 // replace ECMA-262's, following the draft https://tc39.es/ecma402/ dated
-// October 24, 2026. setup installs them (design spec "What setup does");
-// later phases add theirs here.
+// October 24, 2026. setup installs them (design spec "What setup does").
 
 /// The collator localeCompare uses when locales and options are both
 /// undefined, created on first use (design spec "Resistance to tampering").

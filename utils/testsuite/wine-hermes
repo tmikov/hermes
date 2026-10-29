@@ -1,0 +1,56 @@
+#!/bin/bash
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Run utils/test_runner.py's hermes under Wine: a Windows build's hermes.exe,
+# for plugin-mode test262 on Linux (intl/README.md, "Running the Windows
+# build under Wine").
+#
+#   ln -s <checkout>/utils/testsuite/wine-hermes <bin dir>/hermes
+#   WINE_HERMES_DIR=<windows build>/bin python3 utils/test_runner.py \
+#     -b <bin dir> ...
+#
+# test_runner.py runs <bin dir>/hermes, which is this script. It runs
+# $WINE_HERMES_DIR/hermes.exe with Wine and the same arguments, except that
+# an absolute Unix path, alone or after "=" in an option such as
+# -Xintl-plugin-path=<path>, becomes the Z: path Wine maps it to. stdin is
+# /dev/null. The exit status and output are hermes.exe's.
+#
+# Wine's own msvcp140.dll makes Hermes executables hang now and then, so
+# Microsoft's msvcp140.dll (from the Visual C++ Redistributable of the same
+# toolset as the build, 14.44) must be in $WINE_HERMES_DIR next to
+# hermes.exe; this script makes Wine load it (WINEDLLOVERRIDES=msvcp140=n).
+#
+# Environment:
+#   WINE_HERMES_DIR  the directory holding hermes.exe (required);
+#   WINE             the wine executable (default wine);
+#   WINEPREFIX       Wine's own variable, passed through.
+
+set -u
+
+die() {
+  echo "wine-hermes: $*" >&2
+  exit 125
+}
+
+[ -n "${WINE_HERMES_DIR:-}" ] ||
+  die "set WINE_HERMES_DIR to the directory of hermes.exe"
+[ -f "$WINE_HERMES_DIR/hermes.exe" ] || die "no hermes.exe in $WINE_HERMES_DIR"
+[ -f "$WINE_HERMES_DIR/msvcp140.dll" ] ||
+  die "no msvcp140.dll in $WINE_HERMES_DIR; copy Microsoft's there" \
+    "(Visual C++ Redistributable 14.44)"
+
+args=()
+for a in "$@"; do
+  case "$a" in
+    /*) a="Z:${a//\//\\}" ;;
+    -*=/*) v=${a#*=}; a="${a%%=*}=Z:${v//\//\\}" ;;
+  esac
+  args+=("$a")
+done
+
+export WINEDLLOVERRIDES="msvcp140=n${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+export WINEDEBUG=${WINEDEBUG:--all}
+exec "${WINE:-wine}" "$WINE_HERMES_DIR/hermes.exe" "${args[@]}" </dev/null

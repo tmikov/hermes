@@ -16,7 +16,31 @@ target_link_libraries(IntlLoaderTests hermesvm_a)
 # Fake plugin libraries for test/hermes/intl-plugin. Like the Node-API test
 # addons they leave JSI undefined and bind to the host's exported copy, which
 # Windows linkers do not allow.
-if(NOT WIN32)
+if(WIN32)
+  # Fixtures for running the loader's error cases by hand on Windows or under
+  # Wine (lit does not run them): each links its own static JSI, as the real
+  # plugin does on Windows. They are not part of the default build; build
+  # them by name.
+  #   fake_intl_debug_abi   a Release-linkable plugin whose entry carries the
+  #                         Debug ABI bits (_ITERATOR_DEBUG_LEVEL 2, /MDd);
+  #   fake_intl_needs_dep   a plugin that imports fake_intl_dep.dll, which
+  #                         the runs leave out (error 126).
+  function(add_windows_fake_intl_plugin name)
+    add_hermes_library(${name} SHARED fixtures/FakeIntlPlugin.cpp)
+    target_compile_definitions(${name} PRIVATE ${ARGN})
+    target_include_directories(${name} PRIVATE
+      ${HERMES_JSI_DIR} ${PROJECT_SOURCE_DIR}/public
+      ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(${name} PRIVATE jsi)
+    set_target_properties(${name} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+  endfunction()
+
+  add_windows_fake_intl_plugin(fake_intl_debug_abi FAKE_DEBUG_ABI_BITS=1)
+  add_hermes_library(fake_intl_dep SHARED fixtures/FakeIntlDep.cpp)
+  set_target_properties(fake_intl_dep PROPERTIES EXCLUDE_FROM_ALL TRUE)
+  add_windows_fake_intl_plugin(fake_intl_needs_dep FAKE_NEEDS_DEP=1)
+  target_link_libraries(fake_intl_needs_dep PRIVATE fake_intl_dep)
+else()
   function(add_fake_intl_plugin name)
     add_hermes_library(${name} SHARED fixtures/FakeIntlPlugin.cpp)
     target_compile_definitions(${name} PRIVATE ${ARGN})
@@ -26,6 +50,10 @@ if(NOT WIN32)
     set_target_properties(${name} PROPERTIES SUFFIX ".so")
     if(APPLE)
       target_link_options(${name} PRIVATE -undefined dynamic_lookup)
+    elseif(ANDROID)
+      # The NDK links shared libraries with --no-undefined; bind JSI to
+      # libjsi.so, as the real plugin does there.
+      target_link_libraries(${name} PRIVATE jsi)
     endif()
     set_property(GLOBAL APPEND PROPERTY HERMES_INTL_FIXTURE_TARGETS ${name})
   endfunction()

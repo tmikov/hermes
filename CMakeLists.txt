@@ -252,45 +252,30 @@ set(HERMES_ENABLE_CORE_EXTENSIONS ON CACHE BOOL
 set(HERMES_ENABLE_CONTRIB_EXTENSIONS ON CACHE BOOL
     "Include community-contributed extensions (can be disabled for critical deployments)")
 
-# The Intl plugin (intl/) builds for the host only until Phase 6 of
-# doc/superpowers/specs/2026-10-22-intl-plugin-design.md adds cross builds.
-# On macOS that also rules out a single CMAKE_OSX_ARCHITECTURES other than
-# the one cargo builds for. HERMES_INTL_UNSUPPORTED_REASON says why it cannot
-# build, if it cannot; intl/CMakeLists.txt makes HERMES_BUILD_INTL=ON fatal
-# then.
-set(HERMES_INTL_OSX_ARCH_MISMATCH OFF)
-if(APPLE AND CMAKE_OSX_ARCHITECTURES)
-  find_program(HERMES_INTL_CARGO cargo)
-  if(HERMES_INTL_CARGO)
-    execute_process(
-      COMMAND ${HERMES_INTL_CARGO} -vV
-      OUTPUT_VARIABLE _hermes_intl_cargo_vv
-      ERROR_QUIET)
-    hermes_intl_osx_arch_mismatch("${CMAKE_OSX_ARCHITECTURES}"
-      "${_hermes_intl_cargo_vv}" HERMES_INTL_OSX_ARCH_MISMATCH)
-  endif()
-endif()
-hermes_intl_unsupported_reason(${HERMES_INTL_OSX_ARCH_MISMATCH}
-  HERMES_INTL_UNSUPPORTED_REASON)
+# The Intl plugin (intl/) runs cargo for the Rust target triples that
+# hermes_intl_rust_targets (cmake/modules/HermesIntl.cmake) maps this build
+# to. HERMES_INTL_UNSUPPORTED_REASON says why it cannot build, if it cannot;
+# intl/CMakeLists.txt makes HERMES_BUILD_INTL=ON fatal then. It defaults to
+# ON wherever it can build except Windows, where it stays OFF until a native
+# Windows build is verified. hermes_intl_build_option says when an existing
+# build directory follows a new default.
+set(HERMES_INTL_RUST_TARGET "" CACHE STRING
+  "The Rust target triple(s) to build the Intl plugin's core for, instead of the one chosen from the build")
+hermes_intl_find_cargo()
+hermes_intl_rust_targets(HERMES_INTL_RUST_TRIPLES
+  HERMES_INTL_DEPLOYMENT_VAR HERMES_INTL_UNSUPPORTED_REASON)
 if(HERMES_INTL_UNSUPPORTED_REASON)
   set(_hermes_intl_default OFF)
+  set(_hermes_intl_off_why "${HERMES_INTL_UNSUPPORTED_REASON}")
+elseif(WIN32)
+  set(_hermes_intl_default OFF)
+  set(_hermes_intl_off_why
+    "it is not yet verified on Windows; configure with -DHERMES_BUILD_INTL=ON to build it")
 else()
   set(_hermes_intl_default ON)
+  set(_hermes_intl_off_why "")
 endif()
-# Remember the value HERMES_BUILD_INTL defaulted to, so that later
-# configures can tell it from one the user gave.
-if(NOT DEFINED CACHE{HERMES_BUILD_INTL})
-  set(HERMES_INTL_DEFAULTED_TO ${_hermes_intl_default} CACHE INTERNAL
-    "The value HERMES_BUILD_INTL took by default")
-endif()
-set(HERMES_BUILD_INTL ${_hermes_intl_default} CACHE BOOL
-  "Build the ICU4X-based Intl plugin (libhermesintl); requires Rust")
-if(NOT HERMES_BUILD_INTL AND NOT _hermes_intl_default AND
-   DEFINED CACHE{HERMES_INTL_DEFAULTED_TO} AND
-   HERMES_BUILD_INTL STREQUAL HERMES_INTL_DEFAULTED_TO)
-  message(STATUS "Intl plugin off by default: it does not build for "
-    "${HERMES_INTL_UNSUPPORTED_REASON}")
-endif()
+hermes_intl_build_option(${_hermes_intl_default} "${_hermes_intl_off_why}")
 
 # Contrib extensions require core extensions.
 if(NOT HERMES_ENABLE_CORE_EXTENSIONS AND HERMES_ENABLE_CONTRIB_EXTENSIONS)
@@ -813,7 +798,9 @@ if(HERMES_ENABLE_TEST_SUITE)
     list(APPEND HERMES_TEST_DEPS
       napi-runner
     )
-    if(NOT WIN32)
+    # The test addons are not built for Windows or Android; see
+    # unittests/napi/CMakeLists.txt.
+    if(NOT WIN32 AND NOT ANDROID)
       list(APPEND HERMES_TEST_DEPS
         napi_test_addon
         napi_ref_addon
@@ -899,7 +886,7 @@ if(HERMES_ENABLE_TEST_SUITE)
     ARGS ${HERMES_TEST_EXTRA_ARGS}
     )
   set_target_properties(check-hermes PROPERTIES FOLDER "Hermes regression tests")
-  if(HERMES_ENABLE_NAPI)
+  if(TARGET check-napi)
     add_dependencies(check-hermes check-napi)
   endif()
   # The Node-API suites run hermes too, which loads the plugin from

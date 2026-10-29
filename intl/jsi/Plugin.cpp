@@ -75,28 +75,28 @@ void install(jsi::Runtime &rt, const hermes_intl_config *config) {
           rt, config->default_locales, config->default_time_zone));
 }
 
-/// The flags this plugin was built with.
-constexpr uint32_t kFlags =
-#ifdef JSI_UNSTABLE
-    HERMES_INTL_FLAG_JSI_UNSTABLE;
-#else
-    0;
-#endif
-
 /// What hermes_intl_get_entry returns.
 const hermes_intl_entry kEntry{
     sizeof(hermes_intl_entry),
     HERMES_INTL_PLUGIN_INTERFACE_VERSION,
     HERMES_INTL_BYTECODE_VERSION,
-    kFlags,
+    HERMES_INTL_BUILD_FLAGS,
     resolveDefaults,
     install};
 
 } // namespace
 } // namespace hermes_intl
 
+/// Exports a symbol from the plugin library. On Windows nothing else is
+/// exported; elsewhere the version script or export list of
+/// intl/CMakeLists.txt keeps everything else local.
+#ifdef _WIN32
+#define HERMES_INTL_EXPORT __declspec(dllexport)
+#else
+#define HERMES_INTL_EXPORT __attribute__((visibility("default")))
+#endif
+
 /// The plugin's one exported symbol, HERMES_INTL_ENTRY_SYMBOL.
-extern "C" __attribute__((visibility("default"))) const hermes_intl_entry *
-hermes_intl_get_entry() {
+extern "C" HERMES_INTL_EXPORT const hermes_intl_entry *hermes_intl_get_entry() {
   return &hermes_intl::kEntry;
 }
