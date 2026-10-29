@@ -300,6 +300,10 @@ bool invokeCC(
         args.emplace_back("-ljsi");
         if (!params.noHermesLibs) {
           args.emplace_back("-lshermes_console_a");
+          // The static VM library does not contain Boost.Context, which it
+          // uses when Hermes is built with it.
+          if (SHERMES_BOOST_CONTEXT_LIB[0])
+            args.emplace_back(SHERMES_BOOST_CONTEXT_LIB);
         }
 #else
         llvh::errs() << "Static linking unsupported on this platform\n";

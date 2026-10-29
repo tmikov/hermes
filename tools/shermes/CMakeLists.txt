@@ -52,6 +52,14 @@ if (HERMES_ENABLE_UNDEFINED_BEHAVIOR_SANITIZER)
   append("-fsanitize=undefined" SHERMES_CC_SYSCFLAGS SHERMES_CC_SYSLDFLAGS)
 endif()
 
+# The static VM library refers to Boost.Context when it is used, but does not
+# contain it, so a static link names its archive too.
+if (HERMES_USE_BOOST_CONTEXT)
+  set(SHERMES_BOOST_CONTEXT_LIB "$<TARGET_FILE:boost_context>")
+else()
+  set(SHERMES_BOOST_CONTEXT_LIB "")
+endif()
+
 file(GENERATE
         OUTPUT $<CONFIG>/config.h
         CONTENT "\
@@ -59,7 +67,8 @@ file(GENERATE
 #define SHERMES_CC_SYSCFLAGS          R\"(${SHERMES_CC_SYSCFLAGS})\"
 #define SHERMES_CC_SYSLDFLAGS         R\"(${SHERMES_CC_SYSLDFLAGS})\"
 #define SHERMES_CC_INCLUDE_PATH       R\"(${SHERMES_CC_INCLUDE_PATH})\"
-#define SHERMES_CC_LIB_PATH           R\"(${SHERMES_CC_LIB_PATH})\""
+#define SHERMES_CC_LIB_PATH           R\"(${SHERMES_CC_LIB_PATH})\"
+#define SHERMES_BOOST_CONTEXT_LIB     R\"(${SHERMES_BOOST_CONTEXT_LIB})\""
         )
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>)
@@ -88,3 +97,6 @@ export(TARGETS shermes APPEND FILE ${CMAKE_BINARY_DIR}/ImportHostCompilers.cmake
 # compiler, so this is not the default for shermes.
 add_custom_target(shermes-dep)
 add_dependencies(shermes-dep shermes hermesvm_a hermesvmlean_a hermesvm hermesvmlean shermes_console shermes_console_a)
+if (HERMES_USE_BOOST_CONTEXT)
+  add_dependencies(shermes-dep boost_context)
+endif()
