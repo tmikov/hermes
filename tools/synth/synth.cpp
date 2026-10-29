@@ -244,6 +244,19 @@ static hermes::SHA1 stringToSHA1(const std::string &hexStr) {
   return sha;
 }
 
+/// Create the Hermes runtime that replays a trace, from the \p config the
+/// trace gives, with the finalizer thread runner of a command-line tool.
+static std::unique_ptr<facebook::hermes::HermesRuntime> makeReplayRuntime(
+    const ::hermes::vm::RuntimeConfig &config) {
+  auto *hermesRoot =
+      facebook::jsi::castInterface<facebook::hermes::IHermesRootAPI>(
+          facebook::hermes::makeHermesRootAPI());
+  return hermesRoot->makeHermesRuntime(
+      config.rebuild()
+          .withFinalizerThreadRunner(hermes::cli::toolFinalizerThreadRunner())
+          .build());
+}
+
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   llvh::sys::PrintStackTraceOnErrorSignal("Hermes synth");
@@ -411,12 +424,9 @@ int main(int argc, char **argv) {
           options,
           [stream = std::ref(os)](
               const ::hermes::vm::RuntimeConfig &config) mutable {
-            auto *hermesRoot =
-                facebook::jsi::castInterface<facebook::hermes::IHermesRootAPI>(
-                    facebook::hermes::makeHermesRootAPI());
             auto &st = stream.get();
             return facebook::hermes::makeTracingHermesRuntime(
-                hermesRoot->makeHermesRuntime(config),
+                makeReplayRuntime(config),
                 config,
                 std::move(st),
                 /* forReplay */ true);
@@ -442,25 +452,22 @@ int main(int argc, char **argv) {
           shermesUnitCreatorFns.emplace(sha1, unitCreatorFn);
         }
 
-        auto createRuntime = [](const ::hermes::vm::RuntimeConfig &config) {
-          auto hermesRoot =
-              facebook::jsi::castInterface<facebook::hermes::IHermesRootAPI>(
-                  facebook::hermes::makeHermesRootAPI());
-          return hermesRoot->makeHermesRuntime(config);
-        };
-
         llvh::outs() << TraceInterpreter::execNativeWithRuntime(
                             cl::TraceFile,
                             shermesUnitCreatorFns,
                             options,
-                            createRuntime)
+                            makeReplayRuntime)
                      << "\n";
 
       } else
 #endif
       {
-        llvh::outs() << TraceInterpreter::execAndGetStats(
-                            cl::TraceFile, bytecodeFiles, options)
+        // execAndGetStats with the runtime of a command-line tool.
+        llvh::outs() << TraceInterpreter::execWithRuntime(
+                            cl::TraceFile,
+                            bytecodeFiles,
+                            options,
+                            makeReplayRuntime)
                      << "\n";
       }
     }

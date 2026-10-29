@@ -142,7 +142,8 @@ int main(int argc, char **argv) {
       .withTrackIO(flags.TrackBytecodeIO)
       .withEnableHermesInternal(flags.EnableHermesInternal)
       .withEnableHermesInternalTestMethods(
-          flags.EnableHermesInternalTestMethods);
+          flags.EnableHermesInternalTestMethods)
+      .withFinalizerThreadRunner(cli::toolFinalizerThreadRunner());
   options.runtimeConfig =
       cli::withIntlPluginFlags(runtimeConfigBuilder, flags).build();
 

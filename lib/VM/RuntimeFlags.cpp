@@ -43,7 +43,8 @@ vm::RuntimeConfig buildRuntimeConfig(const RuntimeFlags &flags) {
       .withTrackIO(flags.TrackBytecodeIO)
       .withEnableHermesInternal(flags.EnableHermesInternal)
       .withEnableHermesInternalTestMethods(
-          flags.EnableHermesInternalTestMethods);
+          flags.EnableHermesInternalTestMethods)
+      .withFinalizerThreadRunner(toolFinalizerThreadRunner());
   return withIntlPluginFlags(builder, flags).build();
 }
 #endif // HERMES_IS_MOBILE_BUILD

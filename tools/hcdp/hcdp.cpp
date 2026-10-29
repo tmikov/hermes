@@ -24,6 +24,7 @@ int main(void) {
 #include <hermes/Parser/JSONParser.h>
 #include <hermes/Support/JSONEmitter.h>
 #include <hermes/Support/SerialExecutor.h>
+#include <hermes/VM/RuntimeFlags.h>
 #include <hermes/cdp/CDPAgent.h>
 #include <hermes/cdp/CDPDebugAPI.h>
 #include <hermes/cdp/MessageTypes.h>
@@ -56,6 +57,8 @@ class RuntimeInstance {
             fbhermes::makeHermesRuntime(
                 ::hermes::vm::RuntimeConfig::Builder()
                     .withEnableSampleProfiling(true)
+                    .withFinalizerThreadRunner(
+                        ::hermes::cli::toolFinalizerThreadRunner())
                     .build())) {
     cdpDebugAPI_ = cdp::CDPDebugAPI::create(*runtime_);
 

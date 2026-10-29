@@ -346,6 +346,16 @@ struct RuntimeFlags : public VMOnlyRuntimeFlags, CompilerRuntimeFlags {};
 vm::RuntimeConfig buildRuntimeConfig(const RuntimeFlags &flags);
 #endif // HERMES_IS_MOBILE_BUILD
 
+/// Return the JSI finalizer thread runner that command-line tools set in their
+/// RuntimeConfig: an empty runner, which runs the finalizer thread unwrapped.
+/// Leaving the runner unset selects the platform default, which on Android
+/// attaches the thread to the JVM through fbjni and aborts the process when
+/// there is no JVM, as in a command-line tool. Elsewhere the two are the same.
+/// Inline, so that tools linked against the shared libhermesvm can use it.
+inline vm::ThreadRunner toolFinalizerThreadRunner() {
+  return vm::ThreadRunner{};
+}
+
 /// Set the Intl plugin options of \p builder (EnableIntlPlugin,
 /// IntlPluginPath, IntlDefaultLocales and IntlDefaultTimeZone) from \p flags,
 /// for buildRuntimeConfig and the tools that build their RuntimeConfig

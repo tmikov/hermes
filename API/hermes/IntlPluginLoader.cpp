@@ -71,8 +71,8 @@ constexpr jsi::UUID kIntlRecordUUID{
     0xb4f0,
     0x45f899fff1b0};
 
-/// What installIntlPlugin did for one runtime; makeWorkerRuntimeConfig copies
-/// it into a Worker's config.
+/// What installIntlPlugin recorded for one runtime; makeWorkerRuntimeConfig
+/// copies it into a Worker's config.
 struct IntlRecord {
   /// The runtime's Intl field (the old, built-in implementation).
   bool oldIntl = true;
@@ -82,6 +82,12 @@ struct IntlRecord {
   std::string pluginPath;
   /// The defaults the plugin's install received.
   hermes_intl_config defaults;
+  /// The runtime's FinalizerThreadRunner from RuntimeConfig. It is not Intl
+  /// state, but this record is what a Worker's config is built from, and a
+  /// Worker must use the runner its parent was created with: falling back to
+  /// the platform default would attach a command-line tool's Worker threads
+  /// to a JVM that does not exist on Android.
+  std::optional<::hermes::vm::ThreadRunner> finalizerThreadRunner;
 };
 
 /// A plugin entry that passed checkEntry.
@@ -540,6 +546,7 @@ void installIntlPlugin(
     const ::hermes::vm::RuntimeConfig &config) {
   auto record = std::make_shared<IntlRecord>();
   record->oldIntl = config.getIntl();
+  record->finalizerThreadRunner = config.getFinalizerThreadRunner();
   std::optional<LoadedPlugin> plugin;
   if (config.getEnableIntlPlugin()) {
     std::lock_guard<std::mutex> lock(loaderMutex());
@@ -659,7 +666,9 @@ unsigned intlDefaultResolutionsForTests() {
   auto builder = ::hermes::vm::RuntimeConfig::Builder();
   if (!record)
     return builder.build();
-  builder.withIntl(record->oldIntl).withEnableIntlPlugin(record->installed);
+  builder.withFinalizerThreadRunner(record->finalizerThreadRunner)
+      .withIntl(record->oldIntl)
+      .withEnableIntlPlugin(record->installed);
   if (record->installed) {
     builder.withIntlPluginPath(record->pluginPath)
         .withIntlDefaultLocales(record->defaults.default_locales)

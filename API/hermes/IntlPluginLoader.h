@@ -26,7 +26,8 @@ void installIntlPlugin(
 
 /// The RuntimeConfig for a Worker started by \p parent: the parent's plugin
 /// (or none), the default locales and time zone the parent's plugin actually
-/// received, and the parent's Intl flag. Everything else is the default.
+/// received, the parent's Intl flag, and the parent's finalizer thread runner.
+/// Everything else is the default.
 ::hermes::vm::RuntimeConfig makeWorkerRuntimeConfig(jsi::Runtime &parent);
 
 /// What stat says about a file: whether it exists, and its device numbers

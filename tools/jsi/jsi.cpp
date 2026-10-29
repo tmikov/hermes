@@ -7,6 +7,7 @@
 
 #include "hermes/Support/OSCompat.h"
 #include "hermes/TimerStats.h"
+#include "hermes/VM/RuntimeFlags.h"
 #include "hermes/hermes.h"
 
 #include "llvh/Support/CommandLine.h"
@@ -98,7 +99,10 @@ int main(int argc, char **argv) {
       : InputFilename == "-"         ? "<stdin>"
                                      : std::string(InputFilename);
 
-  std::unique_ptr<jsi::Runtime> runtime(facebook::hermes::makeHermesRuntime());
+  std::unique_ptr<jsi::Runtime> runtime(facebook::hermes::makeHermesRuntime(
+      ::hermes::vm::RuntimeConfig::Builder()
+          .withFinalizerThreadRunner(::hermes::cli::toolFinalizerThreadRunner())
+          .build()));
 
   if (CollectTiming) {
     runtime = facebook::hermes::makeTimedRuntime(std::move(runtime));

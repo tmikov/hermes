@@ -155,7 +155,9 @@ using ThreadRunner = std::function<void(std::function<void()>)>;
   /* empty ThreadRunner suppresses that and leaves the thread */        \
   /* unwrapped -- note that this must be spelled */                     \
   /* withFinalizerThreadRunner(ThreadRunner{}), since a bare {} is */   \
-  /* nullopt and so selects the platform default instead. */            \
+  /* nullopt and so selects the platform default instead. Worker */    \
+  /* runtimes inherit their parent's runner, so one runner may be */    \
+  /* called concurrently from several finalizer threads. */             \
   F(HERMES_NON_CONSTEXPR,                                               \
     std::optional<ThreadRunner>,                                        \
     FinalizerThreadRunner,                                              \

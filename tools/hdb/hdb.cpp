@@ -17,6 +17,7 @@ int main(void) {
 
 #include <hermes/DebuggerAPI.h>
 #include <hermes/Support/OSCompat.h>
+#include <hermes/VM/RuntimeFlags.h>
 #include <hermes/hermes.h>
 #include <jsi/jsi.h>
 #include <signal.h>
@@ -780,6 +781,7 @@ int main(int argc, char **argv) {
       hermes::vm::RuntimeConfig::Builder()
           .withCompilationMode(options.compilationMode)
           .withES6BlockScoping(options.enableBlockScoping)
+          .withFinalizerThreadRunner(hermes::cli::toolFinalizerThreadRunner())
           .build();
 
   std::unique_ptr<HermesRuntime> runtime = makeHermesRuntime(config);

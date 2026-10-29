@@ -394,6 +394,67 @@ TEST_F(IntlLoaderTest, WorkerConfigCopiesDisabledState) {
       workerConfigCopiesDisabledState(), ::testing::ExitedWithCode(0), "");
 }
 
+/// Set while markingRunner runs its function, on that thread only.
+thread_local bool inMarkingRunner = false;
+
+/// A finalizer thread runner that tests can recognize: the function it runs
+/// sees inMarkingRunner set.
+void markingRunner(std::function<void()> run) {
+  bool previous = inMarkingRunner;
+  inMarkingRunner = true;
+  run();
+  inMarkingRunner = previous;
+}
+
+/// Whether \p config has a finalizer thread runner and it is markingRunner.
+bool hasMarkingRunner(const RuntimeConfig &config) {
+  auto runner = config.getFinalizerThreadRunner();
+  if (!runner || !*runner)
+    return false;
+  bool marked = false;
+  (*runner)([&marked] { marked = inMarkingRunner; });
+  return marked;
+}
+
+/// Child: a Worker's config carries the parent's finalizer thread runner,
+/// with and without the plugin, so a Worker never falls back to the platform
+/// default (the JNI one on Android) when its parent did not use it. A parent
+/// without a runner gives Workers none either.
+void workerConfigCopiesFinalizerThreadRunner() {
+  registerEntry(goodEntry());
+  auto withPlugin =
+      makeHermesRuntime(RuntimeConfig::Builder()
+                            .withFinalizerThreadRunner(markingRunner)
+                            .build());
+  RuntimeConfig config = makeWorkerRuntimeConfig(*withPlugin);
+  bool ok = config.getEnableIntlPlugin() && hasMarkingRunner(config);
+  // A worker's worker gets it too.
+  auto worker = makeHermesRuntime(config);
+  ok = ok && hasMarkingRunner(makeWorkerRuntimeConfig(*worker));
+
+  auto withoutPlugin =
+      makeHermesRuntime(RuntimeConfig::Builder()
+                            .withEnableIntlPlugin(false)
+                            .withFinalizerThreadRunner(markingRunner)
+                            .build());
+  RuntimeConfig noPlugin = makeWorkerRuntimeConfig(*withoutPlugin);
+  ok = ok && !noPlugin.getEnableIntlPlugin() && hasMarkingRunner(noPlugin);
+
+  auto unset = makeHermesRuntime();
+  ok = ok && !makeWorkerRuntimeConfig(*unset).getFinalizerThreadRunner();
+  worker.reset();
+  withPlugin.reset();
+  withoutPlugin.reset();
+  unset.reset();
+  std::exit(ok ? 0 : 1);
+}
+TEST_F(IntlLoaderTest, WorkerConfigCopiesFinalizerThreadRunner) {
+  EXPECT_EXIT(
+      workerConfigCopiesFinalizerThreadRunner(),
+      ::testing::ExitedWithCode(0),
+      "");
+}
+
 /// A fake stat over \p files: path to its id.
 std::function<MappedFileId(const std::string &)> fakeStat(
     std::map<std::string, MappedFileId> files) {
