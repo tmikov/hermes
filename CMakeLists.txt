@@ -758,6 +758,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(save_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS ${HERMES_BUILD_SHARED_JSI})
 add_subdirectory(${HERMES_JSI_DIR}/jsi ${CMAKE_CURRENT_BINARY_DIR}/jsi)
+# JSI's CMake gives cl /EHsc but treats clang-cl as Clang, and Hermes.cmake
+# removes CMake's default /EHsc, so clang-cl would compile JSI without
+# exceptions.
+if(CLANG_CL)
+  target_compile_options(jsi PRIVATE /EHsc)
+endif()
 set(BUILD_SHARED_LIBS ${save_BUILD_SHARED_LIBS})
 set(CMAKE_POSITION_INDEPENDENT_CODE ${save_CMAKE_POSITION_INDEPENDENT_CODE})
 

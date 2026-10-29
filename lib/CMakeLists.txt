@@ -242,14 +242,16 @@ endif()
 # having its dependencies added to the link line of things that depend on it.
 # That is, we do not want libraries that depend on hermesvm to link in an extra
 # copy of any static libraries linked into it.
+# /WHOLEARCHIVE gets the VM archives by path: link.exe also accepts a library
+# name, but lld-link (the clang-cl cross build) does not.
 if(APPLE)
   target_link_libraries(hermesvm PRIVATE -force_load hermesvm_a)
   target_link_libraries(hermesvmlean PRIVATE -force_load hermesvmlean_a)
 elseif(MSVC)
   target_link_libraries(hermesvm PRIVATE hermesvm_a)
-  target_link_options(hermesvm PRIVATE /WHOLEARCHIVE:hermesvm_a)
+  target_link_options(hermesvm PRIVATE /WHOLEARCHIVE:$<TARGET_FILE:hermesvm_a>)
   target_link_libraries(hermesvmlean PRIVATE hermesvmlean_a)
-  target_link_options(hermesvmlean PRIVATE /WHOLEARCHIVE:hermesvmlean_a)
+  target_link_options(hermesvmlean PRIVATE /WHOLEARCHIVE:$<TARGET_FILE:hermesvmlean_a>)
 else()
   target_link_libraries(hermesvm PRIVATE
     -Wl,--whole-archive
