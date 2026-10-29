@@ -26,7 +26,9 @@
 # It prints the app's link commands for Hermes's frameworks
 # (LC_LOAD_DYLIB or LC_LOAD_WEAK_DYLIB), the frameworks in the app, and the
 # app's report: "Intl.Segmenter: function" means Intl comes from the plugin,
-# "undefined" means there is no plugin. Needs Xcode, CocoaPods and python3.
+# "typeof Intl: undefined" means there is no plugin (and the report then
+# lists Hermes's own locale fallback results). Needs Xcode, CocoaPods and
+# python3.
 
 set -euo pipefail
 

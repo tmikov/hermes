@@ -505,16 +505,6 @@ CallResult<HermesValue> addEntriesFromIterable(
 }
 
 } // namespace vm
-
-#ifdef HERMES_ENABLE_INTL
-namespace intl {
-
-// TODO T65916424: Consider how we can move this somewhere more modular.
-vm::HermesValue createIntlObject(vm::Runtime &runtime);
-
-} // namespace intl
-#endif
-
 } // namespace hermes
 
 #endif // HERMES_VM_JSLIB_JSLIBINTERNAL_H

@@ -11,7 +11,22 @@ Hermes is a C++17 project. clang, gcc, and Visual C++ are supported. Hermes also
 
 The Hermes REPL will also use libreadline, if available.
 
-ICU is not required for a default build: Unicode case conversion, normalization, collation and date formatting are all self-contained. ICU is needed only for `-DHERMES_ENABLE_INTL=ON` (off by default), and even then only on Linux and Windows, since Apple and Android builds use their platform's own Intl implementation. Install `libicu-dev` (Ubuntu) or `icu` (Arch) if you are enabling Intl.
+Hermes does not use ICU. Unicode case conversion, normalization, collation
+and date formatting are all self-contained.
+
+`Intl` comes from the Intl plugin (`libhermesintl`), a separate library
+written in Rust on [ICU4X](https://github.com/unicode-org/icu4x), which
+Hermes loads when it is present. The CMake option `HERMES_BUILD_INTL`
+builds it. It is on by default on Linux and macOS (and for Android and
+the Apple platforms), so a default build there needs a Rust toolchain,
+1.88 or newer; [rustup](https://rustup.rs) installs one. Without Rust,
+configure fails and names the option. Configure with
+`-DHERMES_BUILD_INTL=OFF` for a build without Rust; Hermes then has no
+`Intl`, and `toLocaleString` and the other locale-sensitive built-ins give
+Hermes's own results. On Windows the option is off by default. See
+[the plugin's README](../intl/README.md) for details. The option
+`HERMES_ENABLE_INTL`, which enabled Hermes's former built-in `Intl`, is
+deprecated and ignored.
 
 To install dependencies on Ubuntu:
 
@@ -24,6 +39,11 @@ On Arch Linux:
 On Mac via Homebrew:
 
     brew install cmake git ninja
+
+Then install Rust with rustup, unless you configure with
+`-DHERMES_BUILD_INTL=OFF`:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ## Building on Linux and macOS
 
@@ -78,17 +98,35 @@ To run the Hermes test suite:
 To run Hermes against the test262 suite, you need to have a Hermes binary built
 already and a clone of the [test262 repo](https://github.com/tc39/test262/):
 
-    hermes/utils/testsuite/run_testsuite.py -b <hermes_build> <test262>
+    python3 hermes/utils/test_runner.py -b <hermes_build>/bin <test262>/test
 
 E.g. if we configured at `~/hermes_build` (i.e. `~/hermes_build/bin/hermes` is
 an executable) and cloned test262 at `~/test262`, then perform:
 
-    hermes/utils/testsuite/run_testsuite.py -b ~/hermes_build ~/test262/test
+    python3 hermes/utils/test_runner.py -b ~/hermes_build/bin ~/test262/test
 
-Note that you can also only test against part of a test suite, e.g. to run the
-Intl402 subset of the test262, you can specifiy a subdir:
+You can also give one or more subdirectories or files of the suite in place
+of `~/test262/test`. This normal mode runs every test with the Intl plugin
+disabled, so it tests Hermes without `Intl`, and it skips every test under
+`test/intl402`.
 
-    hermes/utils/testsuite/run_testsuite.py -b ~/hermes_build ~/test262/test/intl402
+The `intl402` tests run against the Intl plugin in plugin mode, which judges
+each result against the plugin's list of expected failures. The list names
+the test262 commit it was made for (on its `test262-commit:` line), and the
+runner refuses a checkout at another commit. For example, on Linux:
+
+    python3 hermes/utils/test_runner.py -b ~/hermes_build/bin \
+      --intl-plugin ~/hermes_build/lib/libhermesintl.so \
+      --intl-expectations hermes/intl/test/test262-expectations.txt \
+      ~/test262/test/intl402
+
+The plugin is `lib/libhermesintl.dylib` on macOS. `check-intl` runs the
+plugin's tests and this test262 run, with the `built-ins` tests of the
+methods the plugin replaces. It needs the build configured with
+`-DHERMES_INTL_TEST262_DIR=<test262>`, and fails without it:
+
+    cmake -S hermes -B ~/hermes_build -DHERMES_INTL_TEST262_DIR=$HOME/test262
+    cmake --build ~/hermes_build --target check-intl
 
 ## Formatting Code
 

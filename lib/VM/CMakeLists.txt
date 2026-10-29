@@ -101,7 +101,6 @@ set(source_files
   JSLib/IteratorPrototype.cpp
   JSLib/HermesInternal.cpp
   JSLib/HermesBuiltin.cpp
-  JSLib/Intl.cpp
   JSLib/JSLibInternal.cpp JSLib/JSLibInternal.h
   JSLib/JSLibStorage.cpp
   JSLib/Map.cpp

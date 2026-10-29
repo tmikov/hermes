@@ -13,10 +13,9 @@
 // ON: object
 
 // With the plugin off, a plugin path that does not exist is never loaded,
-// which would be fatal. Intl is the old built-in one in a HERMES_ENABLE_INTL
-// build and undefined otherwise.
+// which would be fatal, and there is no Intl.
 // RUN: %shermes -exec %s -Wx,-Xintl-plugin=false -Wx,-Xintl-plugin-path=/nonexistent/libhermesintl.so | %FileCheck --match-full-lines --check-prefix=OFF %s
-// OFF: {{object|undefined}}
+// OFF: undefined
 
 // RUN: not --crash %shermes -exec %s -Wx,-Xintl-plugin-path=/nonexistent/libhermesintl.so 2>&1 | %FileCheck --check-prefix=PATH %s
 // PATH: LLVM ERROR: Intl plugin /nonexistent/libhermesintl.so: cannot be loaded:

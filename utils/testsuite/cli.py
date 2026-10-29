@@ -97,12 +97,6 @@ def create_parser():
         help="Run tests in the skiplist and remove them from the list if passed",
     )
     parser.add_argument(
-        "--test-intl",
-        dest="test_intl",
-        action="store_true",
-        help="Run supported Intl tests",
-    )
-    parser.add_argument(
         "--intl-plugin",
         dest="intl_plugin",
         default=None,
@@ -347,7 +341,6 @@ async def run(
     work_dir: PathT,
     n_jobs: int,
     test_skiplist: bool,
-    test_intl: bool,
     bytecode_compat_check: bool,
     lazy: bool,
     shermes: bool,
@@ -375,7 +368,8 @@ async def run(
 
     In Intl plugin mode (intl is the dict from intl_prepare), the skiplist's
     path entries do not apply to intl402, and the return value is the
-    verdict against the expectations file instead.
+    verdict against the expectations file instead. Normal mode has no Intl,
+    so it skips every intl402 test (see intl402_skip).
     """
 
     # Get the common path of all file/directory paths to be used when creating
@@ -406,13 +400,18 @@ async def run(
         assert suite, f"Test suite root directory is not found for {test_file}"
         full_test_name = suite.get_full_test_name(test_file)
 
-        # Plugin mode ignores every skiplist path entry for intl402. Elsewhere
-        # it ignores the intl_tests gate and the platform skip list (on Linux
-        # and macOS, the hosts plugin mode supports, those entries are all
-        # about the old Intl). The other lists record non-Intl Hermes bugs
-        # and still apply.
-        in_intl402 = "/test/intl402/" in test_file.replace(os.sep, "/")
-        if not (intl and in_intl402):
+        # Normal mode skips intl402 whatever the skiplist and
+        # --test-skiplist say.
+        if test_result := intl402_skip(test_file, full_test_name, intl):
+            pd.update(test_result)
+            stats[test_result.code] += 1
+            continue
+
+        # Plugin mode ignores every skiplist path entry for intl402. It also
+        # ignores the platform skip list, which has no entries for Linux or
+        # macOS, the hosts plugin mode supports. The other lists record
+        # non-Intl Hermes bugs and still apply.
+        if not (intl and in_intl402(test_file)):
             # Check if this file should be skipped w.r.t. the test_skiplist flag.
             skip_categories = [
                 SkipCategory.SKIP_LIST,
@@ -429,18 +428,6 @@ async def run(
                 full_test_name,
             ):
                 if not test_skiplist:
-                    pd.update(test_result)
-                    stats[test_result.code] += 1
-                    continue
-                else:
-                    skipped_tests[full_test_name] = suite.directory
-            # We check for intl tests separately since we don't run them frequently.
-            if not intl and (
-                test_result := skipped_paths_features.try_skip(
-                    test_file, [SkipCategory.INTL_TESTS], full_test_name
-                )
-            ):
-                if not test_intl:
                     pd.update(test_result)
                     stats[test_result.code] += 1
                     continue
@@ -517,15 +504,32 @@ async def run(
     if show_slowest_tests > 0:
         print_slowest_tests(all_results, min(show_slowest_tests, len(all_results)))
     print_failed_tests(failed_cases)
-    # The "intl_tests" list is simply a folder and we don't want to unfold
-    # it. All intl tests that we can't pass are included in "skip_list". So
-    # we will only remove them if both "--test-skiplist" and "--test-intl"
-    # are provided.
     if len(skipped_passed) > 0 and test_skiplist:
         print_skipped_passed_tests(skipped_passed)
         remove_tests_from_skiplist(skipped_passed, skipped_paths_features)
 
     return 1 if len(failed_cases) > 0 else 0
+
+
+def in_intl402(test_file: PathT) -> bool:
+    """Whether test_file is in test262's intl402 directory."""
+    return "/test/intl402/" in os.fspath(test_file).replace(os.sep, "/")
+
+
+def intl402_skip(
+    test_file: PathT, full_test_name: str, intl: Optional[dict]
+) -> Optional[TestCaseResult]:
+    """The skip result for an intl402 test in normal mode, else None. Normal
+    mode disables the Intl plugin and Hermes has no Intl of its own, so no
+    intl402 test can pass there; --test-skiplist does not run them either.
+    Plugin mode (intl set) runs them all."""
+    if intl or not in_intl402(test_file):
+        return None
+    return TestCaseResult(
+        full_test_name,
+        TestResultCode.TEST_SKIPPED,
+        f"SKIP: intl402 needs the Intl plugin (--intl-plugin) ({test_file})",
+    )
 
 
 def test262_root(tests_paths) -> str:
@@ -734,7 +738,6 @@ async def main() -> int:
         work_dir,
         args.n_jobs,
         args.test_skiplist,
-        args.test_intl,
         args.bytecode_compat_check,
         args.lazy,
         args.shermes,

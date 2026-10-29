@@ -14,10 +14,11 @@
 // Catalyst, from the build tree (bin/ next to lib/) and from an app-style
 // layout (Frameworks/ next to the executable).
 //
-// It prints "Intl.Segmenter: undefined" when no plugin was loaded: Apple
-// framework builds keep the old Intl, which has no Segmenter. It then
-// prints the paths of the hermesvm and hermesintl images in the process,
-// which shows where the plugin was found.
+// It prints "typeof Intl: undefined" when no plugin was loaded: Hermes has
+// no Intl of its own. It then prints the results of Hermes's own locale
+// fallbacks (CoreFoundation on Apple platforms). Last it prints the paths of
+// the hermesvm and hermesintl images in the process, which shows where the
+// plugin was found.
 
 #include <hermes/hermes.h>
 #include <jsi/jsi.h>
@@ -35,8 +36,20 @@ namespace {
 
 /// The script the smoke test runs; print() is the host function below.
 const char kScript[] = R"JS(
-print("Intl.Segmenter:", typeof Intl.Segmenter);
-if (typeof Intl.Segmenter === "function") {
+print("typeof Intl:", typeof Intl);
+if (typeof Intl === "undefined") {
+  var d = new Date(Date.UTC(2026, 9, 27, 12, 0, 0));
+  print('"a".localeCompare("b"):', "a".localeCompare("b"));
+  print('"I".toLocaleLowerCase():', "I".toLocaleLowerCase());
+  print("toLocaleString:", d.toLocaleString());
+  print("toLocaleDateString:", d.toLocaleDateString());
+  print("toLocaleTimeString:", d.toLocaleTimeString());
+  print("Infinity.toLocaleString():", Infinity.toLocaleString());
+  print("[1, 2].toLocaleString():", [1, 2].toLocaleString());
+} else {
+  print("Intl.Segmenter:", typeof Intl.Segmenter);
+}
+if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
   var ro = new Intl.DateTimeFormat().resolvedOptions();
   print("default locale:", ro.locale);
   print("default time zone:", ro.timeZone);

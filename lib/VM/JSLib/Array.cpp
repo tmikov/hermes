@@ -735,23 +735,13 @@ CallResult<HermesValue> arrayPrototypeToLocaleString(void *, Runtime &runtime) {
       }
       if (vmisa<Callable>(propRes->get())) {
         lv.func.castAndSetHermesValue<Callable>(propRes->get());
-        // If ECMA 402 is implemented, it provides a superseding
-        // definition of Array.prototype.toLocaleString.  The only
-        // difference between these two definitions is that in ECMA
-        // 402, two arguments (locales and options), if provided, are
-        // passed on from this function to the element's
-        // "toLocaleString" method.
-        auto callRes =
-#ifdef HERMES_ENABLE_INTL
-            Callable::executeCall2(
-                lv.func,
-                runtime,
-                lv.elementObj,
-                args.getArg(0),
-                args.getArg(1));
-#else
-            Callable::executeCall0(lv.func, runtime, lv.elementObj);
-#endif
+        // ECMA 402 provides a superseding definition of
+        // Array.prototype.toLocaleString, which the Intl plugin installs
+        // when it is loaded. The only difference between these two
+        // definitions is that in ECMA 402, two arguments (locales and
+        // options), if provided, are passed on from this function to the
+        // element's "toLocaleString" method.
+        auto callRes = Callable::executeCall0(lv.func, runtime, lv.elementObj);
         if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
           return ExecutionStatus::EXCEPTION;
         }

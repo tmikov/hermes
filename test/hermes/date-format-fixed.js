@@ -14,7 +14,7 @@ RUN: TZ=EST+5 LC_ALL=C %hermes -Xintl-plugin=false -O -target=HBC %s \
 RUN:            | %FileCheck --match-full-lines %s
 RUN: TZ=EST+5 LC_ALL=tr_TR _HERMES_TEST_LOCALE=tr_TR %shermes -exec %s -Wx,-Xintl-plugin=false \
 RUN:            | %FileCheck --match-full-lines %s
-UNSUPPORTED: locale_aware_dates || intl
+UNSUPPORTED: locale_aware_dates
 */
 
 // The backends without a platform date formatter emit a fixed English format

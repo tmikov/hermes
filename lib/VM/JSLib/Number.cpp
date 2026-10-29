@@ -360,11 +360,8 @@ CallResult<HermesValue> numberPrototypeToString(void *, Runtime &runtime) {
 }
 
 CallResult<HermesValue> numberPrototypeToLocaleString(
-    void *ctx,
+    void *,
     Runtime &runtime) {
-#ifdef HERMES_ENABLE_INTL
-  return intlNumberPrototypeToLocaleString(/* unused */ ctx, runtime);
-#else
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   double number;
 
@@ -393,7 +390,6 @@ CallResult<HermesValue> numberPrototypeToLocaleString(
   }
 
   return res->getHermesValue();
-#endif
 }
 
 CallResult<HermesValue> numberPrototypeToFixed(void *, Runtime &runtime) {

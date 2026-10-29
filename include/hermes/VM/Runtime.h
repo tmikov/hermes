@@ -1037,10 +1037,6 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
     return hasES6BlockScoping_;
   }
 
-  bool hasIntl() const {
-    return hasIntl_;
-  }
-
   bool hasMicrotaskQueue() const {
     return hasMicrotaskQueue_;
   }
@@ -1283,9 +1279,6 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
 
   /// Set to true if we should enable ES6 block scoping.
   const bool hasES6BlockScoping_;
-
-  /// Set to true if we should enable ECMA-402 Intl APIs.
-  const bool hasIntl_;
 
   /// Set to true if we are using microtasks.
   const bool hasMicrotaskQueue_;

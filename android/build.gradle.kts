@@ -14,7 +14,6 @@ plugins {
   id("signing")
   alias(libs.plugins.nexus.publish)
   alias(libs.plugins.android.library)
-  alias(libs.plugins.download)
   id("publish")
 }
 
@@ -229,9 +228,6 @@ android {
             "-DHERMES_RELEASE_VERSION=${hermesReleaseVersion}",
             "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=True",
             "-DHERMESVM_HEAP_HV_MODE=HEAP_HV_PREFER32",
-            // We intentionally build Hermes with Intl support only. This is to simplify
-            // the build setup and to avoid overcomplicating the build-type matrix.
-            "-DHERMES_ENABLE_INTL=True",
             // The ICU4X-based Intl plugin, libhermesintl.so, which Hermes loads from
             // beside libhermesvm.so or the app's library path. It needs Rust and the
             // Android targets (rustup target add aarch64-linux-android
@@ -283,9 +279,7 @@ android {
   sourceSets {
     getByName("main") {
       manifest.srcFile("$hermesDir/android/hermes/src/main/AndroidManifest.xml")
-      java.directories.addAll(
-          listOf("$hermesDir/lib/Platform/Intl/java", "$hermesDir/lib/Platform/Unicode/java"),
-      )
+      java.directories.add("$hermesDir/lib/Platform/Unicode/java")
     }
   }
 
@@ -297,7 +291,6 @@ android {
   dependencies {
     implementation(libs.fbjni)
     implementation(libs.yoga.proguard.annotations)
-    implementation(libs.androidx.annotation)
   }
 
   packaging {

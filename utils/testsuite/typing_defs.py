@@ -43,7 +43,6 @@ class SkippedPathsOrFeaturesDict(TypedDict):
     handlesan_skip_list: List[SkippedPathItem]
     unsupported_features: List[str]
     permant_unsupported_features: List[str]
-    intl_tests: List[SkippedPathItem]
     platform_skip_list: Dict[str, List[SkippedPathItem]]
 
 

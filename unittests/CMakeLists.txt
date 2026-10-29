@@ -33,7 +33,6 @@ add_subdirectory(Parser)
 add_subdirectory(VMRuntime)
 add_subdirectory(Support)
 add_subdirectory(dtoa)
-add_subdirectory(PlatformIntl)
 add_subdirectory(PlatformUnicode)
 # API tests rely on the interpreter.
 add_subdirectory(API)

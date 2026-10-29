@@ -2267,12 +2267,7 @@ CallResult<HermesValue> typedArrayPrototypeToLocaleString(
     }
     lv.funcValue = std::move(*propRes);
     if (auto func = Handle<Callable>::dyn_vmcast(Handle<>{lv.funcValue})) {
-#ifdef HERMES_ENABLE_INTL
-      auto callRes = Callable::executeCall2(
-          func, runtime, lv.elementObj, args.getArg(0), args.getArg(1));
-#else
       auto callRes = Callable::executeCall0(func, runtime, lv.elementObj);
-#endif
       if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
         return ExecutionStatus::EXCEPTION;
       }

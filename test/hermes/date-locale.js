@@ -15,7 +15,6 @@ RUN:            | %FileCheck --match-full-lines -check-prefix TR %s
 TODO(T53144040) Fix LIT tests on Windows
 XFAIL: windows
 REQUIRES: locale_aware_dates
-UNSUPPORTED: intl
 */
 
 // The Intl plugin replaces Date.prototype.toLocaleString,

@@ -9,7 +9,6 @@
 /// \file
 /// Initialize the global object ES5.1 15.1
 //===----------------------------------------------------------------------===//
-#include "hermes/Platform/Intl/PlatformIntl.h"
 #include "hermes/Support/FastStrToDouble.h"
 #include "hermes/VM/FastArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
@@ -829,21 +828,6 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
     // Define the 'gc' function.
     defineGlobalFunc(Predefined::getSymbolID(Predefined::gc), gc, 0);
   }
-
-#ifdef HERMES_ENABLE_INTL
-  // Define the global Intl object
-  // TODO T65916424: Consider how we can move this somewhere more modular.
-  if (runtime.hasIntl()) {
-    lv.value = intl::createIntlObject(runtime);
-    runtime.ignoreAllocationFailure(
-        JSObject::defineOwnProperty(
-            runtime.getGlobal(),
-            runtime,
-            Predefined::getSymbolID(Predefined::Intl),
-            normalDPF,
-            lv.value));
-  }
-#endif
 }
 
 } // namespace vm

@@ -131,7 +131,9 @@ struct VMOnlyRuntimeFlags {
 
   llvh::cl::opt<bool> Intl{
       "Xintl",
-      llvh::cl::desc("Enable support for ECMA-402 Intl APIs"),
+      llvh::cl::desc(
+          "Deprecated and ignored: Intl comes from the Intl plugin "
+          "(-Xintl-plugin)"),
       llvh::cl::init(vm::RuntimeConfig::getDefaultIntl()),
       llvh::cl::cat(RuntimeCategory)};
 

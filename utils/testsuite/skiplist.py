@@ -23,7 +23,6 @@ class SkipCategory(Enum):
     HANDLESAN_SKIP_LIST = "handlesan_skip_list"
     UNSUPPORTED_FEATURES = "unsupported_features"
     PERMANENT_UNSUPPORTED_FEATURES = "permanent_unsupported_features"
-    INTL_TESTS = "intl_tests"
     PLATFORM_SKIP_LIST = "platform_skip_list"
 
 
@@ -34,7 +33,6 @@ SKIPCAT_TO_RETCODE = {
     SkipCategory.PERMANENT_SKIP_LIST: TestResultCode.TEST_PERMANENTLY_SKIPPED,
     SkipCategory.UNSUPPORTED_FEATURES: TestResultCode.TEST_SKIPPED,
     SkipCategory.PERMANENT_UNSUPPORTED_FEATURES: TestResultCode.TEST_PERMANENTLY_SKIPPED,
-    SkipCategory.INTL_TESTS: TestResultCode.TEST_SKIPPED,
     SkipCategory.PERMANENT_SKIP_LIST: TestResultCode.TEST_SKIPPED,
     SkipCategory.PLATFORM_SKIP_LIST: TestResultCode.TEST_SKIPPED,
 }

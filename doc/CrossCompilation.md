@@ -36,25 +36,22 @@ Without it, an Android build uses the Java backend, which needs a JVM at
 runtime and so is not usable from a binary pushed with `adb push` and run
 under `adb shell`.
 
-No ICU is needed here, or in any cross-compilation target. Hermes no
-longer depends on ICU at all. The `platform_unicode` layer -- case
-conversion, normalization, collation and date formatting -- is
-self-contained, and the ICU-backed Intl backend has been removed.
-`-DHERMES_ENABLE_INTL=ON` is now supported only on Apple and Android,
-which have their own native Intl implementations.
+No ICU is needed here, or in any cross-compilation target. Hermes does
+not use ICU. The `platform_unicode` layer -- case conversion,
+normalization, collation and date formatting -- is self-contained.
 
-The Intl plugin, `libhermesintl.so`, which `HERMES_BUILD_INTL` builds,
-by default for Android, is written in Rust: the build runs cargo for the
-ABI's Rust target, whose standard library must be installed (`rustup
-target add aarch64-linux-android` for arm64-v8a), and compiles the
-plugin's JavaScript with the host compiler from `IMPORT_HOST_COMPILERS`.
-On Android the plugin links `libjsi.so`, hence
-`-DHERMES_BUILD_SHARED_JSI=ON` above. To build without the plugin, and
-without Rust, pass `-DHERMES_BUILD_INTL=OFF` instead. On the device, the
-plugin must be pushed along with the binaries and the libraries they
-load; `utils/testsuite/adb-hermes setup`, described in [the plugin's
-README](../intl/README.md), collects them. The README also covers the
-other platforms.
+`Intl` comes from the Intl plugin, `libhermesintl.so`, which
+`HERMES_BUILD_INTL` builds, by default for Android. It is written in
+Rust: the build runs cargo for the ABI's Rust target, whose standard
+library must be installed (`rustup target add aarch64-linux-android` for
+arm64-v8a), and compiles the plugin's JavaScript with the host compiler
+from `IMPORT_HOST_COMPILERS`. On Android the plugin links `libjsi.so`,
+hence `-DHERMES_BUILD_SHARED_JSI=ON` above. To build without the plugin,
+and without Rust, pass `-DHERMES_BUILD_INTL=OFF` instead; Hermes then has
+no `Intl`. On the device, `Intl` needs the plugin pushed along with the
+binaries and the libraries they load; `utils/testsuite/adb-hermes setup`,
+described in [the plugin's README](../intl/README.md), collects them. The
+README also covers the other platforms.
 
 ## Emscripten
 

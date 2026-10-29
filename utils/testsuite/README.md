@@ -52,12 +52,16 @@ unsupported feature here.
 support them in the future.
 - "permanent_unsupported_features": Tests with unsupported features in 262. We
 don't have a plan to support them.
-- "intl_tests": Tests requires INTL to be enabled.
 - "platform_skip_list": Tests that need to be skipped depending on platforms.
 
 Run with flag `--test-skiplist` to force running tests that are included in the
 `skiplist.json` config (all other sections, and "lazy_skip_list" if `--lazy` is
-given, "intl_tests" if `--test-intl` is given).
+given).
+
+Hermes has no `Intl` of its own, so a normal run skips every test under
+`test262/test/intl402`, with or without `--test-skiplist`, and the skiplist has
+no entries for them. Run them in Intl plugin mode (`--intl-plugin`, see
+`intl/README.md`), which ignores the skiplist for intl402.
 
 After it finishes, all passed tests included in the skiplist config file will be
 printed, and you can tell the runner to remove these tests from the config by

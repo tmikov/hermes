@@ -305,9 +305,6 @@ set(ANDROID_LINUX_PERF_PATH ""
 set(HERMES_MSVC_MP ON CACHE STRING
   "Enable /MP in MSVC for parallel builds")
 
-set(HERMES_ENABLE_INTL OFF CACHE BOOL
-  "Enable JS Intl support (WIP)")
-
 set(HERMES_ENABLE_UNICODE_REGEXP_PROPERTY_ESCAPES ON CACHE BOOL
   "Enable RegExp Unicode Property Escapes support")
 
@@ -563,8 +560,13 @@ if (NOT (ANDROID_LINUX_PERF_PATH STREQUAL ""))
   add_definitions(-DANDROID_LINUX_PERF_PATH="${ANDROID_LINUX_PERF_PATH}")
 endif()
 
+# The old built-in Intl is gone; Intl now comes from the Intl plugin
+# (HERMES_BUILD_INTL). React Native's builds still pass HERMES_ENABLE_INTL, so
+# accept it with a warning and otherwise ignore it.
 if (HERMES_ENABLE_INTL)
-  add_definitions(-DHERMES_ENABLE_INTL)
+  message(WARNING "HERMES_ENABLE_INTL is deprecated and ignored: Hermes no "
+    "longer has a built-in Intl. Intl is provided by the Intl plugin, built "
+    "with HERMES_BUILD_INTL.")
 endif()
 
 if (HERMES_ENABLE_UNICODE_REGEXP_PROPERTY_ESCAPES)
@@ -653,10 +655,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (APPLE)
   find_library(CORE_FOUNDATION CoreFoundation)
-  find_library(FOUNDATION Foundation)
 else()
   set(CORE_FOUNDATION "")
-  set(FOUNDATION "")
 endif()
 
 if (HERMES_ENABLE_DEBUGGER)
@@ -731,7 +731,6 @@ add_subdirectory(utils/hermes-lit)
 add_subdirectory(lib)
 add_subdirectory(public)
 add_subdirectory(API)
-add_subdirectory(android/intltest/java/com/facebook/hermes/test)
 
 if(HERMES_ENABLE_TOOLS)
   add_subdirectory(tools)
@@ -820,7 +819,6 @@ if(HERMES_ENABLE_TEST_SUITE)
     unittests_dir=${CMAKE_CURRENT_BINARY_DIR}/unittests
     debugger_enabled=${HERMES_ENABLE_DEBUGGER}
     jit_enabled=${HERMESVM_ALLOW_JIT}
-    intl_enabled=${HERMES_ENABLE_INTL}
     regexp_unicode_properties_enabled=${HERMES_ENABLE_UNICODE_REGEXP_PROPERTY_ESCAPES}
     hbc_deltaprep=${HERMES_TOOLS_OUTPUT_DIR}/hbc-deltaprep
     dependency_extractor=${HERMES_TOOLS_OUTPUT_DIR}/dependency-extractor

@@ -11,11 +11,12 @@
 // plugin and the defaults come from the device), and prints a few Intl
 // results. intl/README.md describes the layouts it is run in.
 //
-// It prints "Intl.Segmenter: undefined" and stops when no plugin was
-// loaded: the Android build keeps the old, Java-backed Intl, which cannot
-// run in a process without a JVM. With --maps it then prints the files the
-// code of libhermesvm.so and libhermesintl.so was mapped from, which shows
-// where the plugin was found (an APK is one file).
+// Without the plugin there is no Intl: it prints "typeof Intl: undefined"
+// and the results of two of Hermes's own locale fallbacks that need no JVM
+// (the others call Android's Java Unicode class, and this process has no
+// JVM). With --maps it then prints the files the code of libhermesvm.so and
+// libhermesintl.so was mapped from, which shows where the plugin was found
+// (an APK is one file).
 
 #include <hermes/hermes.h>
 #include <jsi/jsi.h>
@@ -32,8 +33,14 @@ namespace {
 
 /// The script the smoke test runs; print() is the host function below.
 const char kScript[] = R"JS(
-print("Intl.Segmenter:", typeof Intl.Segmenter);
-if (typeof Intl.Segmenter === "function") {
+print("typeof Intl:", typeof Intl);
+if (typeof Intl === "undefined") {
+  print("Infinity.toLocaleString():", Infinity.toLocaleString());
+  print("[1, 2].toLocaleString():", [1, 2].toLocaleString());
+} else {
+  print("Intl.Segmenter:", typeof Intl.Segmenter);
+}
+if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
   var ro = new Intl.DateTimeFormat().resolvedOptions();
   print("default locale:", ro.locale);
   print("default time zone:", ro.timeZone);

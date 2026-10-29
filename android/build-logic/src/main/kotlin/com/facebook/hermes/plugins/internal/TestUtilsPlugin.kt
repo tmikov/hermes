@@ -5,7 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import java.io.File
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -35,26 +34,6 @@ class HermesUtils(private val project: Project) {
       return value
     }
 
-  val hermesC: String
-    get() {
-      val candidateHermesCPaths = listOf(
-          "$hermesWs/build/ImportHostCompilers.cmake",
-          "$hermesWs/build_release/ImportHostCompilers.cmake",
-      )
-
-      val hermesCPath = candidateHermesCPaths.lastOrNull { File(it).exists() }
-      if (hermesCPath == null) {
-        project.logger.warn("Could not find hermesC path. Using default path.")
-        return "$hermesWs/build/ImportHostCompilers.cmake"
-      }
-
-      return hermesCPath
-    }
-
-  // For Facebook internal use:
-  val fbsource: String
-    get() = System.getenv("FBSOURCE_DIR") ?: "${System.getenv("HOME")}/fbsource"
-
   val outputDir: String
     get() = "${hermesWs}/build_android/outputs"
 
@@ -63,9 +42,6 @@ class HermesUtils(private val project: Project) {
 
   val minSdk: Int
     get() = libs.findVersion("minSdk").get().getRequiredVersion().toInt()
-
-  val facebookBuild: String
-    get() = System.getenv("FACEBOOK") ?: "0"
 
   val cmakeVersion: String
     get() = libs.findVersion("cmake").get().getDisplayName()

@@ -6,6 +6,11 @@ built as a separate shared library. Hermes loads it automatically when it
 creates a runtime and the library is present; adding or removing it needs no
 Hermes rebuild. The plugin talks to the engine only through JSI.
 
+Hermes has no other `Intl`. Without the plugin a runtime has no `Intl`
+global, and the locale-sensitive built-ins (`toLocaleString` and the
+others) give Hermes's own results, without throwing; the spec's "Without
+the plugin" section lists them.
+
 The design, and the reasons behind it, are in
 [the spec](../doc/superpowers/specs/2026-10-22-intl-plugin-design.md). The
 Phase 0 plan is
@@ -27,7 +32,8 @@ has `getCanonicalLocales`, `supportedValuesOf`, `Locale`, `Collator`,
 Phase 6 packaged it for Android (in the AAR), the Apple platforms
 (`hermesintl.xcframework` and the podspec) and Windows (cross-built on
 Linux and tested under Wine; the native Windows checks are still to be
-run). Phase 7 deletes Hermes's old `Intl` (see "Phasing" in the spec).
+run). Phase 7 deleted the built-in `Intl` that Hermes had on Apple
+platforms and Android (see "Phasing" in the spec).
 
 ## Layout
 
@@ -102,6 +108,10 @@ tvOS and visionOS. Without one, configure fails and names the option;
 `cargo` on `PATH`, else the one in `$CARGO_HOME/bin` or `~/.cargo/bin`,
 where rustup installs it (a Gradle daemon or an Xcode build launched from
 the GUI does not get the shell's `PATH`), and the `rustc` next to it.
+
+The option of the deleted built-in `Intl`, `HERMES_ENABLE_INTL`, is
+deprecated and ignored: a configure that sets it ON prints a warning and
+goes on.
 
 It is `ON` by default for Linux and macOS hosts (universal macOS
 included), Android and every Apple target platform. It is `OFF` by default
@@ -418,8 +428,9 @@ default locales and time zone, and the parent's finalizer thread runner.
 
 `hermes`, `hvm` and `test-runner` take these flags, and so do programs
 compiled by `shermes`: on their own command line, or through
-`shermes -exec <file> -Wx,<flag>`. The old `Intl` field (`-Xintl`) controls
-only the old, built-in implementation.
+`shermes -exec <file> -Wx,<flag>`. The `Intl` field (`-Xintl`), which
+controlled the deleted built-in `Intl`, is deprecated and ignored: it is
+still accepted, and changes nothing, with or without the plugin.
 
 When a default is not given, the plugin detects it from the host:
 `LC_ALL`/`LC_MESSAGES`/`LANG` and `TZ`/`/etc/localtime` on Linux;
@@ -464,7 +475,8 @@ also refuses a checkout at another commit unless given
 
 Without `--intl-plugin`, `test_runner.py` passes `-Xintl-plugin=false` to
 every run, so the plugin in `<build>/lib` never changes the results of a
-normal test262 run.
+normal test262 run, and it skips every test under `test/intl402`, even
+with `--test-skiplist`, since there is no `Intl` without the plugin.
 
 In plugin mode the runner runs each test's strict and non-strict variants
 separately, and judges each against the expectations file. An expected
@@ -511,7 +523,9 @@ plugin next to `libhermesvm.so`, with the plugin only on
 `LD_LIBRARY_PATH`, and with every library in an APK-style zip, loaded with
 `LD_LIBRARY_PATH=<apk>!/lib/<abi>`. The zip must store the libraries
 uncompressed and 16 KB aligned (`zip -0`, then `zipalign -P 16 -f 4`), as
-AGP does.
+AGP does. Without the plugin it prints `typeof Intl: undefined` and two of
+Hermes's own locale fallbacks that need no JVM (`Infinity` and `1,2`), and
+exits 0.
 
 `test/android/app/` is a test app that loads Hermes from the AAR through
 SoLoader, as React Native does, with the libraries left in the APK
@@ -541,7 +555,11 @@ Native supplies it. Every other Hermes library comes from the AAR. The app
 builds x86_64 only unless given `-PhermesAbis=<abi>,...`. The log should
 show `Intl.Segmenter: function`, `number: 1.234,5`, the default locale and
 time zone, and the plugin's code mapped from `base.apk`. Without
-`libhermesintl.so` in the APK it shows `Intl.Segmenter: undefined`.
+`libhermesintl.so` in the APK the app still runs and shows `typeof Intl:
+undefined` and the results of Hermes's own locale fallbacks, including
+those that call Android's Java Unicode class (`localeCompare`,
+`toLocaleLowerCase`, and Date's `toLocaleString`, `toLocaleDateString` and
+`toLocaleTimeString`).
 
 ### On Apple platforms
 
@@ -560,9 +578,10 @@ for the consumer app.
 - **The smoke host:** after a slice is built, `cmake --build
   build_<platform> --target hermes-intl-apple-smoke`. It creates a runtime
   with the default configuration, prints `Intl.Segmenter: function` and a
-  few results when the plugin loaded (`undefined` when not), and prints
-  the image paths of hermesvm and hermesintl. Its rpaths find the
-  frameworks in the build tree (`../lib`) and in an app layout
+  few results when the plugin loaded (`typeof Intl: undefined` and the
+  results of Hermes's own locale fallbacks, which use CoreFoundation, when
+  not), and prints the image paths of hermesvm and hermesintl. Its rpaths
+  find the frameworks in the build tree (`../lib`) and in an app layout
   (`Frameworks/` next to the executable, or `../Frameworks`). For a
   simulator, run it with `xcrun simctl spawn <device> <path>`; to test
   default detection there, set `AppleLanguages` with `xcrun simctl spawn
@@ -580,8 +599,8 @@ for the consumer app.
   builds the app against the tarball through this repository's podspec,
   runs it on a new simulator, and prints its load commands (the plugin
   must be `LC_LOAD_WEAK_DYLIB`) and what it reports. With
-  `--remove-plugin` it must still launch and report `Intl.Segmenter:
-  undefined`.
+  `--remove-plugin` it must still launch and report `typeof Intl:
+  undefined` and the fallback results.
 - **`pod lib lint`:** `env "hermes-artifact-url=file://<tarball>" pod lib
   lint hermes-engine.podspec --platforms=ios,tvos,macos --allow-warnings`,
   and the same with `--platforms=visionos`. With Xcode 27.1 or later, the

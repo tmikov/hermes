@@ -112,16 +112,6 @@ RUNTIME_HV_FIELD(keptObjects_, JSMapImpl<CellKind::JSSetKind>)
 RUNTIME_HV_FIELD(debuggerInternalObject_, JSObject)
 #endif // HERMES_ENABLE_DEBUGGER
 
-#ifdef HERMES_ENABLE_INTL
-// TODO T65916424: move these out of Runtime
-RUNTIME_HV_FIELD(intlCollator, NativeConstructor)
-RUNTIME_HV_FIELD(intlCollatorPrototype, JSObject)
-RUNTIME_HV_FIELD(intlDateTimeFormat, NativeConstructor)
-RUNTIME_HV_FIELD(intlDateTimeFormatPrototype, JSObject)
-RUNTIME_HV_FIELD(intlNumberFormat, NativeConstructor)
-RUNTIME_HV_FIELD(intlNumberFormatPrototype, JSObject)
-#endif
-
 RUNTIME_HV_FIELD(promiseRejectionTrackingHook_, HermesValue)
 
 #undef RUNTIME_HV_FIELD

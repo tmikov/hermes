@@ -9,8 +9,9 @@
 // hermesvm.framework and hermesintl.framework from the hermes-engine pod,
 // creates a runtime with the default configuration, writes what it finds to
 // stdout and to tmp/podapp-result.txt in its data container, and exits.
-// "Intl.Segmenter: function" means Intl comes from the plugin; the old Intl
-// of the Apple frameworks has no Segmenter.
+// "Intl.Segmenter: function" means Intl comes from the plugin; "typeof Intl:
+// undefined" means there is no plugin (Hermes has no Intl of its own), and
+// the report then holds the results of Hermes's own locale fallbacks.
 
 #import <Foundation/Foundation.h>
 
@@ -31,8 +32,20 @@ namespace {
 
 /// The script the app runs; its value is the report's JavaScript part.
 const char kScript[] = R"JS(
-var r = ["Intl.Segmenter: " + typeof Intl.Segmenter];
-if (typeof Intl.Segmenter === "function") {
+var r = ["typeof Intl: " + typeof Intl];
+if (typeof Intl === "undefined") {
+  var d = new Date(Date.UTC(2026, 9, 27, 12, 0, 0));
+  r.push('"a".localeCompare("b"): ' + "a".localeCompare("b"));
+  r.push('"I".toLocaleLowerCase(): ' + "I".toLocaleLowerCase());
+  r.push("toLocaleString: " + d.toLocaleString());
+  r.push("toLocaleDateString: " + d.toLocaleDateString());
+  r.push("toLocaleTimeString: " + d.toLocaleTimeString());
+  r.push("Infinity.toLocaleString(): " + Infinity.toLocaleString());
+  r.push("[1, 2].toLocaleString(): " + [1, 2].toLocaleString());
+} else {
+  r.push("Intl.Segmenter: " + typeof Intl.Segmenter);
+}
+if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
   var ro = new Intl.DateTimeFormat().resolvedOptions();
   r.push("default locale: " + ro.locale);
   r.push("default time zone: " + ro.timeZone);

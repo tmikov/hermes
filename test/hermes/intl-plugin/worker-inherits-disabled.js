@@ -6,8 +6,6 @@
  */
 
 // REQUIRES: jsi_unstable
-// The old built-in Intl would make `typeof Intl` differ for other reasons.
-// UNSUPPORTED: intl
 // RUN: %hermes -Xintl-plugin=false -Xintl-plugin-path=%intl_fixture_dir/libfake_intl_good.so %s | %FileCheck --match-full-lines %s
 
 // A parent without a plugin has workers without one, even when the default

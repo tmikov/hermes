@@ -437,7 +437,8 @@ class IntlPluginTest(unittest.TestCase):
         # the plugin (only -Xintl, the old Intl) does not.
         args = ["file.hbc", "-b", DISABLE_PLUGIN_FLAG]
         new_help = (
-            "  -Xintl                - Enable support for ECMA-402 Intl APIs\n"
+            "  -Xintl                - Deprecated and ignored: Intl comes from "
+            "the Intl plugin (-Xintl-plugin)\n"
             "  -Xintl-plugin         - Load the Intl plugin when one is available\n"
             "  -Xintl-plugin-path=<path> - Load the Intl plugin from this library\n"
         )
@@ -499,6 +500,74 @@ class IntlPluginTest(unittest.TestCase):
             derive_reason("test/intl402/Collator/x.js"), "Phase 2: Intl.Collator"
         )
         self.assertEqual(derive_reason("test/intl402/Intl/x.js"), "UNEXPLAINED")
+
+
+class NormalModeTest(unittest.TestCase):
+    """Normal mode disables the plugin, and Hermes has no Intl of its own."""
+
+    def test_test_intl_is_gone(self):
+        from testsuite.cli import create_parser
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                create_parser().parse_args(["--test-intl", "t"])
+
+    @unittest.skipIf(os.name == "nt", "the stand-in binaries are sh scripts")
+    def test_skips_intl402_even_with_test_skiplist(self):
+        import asyncio
+        import json
+
+        from testsuite.cli import run
+        from testsuite.hermes import ExtraCompileVMArgs
+        from testsuite.skiplist import SkippedPathsOrFeatures
+
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        tests = os.path.join(root, "test262", "test", "intl402")
+        os.makedirs(tests)
+        harness = os.path.join(root, "test262", "harness")
+        os.makedirs(harness)
+        for name in ("sta.js", "assert.js"):
+            open(os.path.join(harness, name), "w").close()
+        # One test the skiplist also names, so --test-skiplist would run it
+        # if the skiplist were what skipped it.
+        for name in ("a.js", "listed.js"):
+            open(os.path.join(tests, name), "w").close()
+        # Binaries that fail every run, so a test that ran would fail.
+        bin_dir = os.path.join(root, "bin")
+        os.makedirs(bin_dir)
+        for name in ("hermes", "hermesc"):
+            exe = os.path.join(bin_dir, name)
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\nexit 1\n")
+            os.chmod(exe, 0o755)
+        cfg = os.path.join(root, "skiplist.json")
+        with open(cfg, "w") as f:
+            json.dump({"skip_list": ["test262/test/intl402/listed.js"]}, f)
+        for test_skiplist in (False, True):
+            with self.subTest(test_skiplist=test_skiplist):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = asyncio.run(
+                        run(
+                            [tests],
+                            bin_dir,
+                            SkippedPathsOrFeatures(cfg),
+                            os.path.join(root, "work"),
+                            n_jobs=1,
+                            test_skiplist=test_skiplist,
+                            bytecode_compat_check=False,
+                            lazy=False,
+                            shermes=False,
+                            opt=False,
+                            extra_compile_vm_args=ExtraCompileVMArgs([], []),
+                            timeout=10,
+                            verbose=False,
+                        )
+                    )
+                self.assertEqual(code, 0, out.getvalue())
+                self.assertRegex(out.getvalue(), r"\| Passes +\| +0 \|")
+                self.assertRegex(out.getvalue(), r"\| Skipped +\| +2 \|")
 
 
 if __name__ == "__main__":

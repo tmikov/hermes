@@ -46,7 +46,12 @@ Hermes provides broad support for ECMAScript features, including:
         *   `Promise.try` (ES2025)
     *   `Symbol.prototype.description` (ES2019 - see "Known Deviations")
     *   `WeakRef` (ES2021 - see "Planned Features" regarding `FinalizationRegistry`)
-    *   [`Intl` API](IntlAPIs.md) (Basic `DateTimeFormat`, `NumberFormat` support; see "Planned Features")
+    *   `Intl` (ECMA-402), through the separate Intl plugin
+        (`libhermesintl`, on ICU4X), which Hermes loads when it is present:
+        every `Intl` constructor and the ECMA-402 versions of the
+        locale-sensitive built-ins. Without the plugin there is no `Intl`,
+        and `toLocaleString` and the other locale-sensitive built-ins give
+        Hermes's own results. See [the plugin's README](../intl/README.md).
     *   _Note: Support for the latest standard library features may lag behind language feature support._
 
 ### Planned Features
@@ -54,7 +59,6 @@ Hermes provides broad support for ECMAScript features, including:
 Features Hermes intends to support in the future. Active development or implementation hasn't started or completed yet.
 
 *   **`FinalizationRegistry`:** The complementary API to `WeakRef`.
-*   **Expanded `Intl` Functionality:** Support for APIs such as `DisplayNames`, `ListFormat`, `PluralRules`, `RelativeTimeFormat`, `Locale`, etc.
 *   **Other Standard Library Features:** Newer library additions (e.g., Iterator Helpers, Array Grouping methods) are considered but may be lower priority.
 
 ### Intentionally Excluded / De-prioritized Features

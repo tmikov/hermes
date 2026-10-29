@@ -266,12 +266,6 @@ endif()
 target_link_options(hermesvm PRIVATE ${HERMES_EXTRA_LINKER_FLAGS})
 target_link_options(hermesvmlean PRIVATE ${HERMES_EXTRA_LINKER_FLAGS})
 
-if(HERMES_ENABLE_INTL)
-  set(INTL_OBJ_LIBS hermesPlatformIntl_obj hermesBCP47Parser_obj)
-  target_link_libraries(hermesvm_a PUBLIC ${INTL_OBJ_LIBS})
-  target_link_libraries(hermesvmlean_a PUBLIC ${INTL_OBJ_LIBS})
-endif()
-
 # Construct the HermesVM model string
 set(HERMESVM_MODEL "")
 

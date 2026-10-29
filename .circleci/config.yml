@@ -37,9 +37,9 @@ jobs:
           command: |
             # Tests can take a long time to run, since we don't need to attach a debugger
             # a Debug build with with -O2 lets us avoid timeouts and get results sooner.
-            # Tests the old, built-in Intl.
-            cmake -S hermes -B build -GNinja -DHERMES_ENABLE_INTL=ON \
-              -DHERMES_BUILD_INTL=OFF \
+            # No Rust here, so no Intl plugin: this tests Hermes without Intl,
+            # and the test262 run skips intl402.
+            cmake -S hermes -B build -GNinja -DHERMES_BUILD_INTL=OFF \
               -DCMAKE_BUILD_TYPE=Debug \
               -DCMAKE_CXX_FLAGS=-O2 -DCMAKE_C_FLAGS=-O2 \
               -DHERMESVM_SANITIZE_HANDLES=<< parameters.sanitize >> \
@@ -50,7 +50,7 @@ jobs:
             cmake --build build --target check-hermes
             # TODO(zhaogang): test with --shermes flag as well once we address the harness
             # code issue with shermes.
-            python3 hermes/utils/test_runner.py --test-intl test262/test -b build/bin
+            python3 hermes/utils/test_runner.py test262/test -b build/bin
 
   test-linux:
     docker:

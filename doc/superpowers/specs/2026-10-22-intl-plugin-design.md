@@ -5,13 +5,15 @@ Status: draft, revised during Phase 0 planning and implementation
 
 ## Context
 
-Hermes's current `Intl` maps ECMA-402 onto platform APIs: Foundation on Apple
-(`lib/Platform/Intl/PlatformIntlApple.mm`) and Java through JNI on Android
-(`lib/Platform/Intl/PlatformIntlAndroid.cpp`), with the JS-facing layer in
-`lib/VM/JSLib/Intl.cpp`. It exists only on those two platforms, is limited, and
-is impossible to maintain: the platform APIs do not map onto ECMA-402, and every
-mismatch becomes a special case. On test262.fyi (2026-10-19) Hermes passes 358
-of 3382 `intl402` tests; SpiderMonkey passes 3376 and V8 3343.
+Before this plugin, Hermes's `Intl` mapped ECMA-402 onto platform APIs:
+Foundation on Apple (`lib/Platform/Intl/PlatformIntlApple.mm`) and Java
+through JNI on Android (`lib/Platform/Intl/PlatformIntlAndroid.cpp`), with
+the JS-facing layer in `lib/VM/JSLib/Intl.cpp`. It existed only on those two
+platforms, was limited, and was impossible to maintain: the platform APIs do
+not map onto ECMA-402, and every mismatch became a special case. On
+test262.fyi (2026-10-19) Hermes passed 358 of 3382 `intl402` tests;
+SpiderMonkey passed 3376 and V8 3343. Phase 7 deleted that implementation
+(see "Without the plugin" and "Phasing").
 
 The ICU-backed implementation was deleted in `5cf80e4e9`. GitHub discussion
 #1211 records the history: ICU4C is too large to ship, platform APIs are
@@ -232,6 +234,11 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
   configure says so; a value given on the command line or edited in the
   cache is kept. The host-`hermesc` stages of the Android and Apple builds
   pass `-DHERMES_BUILD_INTL=OFF`.
+- The option of the deleted built-in implementation, `HERMES_ENABLE_INTL`,
+  is deprecated and ignored since Phase 7. React Native's own builds still
+  pass `-DHERMES_ENABLE_INTL=True`, so a configure that sets it ON prints a
+  CMake warning that names `HERMES_BUILD_INTL` and goes on; the option has
+  no other effect, and no build in this repository passes it.
 - CMake drives `cargo` for the target triples of the build.
   `hermes_intl_rust_targets` (`cmake/modules/HermesIntl.cmake`), a pure
   function tested with `cmake -P` (`intl/test/lit/rust-targets.js`), maps
@@ -325,12 +332,20 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
   beside `libhermesvm.so`; nothing else was needed. Like `libhermesvm.so`,
   the plugin is 16 KB aligned on the 64-bit ABIs and 4 KB aligned on the
   32-bit ones. The AAR still leaves out `libjsi.so`, which React Native
-  supplies, and still has the old `Intl` until Phase 7.
+  supplies.
+- Since Phase 7 the AAR has no Java code for `Intl`: its `classes.jar`
+  holds only `com/facebook/hermes/unicode/AndroidUnicodeUtils`, where it
+  held 76 classes under `com/facebook/hermes/intl` before, and
+  `libhermesvm.so` names none of them. Without `libhermesintl.so` a
+  runtime has no `Intl` (see "Without the plugin"). Phase 7 also deleted
+  `android/intltest`, the instrumented tests of the built-in
+  implementation, with its Gradle project, the build-logic properties
+  only it read, and the `androidx.annotation` library and
+  `de.undercouch.download` plugin, which nothing else used. The Java
+  sources of the AAR are now only `lib/Platform/Unicode/java`.
 - The CI workflows that build the AAR (`build-android.yml`, and the
   publish job of `rn-build-hermes.yml`) install rustup and the four
   Android targets.
-- `android/intltest`, which tests the old `Intl`, passes
-  `-DHERMES_BUILD_INTL=OFF` until Phase 7 removes it.
 - The loader needs nothing Android-specific: default resolution finds the
   plugin next to `libhermesvm.so` when libraries are extracted, and through
   the library search path when they are mapped from the APK
@@ -397,6 +412,14 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
   no load command for it, the "arm64 x86_64" build runs with the plugin,
   the app without the plugin runs, and the non-weak control fails at
   launch. The x86_64 process itself has not run.
+- Since Phase 7, `utils/build-apple-framework.sh` no longer passes the
+  deprecated option (see Build), and an app without the plugin has no
+  `Intl`; the podspec's comment says so. The link of `hermesvm` no longer
+  names Foundation, which only the built-in implementation used;
+  CoreFoundation stays, for Hermes's own locale fallbacks
+  (`PlatformUnicodeCF.cpp`). The built `hermesvm.framework` of every
+  slice no longer loads Foundation or libobjc, and the smoke tests and
+  CocoaPods app without the plugin pass (Phasing, item 7).
 - The `hermes-ios` tarball carries both xcframeworks, and
   `validateHermesFrameworksExist` (`utils/scripts/hermes/hermes-utils.js`)
   requires both. The CI workflow that builds the slices
@@ -415,11 +438,26 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
   - Its own podspec for `hermes-engine` must vendor
     `hermesintl.xcframework` next to `hermesvm.xcframework` and link it
     weakly (`-weak_framework hermesintl`). Without the first, React Native
-    apps on Apple platforms have no plugin and keep the old `Intl`, and
-    once Phase 7 deletes the old `Intl` they have no `Intl` at all, so
-    this change is a prerequisite for Phase 7. Without the second, an app
-    whose plugin is missing or lacks the running architecture fails to
-    launch.
+    apps on Apple platforms have no plugin, and since Phase 7 deleted the
+    built-in implementation they have no `Intl` at all. Without the
+    second, an app whose plugin is missing or lacks the running
+    architecture fails to launch.
+  - On Android a React Native app has `Intl` only when
+    `libhermesintl.so` is packaged with it; the AAR carries it. React
+    Native's ProGuard keep rules for `com.facebook.hermes.intl` are stale,
+    since those classes no longer exist.
+  - Its builds still pass `-DHERMES_ENABLE_INTL=True`, which now only
+    prints the deprecation warning (see Build); they can drop it.
+  - **Release gate.** These changes are in another repository and cannot
+    be made or tested here, so they do not block Phase 7 from landing on
+    the integration branch. A Hermes release that contains Phase 7 must
+    not ship to React Native until React Native's podspec vendors
+    `hermesintl.xcframework` and links it weakly, and its builds of
+    Hermes from source have Rust or pass `-DHERMES_BUILD_INTL=OFF` (next
+    item). The `-DHERMES_BUILD_INTL=OFF` branch leaves those apps with
+    no `Intl` at all, where today they have the built-in one. The first
+    compatible React Native revision: not yet known; to be recorded here
+    when React Native's change lands.
   - Its builds of Hermes from source (the Android Gradle build and the iOS
     build from source) configure Hermes with CMake, where
     `HERMES_BUILD_INTL` now defaults to `ON` for Android and every Apple
@@ -484,7 +522,26 @@ smaller (macOS, for example: 39,487,160 bytes for the plugin, against
 
 The AAR's copies, stripped by AGP, are 300 to 504 bytes larger than the
 Android figures. For comparison, the stripped `libhermesvm.so` of the same
-Android arm64 build is 2,883,928 bytes.
+Android arm64 build is 2,883,928 bytes. That is the Phase 6 measurement
+build; the "before" figure below (2,884,968) is from a later build, made
+just before Phase 7.
+
+Deleting the built-in implementation in Phase 7 made `libhermesvm.so`
+smaller. Bytes, stripped with `llvm-strip`, from the same MinSizeRel
+builds configured as AGP does (NDK r28c, IPO, `HEAP_HV_PREFER32`), before
+and after the deletion:
+
+| Android ABI | Before | After | Change |
+|---|---|---|---|
+| arm64-v8a | 2,884,968 | 2,807,792 | -77,176 (-2.7%) |
+| armeabi-v7a | 1,981,592 | 1,931,472 | -50,120 (-2.5%) |
+| x86 | 3,147,300 | 3,068,648 | -78,652 (-2.5%) |
+| x86_64 | 3,015,168 | 2,937,736 | -77,432 (-2.6%) |
+
+The AAR's `classes.jar` went from 131,299 to 2,227 bytes, and the whole
+AAR from 118,552,587 to 116,262,557 bytes; `libhermesintl.so` stayed
+about the same (x86_64: 19,926,152, then 19,928,152 bytes). The
+`hermesvm.framework` sizes per slice are under Phasing, item 7.
 
 ## Loading and installation
 
@@ -833,8 +890,11 @@ configuration:
   same plugin (the same `IntlPluginPath`, or default resolution, which
   returns the plugin already resolved), and the resolved locale list and
   time zone set explicitly, so the worker never re-runs detection;
-- during coexistence it also copies the old `Intl` field, so a parent with the
-  old implementation disabled does not get a worker with it enabled;
+- it does not copy the `Intl` field, which is deprecated and ignored (see
+  `RuntimeConfig`): a worker's `Intl` comes from the plugin it inherits.
+  Before Phase 7 deleted the built-in implementation, the field was copied
+  too (`IntlRecord::oldIntl`), so that a parent with that implementation
+  disabled did not get a worker with it enabled;
 - it also passes on the finalizer thread runner the parent was created
   with. The command-line tools set one with no JNI attachment
   (`cli::toolFinalizerThreadRunner`), since on Android the default
@@ -853,25 +913,49 @@ New fields, appended after the last existing field so that
 - `IntlDefaultLocales` (optional list of BCP 47 tags);
 - `IntlDefaultTimeZone` (optional IANA name).
 
-The existing `Intl` field (`public/hermes/Public/RuntimeConfig.h`) keeps
-controlling only the old built-in implementation.
+The existing `Intl` field (`public/hermes/Public/RuntimeConfig.h`)
+controlled the built-in implementation that Phase 7 deleted. It is
+deprecated and ignored, and stays where it is, because removing a field
+from the middle of `RuntimeConfig` would change its layout.
+`withIntl(true)` and `withIntl(false)` are accepted and change nothing,
+with or without the plugin, for a runtime and for the Workers it creates;
+`SynthTrace` still writes and parses the field. The command-line flag
+`-Xintl` stays accepted, described as deprecated and ignored, because
+scripts pass it. `IntlLoaderTest.IntlFieldIsIgnored` checks the field
+both ways, with the plugin enabled and disabled, for a parent runtime
+and a Worker made from it; `intl/test/lit/xintl-ignored.js` and
+`test/hermes/no-intl-fallbacks.js` check `-Xintl` and `-Xintl=false`.
 
-### Coexistence with the old implementation
+### Without the plugin
 
-The old implementation stays until the plugin reaches parity on Android and
-iOS (see Phasing). Until then:
+Hermes has no other `Intl`. Phase 7 deleted the built-in implementation
+(`lib/VM/JSLib/Intl.cpp` and its platform backends), so:
 
-- With no plugin, behavior is exactly today's: the old `Intl` where it is
-  compiled in and enabled, and the existing locale-sensitive fallbacks
-  elsewhere.
-- With the plugin, the plugin replaces `globalThis.Intl` and the built-ins,
-  whatever the `Intl` field says. Each built-in is replaced in the phase
-  that implements it; until then it keeps the behavior of the build without
-  the plugin. So the presence of `Intl` does not imply ECMA-402
-  `toLocaleString`: in Phase 0, `Infinity.toLocaleString()` is still
-  `"Infinity"`, not en-US `"∞"`, in a build without the old `Intl`, and the
-  old `Intl`'s `"+∞"` in a build with it, whether or not the `Intl` field
-  enables it.
+- With no plugin, a runtime has no `Intl` global (`typeof Intl` is
+  `"undefined"`), and the locale-sensitive built-ins keep Hermes's own
+  fallbacks, none of which throws for an ordinary value:
+  - `Number.prototype.toLocaleString` and `BigInt.prototype.toLocaleString`
+    give `toString`'s result (`"1234.5"`, `"Infinity"`, `"NaN"`, `"12"`);
+  - `Array.prototype.toLocaleString` and
+    `%TypedArray%.prototype.toLocaleString` are ECMA-262's: each element's
+    `toLocaleString` is called with no arguments;
+  - `Date.prototype.toLocaleString`, `toLocaleDateString` and
+    `toLocaleTimeString` format with Hermes's own platform code
+    (`platform_unicode`), and give `"Invalid Date"` for a time value that
+    is not finite;
+  - `String.prototype.toLocaleLowerCase` and `toLocaleUpperCase` map case
+    for the default locale (`convertCase`): with a Turkish default locale
+    `"I".toLocaleLowerCase()` is U+0131 and `"i".toLocaleUpperCase()` is
+    U+0130;
+  - `String.prototype.localeCompare` uses `platform_unicode::localeCompare`.
+
+  `test/hermes/no-intl-fallbacks.js` checks each of these with
+  `-Xintl-plugin=false`, and `no-intl-fallbacks-tr.js` the Turkish case
+  mappings (it runs with Hermes's own and the CoreFoundation Unicode
+  backends).
+  Embedders that need `Intl` must ship the plugin.
+- With the plugin, the plugin replaces `globalThis.Intl` and all of these
+  built-ins, whatever the `Intl` field says.
 - The extensions run before the plugin. None of them captures `Intl` today
   (`API/hermes/extensions/Intrinsics.cpp`); any future extension that needs
   `Intl` must look it up when it runs, not at install.
@@ -3292,17 +3376,25 @@ NumberFormat's internal plural-rules objects use it.
   test262 pin is the commit CI already uses,
   `c9aa6126e8f6fe2c6f668c65bfba771ffc8a6096`.
 - **Runner:** `utils/test_runner.py` has a plugin mode (`--intl-plugin`,
-  `utils/testsuite/intl_plugin.py`). Its normal mode skips the Intl tests
-  through `skiplist.json` and only reports passes; plugin mode judges every
+  `utils/testsuite/intl_plugin.py`). Its normal mode runs without the
+  plugin and only reports passes; since Phase 7 it skips every test under
+  `test262/test/intl402` as a fixed rule, even with `--test-skiplist`,
+  because a runtime without the plugin has no `Intl`. (`--test-intl`,
+  which ran them against the built-in implementation, is gone from
+  `utils/test_runner.py` and `tools/test-runner`, and so are the
+  `skiplist.json` entries under `intl402`.) Plugin mode judges every
   result against an expectations file instead. In plugin mode:
   - every run gets `-Xintl-plugin-path=<plugin>`,
     `-Xintl-default-locale=en-US` and `-Xintl-default-time-zone=UTC`, and
     runs with `TZ=UTC`, so that the engine's local time agrees with the
     plugin's zone (test262 builds dates from local fields, `new Date(2017,
     11, 12, h)`), and results do not depend on the host;
-  - the `intl_tests` gate and the platform skip list are ignored for every
-    path: on the hosts plugin mode supports, their entries are all about the
-    old `Intl`, and ignoring them gives the same coverage on every platform.
+  - the platform skip list is ignored for every path, which gives the same
+    coverage on every platform. Its macOS entries (the built-in Apple
+    Collator) and Linux entries (`intl402` paths, and Hermes's own
+    `toLocaleLowerCase` and `toLocaleUpperCase`, which pass in normal mode
+    without them) were removed in Phase 7, so only the Windows entries,
+    slow tests under ASan, remain.
     Inside `intl402` every skip list is ignored. Outside it the other lists,
     which record non-Intl Hermes bugs, still apply. Intl feature exclusions
     (for example `Intl.NumberFormat-v3`, `Intl.DurationFormat`) are ignored
@@ -3345,7 +3437,7 @@ NumberFormat's internal plural-rules objects use it.
   passes `-Xintl-plugin=false` to every run. Normal mode measures the engine
   without the plugin, as before the plugin existed, so a plugin in
   `<build>/lib` does not change its results; otherwise tests outside
-  `intl402` that use `Intl` when it exists would see a partial one. test262
+  `intl402` that use `Intl` when it exists would see the plugin's. test262
   runs against the plugin only in plugin mode. An external `b_hermes`
   (`--bytecode-compat-check`) gets the flag only if its `-help` lists it; one
   that predates the plugin cannot load it anyway.
@@ -3397,8 +3489,10 @@ NumberFormat's internal plural-rules objects use it.
       on x86_64 only: the ARM translation ignores `LD_LIBRARY_PATH`.
     - The app in `intl/test/android/app/`, which loads Hermes from the AAR
       through SoLoader, as React Native does, with the libraries left in
-      the APK; it reports `Intl.Segmenter` from the plugin, and `undefined`
-      once the plugin is removed from the APK.
+      the APK; it reports `Intl.Segmenter` from the plugin. Once the
+      plugin is removed from the APK it reported `undefined` for
+      `Intl.Segmenter` in Phase 6, and since Phase 7 it reports
+      `typeof Intl: undefined` and the results of Hermes's own fallbacks.
     - Plugin-mode test262 on the device through `utils/testsuite/adb-hermes`
       (`intl/README.md`), x86_64 natively and arm64 under translation:
       both give the host's totals (2696 pass, 18 js-fail, 0 problems).
@@ -3652,29 +3746,124 @@ components completely: the whole public surface, including `formatToParts`,
      eight slices and both xcframeworks, the link checks, the smoke tests
      on the iOS 27.1, tvOS 27.0 and visionOS 27.0 simulators and on macOS
      and Mac Catalyst, and the tarball. The CocoaPods consumer app passed
-     with the committed podspec (see Packaging): the tvOS x86_64 build
-     embeds the arm64-only plugin (the linker ignores it for x86_64, so
-     the x86_64 code has no load command for it), the tvOS "arm64 x86_64"
-     build runs with the plugin, the app with the plugin removed runs
-     with the built-in `Intl` and without `Intl.Segmenter`, and a link
-     without the weak flag fails at launch. `pod lib lint` passed for
-     iOS and tvOS together and for visionOS. Still unverified: an x86_64
-     simulator process at run time (only arm64 simulator runtimes were
-     available). `pod lib lint` for macOS fails on Xcode 27.1 only
-     because the pod target's 10.15 minimum is below Xcode 27.1's 12.0;
-     raising it is upstream's choice to make. Hermes cannot be generated with CMake's Xcode
-     generator (upstream: the `InternalBytecode.js` custom command in
-     `lib/InternalJavaScript` is attached to two targets, which the Xcode
-     new build system rejects), so the multi-configuration Apple
-     framework layout is verified with Ninja Multi-Config.
+     with the committed podspec (see Packaging): the tvOS x86_64 build embeds
+     the arm64-only plugin (the linker ignores it for x86_64, so the x86_64
+     code has no load command for it), the tvOS "arm64 x86_64" build runs
+     with the plugin, the app with the plugin removed runs (then with the
+     built-in implementation, which Phase 7 deleted, so without
+     `Intl.Segmenter`), and a link without the weak flag fails at launch.
+     `pod lib lint` passed for iOS and tvOS together and for visionOS. Still
+     unverified: an x86_64 simulator process at run time (only arm64
+     simulator runtimes were available). `pod lib lint` for macOS fails on
+     Xcode 27.1 only because the pod target's 10.15 minimum is below Xcode
+     27.1's 12.0; raising it is upstream's choice to make. Hermes cannot be
+     generated with CMake's Xcode generator (upstream: the
+     `InternalBytecode.js` custom command in `lib/InternalJavaScript` is
+     attached to two targets, which the Xcode new build system rejects), so
+     the multi-configuration Apple framework layout is verified with Ninja
+     Multi-Config.
    - **Signing with an app's Team ID** (see Risks).
-7. **Delete the old implementation:** `lib/VM/JSLib/Intl.cpp`,
-   `lib/Platform/Intl/`, the `HERMES_ENABLE_INTL` paths in the VM, its
-   `PredefinedStrings`, `NativeFunctions` and `RuntimeHermesValueFields`
-   entries, and `android/intltest`. The `Intl` `RuntimeConfig` field stays
-   in place, documented as deprecated and ignored, because removing a field
-   from the middle of `RuntimeConfig` would change its layout and require a
-   version bump.
+7. **Delete the built-in implementation.** Phase 7 did it, so `Intl`
+   comes only from the plugin:
+   - Deleted: `lib/VM/JSLib/Intl.cpp`; `lib/Platform/Intl/` (the Apple
+     and Android backends, the unused `PlatformIntlShared.cpp`, the BCP 47
+     parser and the Java classes); `include/hermes/Platform/Intl/`;
+     `android/intltest`; `unittests/PlatformIntl/`; `utils/IntlGen/`;
+     `doc/IntlAPIs.md`; the VM's `Intl` global, `Runtime::hasIntl()`,
+     and the conditional entries of `NativeFunctions.def`,
+     `PredefinedStrings.def` and `RuntimeHermesValueFields.def`, and
+     `IntlNativeType` in `InternalProperties.def` (runtime-only IDs, so no
+     bytecode change); `${FOUNDATION}`, which only the Apple backend
+     linked (`CORE_FOUNDATION` stays). fbjni stays, for the Unicode code
+     and the finalizer thread runner.
+   - Kept: each locale-sensitive built-in's fallback, now its only code
+     (see "Without the plugin"). The `HERMES_ENABLE_INTL` option is
+     deprecated and ignored (see Build). The `Intl` field of
+     `RuntimeConfig` and `-Xintl` are deprecated and ignored (see
+     `RuntimeConfig`), and the loader no longer copies the field to
+     Workers.
+   - Tests. The 23 lit tests of the built-in implementation
+     (`test/hermes/intl/`, `test/shermes/intl/`,
+     `test/hermes/regress-intl-number-format-bigint-input.js`), which
+     never ran on a Linux host, and the 4 BCP 47 parser gtests are gone.
+     What they covered and the plugin's tests lacked became plugin lit
+     tests: `NumberFormat` `format(0n)` and `formatToParts(0n)`
+     (`number-format-bigint-zero.js`), and a default locale with an
+     unknown POSIX modifier (`LANG=en_GB@foo=bar`) and the default time
+     zone from `TZ=US/Pacific` (`default-locale-env.js`). The test262
+     `toLocaleLowerCase` cases were already covered by plugin-mode test262.
+     New: `test/hermes/no-intl-fallbacks.js` and
+     `no-intl-fallbacks-tr.js`, `intl/test/lit/xintl-ignored.js` and
+     `IntlLoaderTest.IntlFieldIsIgnored`. `shermes-flags.js` and
+     `tool-flags.js` expect `undefined`, not an object, with the plugin
+     off.
+   - Test runners: see "Runner" under Testing.
+   - CI. The `test-macos-test262` job of `build.yml` builds once, with
+     the plugin, and runs `check-hermes`, `check-intl` and a normal-mode
+     test262 run of the whole `test262/test` tree, which keeps the
+     `-Xjit=force` matrix entry, in place of its run of the built-in
+     implementation. The `test-macos` job of `.circleci/config.yml`
+     builds with `-DHERMES_BUILD_INTL=OFF`, since it has no Rust, so it
+     tests Hermes without `Intl`. Neither has run yet.
+   - Android and Apple: see Packaging. React Native: the release gate
+     under Packaging.
+
+   Verified on the Linux host: `check-hermes` gives 4375 passes, 6
+   expected failures, 156 unsupported and 0 unexpected results (before:
+   4376 passes and 179 unsupported; the 4 parser gtests and the 23 lit
+   tests went, 3 tests were added); `check-shermes` 69 passes, 1 expected
+   failure, 5 unsupported (before: 11 unsupported); `check-intl` 161 lit
+   passes and 2 unsupported (3 more passes), 198 Rust tests, 23 runner
+   tests (2 more) and 57 data tests; plugin-mode test262 2696 pass, 18
+   js-fail, 0 problems, unchanged. A configure with
+   `-DHERMES_ENABLE_INTL=ON` or `=True` prints the warning and succeeds.
+   Verified on Android (the x86_64 emulator image under Testing): the AAR
+   has no `com/facebook/hermes/intl` classes; the smoke test and the test
+   app run with the plugin as before, and without it report `typeof
+   Intl: undefined` and the fallback results, the app under
+   `-Xcheck:jni` with no JNI error; plugin-mode test262 on the device
+   gives the host's totals. As a negative case, the same app built
+   against the AAR from before Phase 7, with the plugin removed, reports
+   `typeof Intl: object`.
+
+   **Apple: verified on a Mac** (Xcode 27.1; iOS 27.1, tvOS 27.0 and
+   visionOS 27.0 simulators; the eight slices and both xcframeworks built
+   without the deprecated option, with no deprecation warning). Foundation
+   and libobjc are gone from every `hermesvm` slice: what remains is the
+   `hermesvm` id, CoreFoundation, libc++ and libSystem (21 CoreFoundation
+   imports in each slice). `hermesintl`'s link set is unchanged.
+   `hermesvm.xcframework` went from 61M to 58M, and the `hermes-ios`
+   tarball from 104,590,473 to 103,718,999 bytes. The smoke tests (iOS,
+   tvOS and visionOS simulators; Mac Catalyst and macOS, each native and
+   under `arch -x86_64`) print `typeof Intl: object` and
+   `Intl.Segmenter: function` with the plugin; without it they print
+   `typeof Intl: undefined` and the seven fallback results, following the
+   device locale and time zone, with no crash. The CocoaPods app (iOS and
+   tvOS) does the same with and without the plugin, and `pod lib lint`
+   passes for ios,tvos and for visionos. `hermesvm` sizes, in bytes:
+
+   | Slice | Before Phase 7 | After Phase 7 | Change |
+   |---|---:|---:|---:|
+   | macOS | 10,563,576 | 10,075,544 | -488,032 (-4.6%) |
+   | iOS | 4,464,968 | 4,224,168 | -240,800 (-5.4%) |
+   | iOS simulator | 8,957,576 | 8,485,544 | -472,032 (-5.3%) |
+   | Mac Catalyst | 10,561,464 | 10,073,064 | -488,400 (-4.6%) |
+   | tvOS | 4,464,712 | 4,224,472 | -240,240 (-5.4%) |
+   | tvOS simulator | 8,957,304 | 8,485,848 | -471,456 (-5.3%) |
+   | visionOS | 5,273,504 | 5,015,280 | -258,224 (-4.9%) |
+   | visionOS simulator | 10,641,816 | 10,135,784 | -506,032 (-4.8%) |
+
+   The macOS host paths that both macOS CI jobs now run also passed
+   (arm64, Xcode 27.1): `check-hermes` with the plugin (4188 pass,
+   0 failures; `no-intl-fallbacks.js`, `no-intl-fallbacks-tr.js` and
+   `date-locale.js` pass with CoreFoundation, `date-format-fixed.js`
+   is unsupported there as before) and in the CircleCI configuration
+   with `-DHERMES_BUILD_INTL=OFF` (4220 pass, 0 failures), and a
+   normal-mode test262 run of the locale built-ins (String
+   `toLocale{Lower,Upper}Case` and `localeCompare`, Date, Number, Array
+   and `%TypedArray%` `toLocaleString`, `staging/sm/String`) against
+   the CoreFoundation fallbacks in both builds: 181 tests, 160 pass,
+   0 failures, 21 skipped by the existing lists.
 
 ## Risks
 

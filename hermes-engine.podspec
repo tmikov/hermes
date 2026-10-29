@@ -35,8 +35,8 @@ Pod::Spec.new do |spec|
   spec.header_mappings_dir = "destroot/include"
 
   # Hermes and its Intl plugin. The app embeds both; Hermes finds the plugin
-  # next to hermesvm.framework when it creates a runtime, and uses its
-  # built-in Intl when the plugin is absent.
+  # next to hermesvm.framework when it creates a runtime; there is no Intl
+  # when the plugin is absent.
   frameworks = [
     "destroot/Library/Frameworks/universal/hermesvm.xcframework",
     "destroot/Library/Frameworks/universal/hermesintl.xcframework",

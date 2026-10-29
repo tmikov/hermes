@@ -84,9 +84,10 @@ using ThreadRunner = std::function<void(std::function<void()>)>;
   /* Support for async generators in eval. */                           \
   F(constexpr, bool, EnableAsyncGenerators, false)                      \
                                                                         \
-  /* Support for the built-in, platform-based ECMA-402 */               \
-  /* implementation. Does not affect the Intl plugin */                 \
-  /* (EnableIntlPlugin). */                                             \
+  /* Deprecated and ignored. It enabled Hermes's old built-in */        \
+  /* ECMA-402 implementation, which no longer exists; Intl comes */     \
+  /* from the Intl plugin (EnableIntlPlugin). Kept so that the */       \
+  /* layout of RuntimeConfig does not change. */                        \
   F(constexpr, bool, Intl, true)                                        \
                                                                         \
   /* Support for using microtasks. */                                   \

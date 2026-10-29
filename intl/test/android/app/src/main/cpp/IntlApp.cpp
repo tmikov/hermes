@@ -22,11 +22,24 @@ using namespace facebook;
 
 namespace {
 
-/// The script whose result nativeRun reports. Intl.Segmenter exists only in
-/// the plugin: the AAR still has the old Intl, which has Intl but not it.
+/// The script whose result nativeRun reports. Intl comes only from the
+/// plugin. Without it, the script reports Hermes's own locale fallbacks,
+/// several of which call Android's Java Unicode class through JNI.
 const char kScript[] = R"JS(
-var lines = ["Intl.Segmenter: " + typeof Intl.Segmenter];
-if (typeof Intl.Segmenter === "function") {
+var lines = ["typeof Intl: " + typeof Intl];
+if (typeof Intl === "undefined") {
+  var d = new Date(Date.UTC(2026, 9, 27, 12, 0, 0));
+  lines.push('"a".localeCompare("b"): ' + "a".localeCompare("b"));
+  lines.push('"I".toLocaleLowerCase(): ' + "I".toLocaleLowerCase());
+  lines.push("toLocaleString: " + d.toLocaleString());
+  lines.push("toLocaleDateString: " + d.toLocaleDateString());
+  lines.push("toLocaleTimeString: " + d.toLocaleTimeString());
+  lines.push("Infinity.toLocaleString(): " + Infinity.toLocaleString());
+  lines.push("[1, 2].toLocaleString(): " + [1, 2].toLocaleString());
+} else {
+  lines.push("Intl.Segmenter: " + typeof Intl.Segmenter);
+}
+if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
   lines.push("number: " + new Intl.NumberFormat("de").format(1234.5));
   var ro = new Intl.DateTimeFormat().resolvedOptions();
   lines.push("default locale: " + ro.locale);

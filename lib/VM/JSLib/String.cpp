@@ -1043,11 +1043,8 @@ CallResult<HermesValue> stringPrototypeToLowerCase(void *, Runtime &runtime) {
 }
 
 CallResult<HermesValue> stringPrototypeToLocaleLowerCase(
-    void *ctx,
+    void *,
     Runtime &runtime) {
-#ifdef HERMES_ENABLE_INTL
-  return intlStringPrototypeToLocaleLowerCase(/* unused */ ctx, runtime);
-#else
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
   struct : public Locals {
@@ -1066,7 +1063,6 @@ CallResult<HermesValue> stringPrototypeToLocaleLowerCase(
   }
   lv.res = std::move(*resCall);
   return convertCase(runtime, lv.res, false, true);
-#endif
 }
 
 CallResult<HermesValue> stringPrototypeToUpperCase(void *, Runtime &runtime) {
@@ -1091,11 +1087,8 @@ CallResult<HermesValue> stringPrototypeToUpperCase(void *, Runtime &runtime) {
 }
 
 CallResult<HermesValue> stringPrototypeToLocaleUpperCase(
-    void *ctx,
+    void *,
     Runtime &runtime) {
-#ifdef HERMES_ENABLE_INTL
-  return intlStringPrototypeToLocaleUpperCase(/* unused */ ctx, runtime);
-#else
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
   struct : public Locals {
@@ -1114,7 +1107,6 @@ CallResult<HermesValue> stringPrototypeToLocaleUpperCase(
   }
   lv.res = std::move(*resCall);
   return convertCase(runtime, lv.res, true, true);
-#endif
 }
 
 CallResult<HermesValue> stringPrototypeSubstr(void *, Runtime &runtime) {
@@ -1289,12 +1281,7 @@ CallResult<HermesValue> stringPrototypeTrimEnd(void *, Runtime &runtime) {
   return StringPrimitive::slice(runtime, lv.S, 0, endIdx);
 }
 
-CallResult<HermesValue> stringPrototypeLocaleCompare(
-    void *ctx,
-    Runtime &runtime) {
-#ifdef HERMES_ENABLE_INTL
-  return intlStringPrototypeLocaleCompare(/* unused */ ctx, runtime);
-#else
+CallResult<HermesValue> stringPrototypeLocaleCompare(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   struct : public Locals {
     PinnedValue<StringPrimitive> S;
@@ -1329,7 +1316,6 @@ CallResult<HermesValue> stringPrototypeLocaleCompare(
   int comparisonResult = platform_unicode::localeCompare(left, right);
   assert(comparisonResult >= -1 && comparisonResult <= 1);
   return HermesValue::encodeTrustedNumberValue(comparisonResult);
-#endif
 }
 
 CallResult<HermesValue> stringPrototypeNormalize(void *, Runtime &runtime) {

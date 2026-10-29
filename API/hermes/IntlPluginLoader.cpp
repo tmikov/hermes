@@ -99,8 +99,6 @@ constexpr jsi::UUID kIntlRecordUUID{
 /// What installIntlPlugin recorded for one runtime; makeWorkerRuntimeConfig
 /// copies it into a Worker's config.
 struct IntlRecord {
-  /// The runtime's Intl field (the old, built-in implementation).
-  bool oldIntl = true;
   /// Whether a plugin was installed.
   bool installed = false;
   /// The plugin's library path from RuntimeConfig; empty for the default.
@@ -800,7 +798,6 @@ void installIntlPlugin(
     jsi::Runtime &rt,
     const ::hermes::vm::RuntimeConfig &config) {
   auto record = std::make_shared<IntlRecord>();
-  record->oldIntl = config.getIntl();
   record->finalizerThreadRunner = config.getFinalizerThreadRunner();
   std::optional<LoadedPlugin> plugin;
   if (config.getEnableIntlPlugin()) {
@@ -1260,7 +1257,6 @@ unsigned intlDefaultResolutionsForTests() {
   if (!record)
     return builder.build();
   builder.withFinalizerThreadRunner(record->finalizerThreadRunner)
-      .withIntl(record->oldIntl)
       .withEnableIntlPlugin(record->installed);
   if (record->installed) {
     builder.withIntlPluginPath(record->pluginPath)

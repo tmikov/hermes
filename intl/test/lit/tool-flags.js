@@ -10,8 +10,7 @@
 // (lib/VM/RuntimeFlags.cpp); shermes-flags.js covers buildRuntimeConfig. Each
 // of the four flags must reach the loader from each of them. With the plugin
 // off, a plugin path that does not exist is never loaded, which would be
-// fatal; Intl is then the old built-in one in a HERMES_ENABLE_INTL build and
-// undefined otherwise.
+// fatal, and there is no Intl.
 
 // RUN: %hermes_default %s | %FileCheck --match-full-lines --check-prefix=ON %s
 // RUN: %hermes_default -Xintl-plugin=false -Xintl-plugin-path=/nonexistent/libhermesintl.so %s | %FileCheck --match-full-lines --check-prefix=OFF %s
@@ -33,9 +32,9 @@
 // RUN: not --crash %hvm -Xintl-default-time-zone=Mars/Olympus_Mons %t.hbc 2>&1 | %FileCheck --check-prefix=ZONE %s
 
 // ON: object
-// OFF: {{object|undefined}}
+// OFF: undefined
 // REPLON: "object"
-// REPLOFF: {{"object"|"undefined"}}
+// REPLOFF: "undefined"
 // PATH: LLVM ERROR: Intl plugin /nonexistent/libhermesintl.so: cannot be loaded:
 // LOCALE: rejected the default locale or time zone: IntlDefaultLocales: "en_US" is not a well-formed BCP 47 language tag
 // ZONE: rejected the default locale or time zone: IntlDefaultTimeZone: "Mars/Olympus_Mons" is not an IANA time zone the Intl plugin knows

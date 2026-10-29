@@ -5,9 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: %hermes -Xintl-plugin=false -O -target=HBC %s | %FileCheck --match-full-lines --check-prefixes=CHECK,%old_intl %s
-// RUN: %hermes -O -target=HBC -emit-binary -out %t.hbc %s && %hermes -Xintl-plugin=false %t.hbc | %FileCheck --match-full-lines --check-prefixes=CHECK,%old_intl %s
-// RUN: %shermes -exec %s -Wx,-Xintl-plugin=false | %FileCheck --match-full-lines --check-prefixes=CHECK,%old_intl %s
+// RUN: %hermes -Xintl-plugin=false -O -target=HBC %s | %FileCheck --match-full-lines %s
+// RUN: %hermes -O -target=HBC -emit-binary -out %t.hbc %s && %hermes -Xintl-plugin=false %t.hbc | %FileCheck --match-full-lines %s
+// RUN: %shermes -exec %s -Wx,-Xintl-plugin=false | %FileCheck --match-full-lines %s
 "use strict";
 
 print('Number');
@@ -127,14 +127,12 @@ print('toLocaleString');
 print((1).toLocaleString());
 // CHECK-NEXT: 1
 
-// The old built-in Intl (HERMES_ENABLE_INTL) formats it itself, even with
-// -Xintl=false. Otherwise it is Hermes's own toLocaleString. The Intl
-// plugin replaces Number.prototype.toLocaleString with its ECMA-402
-// version, so this test runs with the plugin off (-Xintl-plugin=false);
+// The Intl plugin replaces Number.prototype.toLocaleString with its
+// ECMA-402 version, so this test runs with the plugin off
+// (-Xintl-plugin=false) to test Hermes's own;
 // intl/test/lit/to-locale-string.js tests the plugin's version.
 print((+Infinity).toLocaleString());
-// OLD-INTL-NEXT: +∞
-// NO-OLD-INTL-NEXT: Infinity
+// CHECK-NEXT: Infinity
 
 print((-3.14).toLocaleString());
 // CHECK-NEXT: -3.14

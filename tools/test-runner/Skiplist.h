@@ -33,8 +33,11 @@ enum class SkipReason {
   HandlesanSkipList,
   UnsupportedFeature,
   PermanentUnsupportedFeature,
-  IntlTests,
   PlatformSkipList,
+  /// test262's intl402 directory: always skipped. Hermes has no Intl of its
+  /// own, and this runner has no Intl plugin mode to judge the results of
+  /// the plugin against its expectations (utils/test_runner.py does).
+  Intl402,
 };
 
 /// Display name for a skip reason.
@@ -56,10 +59,10 @@ inline const char *skipReasonName(SkipReason r) {
       return "unsupported_features";
     case SkipReason::PermanentUnsupportedFeature:
       return "permanent_unsupported_features";
-    case SkipReason::IntlTests:
-      return "intl_tests";
     case SkipReason::PlatformSkipList:
       return "platform_skip_list";
+    case SkipReason::Intl402:
+      return "intl402";
   }
   return "unknown";
 }
@@ -158,7 +161,6 @@ class Skiplist {
         {"skip_list", SkipReason::SkipList},
         {"lazy_skip_list", SkipReason::LazySkipList},
         {"permanent_skip_list", SkipReason::PermanentSkipList},
-        {"intl_tests", SkipReason::IntlTests},
         // handlesan_skip_list is loaded separately below — those tests
         // run with handle sanitizer disabled, not skipped.
     };
@@ -258,28 +260,14 @@ class Skiplist {
   }
 
   /// Check if a test path should be skipped based on path matching.
-  /// Uses substring matching: a skiplist entry matches if it is contained
-  /// within the test path (matching Python's `value in test_or_feature`).
+  /// Every test under test262's intl402 directory is skipped, as the Python
+  /// runner does outside its Intl plugin mode. Otherwise uses substring
+  /// matching: a skiplist entry matches if it is contained within the test
+  /// path (matching Python's `value in test_or_feature`).
   SkipReason shouldSkipPath(llvh::StringRef testPath) const {
+    if (testPath.contains("/test/intl402/"))
+      return SkipReason::Intl402;
     for (const auto &cat : categories_) {
-      for (const auto &skipPath : cat.paths) {
-        if (testPath.contains(skipPath)) {
-          return cat.reason;
-        }
-      }
-    }
-    return SkipReason::NotSkipped;
-  }
-
-  /// Check if a test path should be skipped by any non-intl category.
-  /// This mirrors the Python runner's two-pass design: first check
-  /// skip_list/permanent_skip_list/manual_skip_list/platform_skip_list,
-  /// then check intl_tests separately. Used when --test-intl bypasses
-  /// IntlTests but platform-specific skips must still be honored.
-  SkipReason shouldSkipPathNonIntl(llvh::StringRef testPath) const {
-    for (const auto &cat : categories_) {
-      if (cat.reason == SkipReason::IntlTests)
-        continue;
       for (const auto &skipPath : cat.paths) {
         if (testPath.contains(skipPath)) {
           return cat.reason;

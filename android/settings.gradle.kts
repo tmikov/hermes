@@ -24,4 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "hermes-engine"
 
-include(":ios-artifacts", ":cppruntime", ":intltest")
+include(":ios-artifacts", ":cppruntime")

@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -444,7 +445,7 @@ void workerConfigCopiesEffectiveDefaults() {
   registerEntry(goodEntry());
   auto parent = makeHermesRuntime();
   RuntimeConfig config = makeWorkerRuntimeConfig(*parent);
-  bool ok = config.getEnableIntlPlugin() && config.getIntl() &&
+  bool ok = config.getEnableIntlPlugin() &&
       config.getIntlPluginPath().empty() &&
       config.getIntlDefaultLocales() ==
           std::vector<std::string>{"xx-detected"} &&
@@ -467,18 +468,56 @@ TEST_F(IntlLoaderTest, WorkerConfigCopiesEffectiveDefaults) {
 /// Child: a parent without the plugin has Workers without it.
 void workerConfigCopiesDisabledState() {
   registerEntry(goodEntry());
-  auto parent = makeHermesRuntime(RuntimeConfig::Builder()
-                                      .withEnableIntlPlugin(false)
-                                      .withIntl(false)
-                                      .build());
+  auto parent = makeHermesRuntime(
+      RuntimeConfig::Builder().withEnableIntlPlugin(false).build());
   RuntimeConfig config = makeWorkerRuntimeConfig(*parent);
-  bool ok = !config.getEnableIntlPlugin() && !config.getIntl();
+  bool ok = !config.getEnableIntlPlugin();
   parent.reset();
   std::exit(ok ? 0 : 1);
 }
 TEST_F(IntlLoaderTest, WorkerConfigCopiesDisabledState) {
   EXPECT_EXIT(
       workerConfigCopiesDisabledState(), ::testing::ExitedWithCode(0), "");
+}
+
+/// Child: RuntimeConfig's Intl field is deprecated and ignored. With it true
+/// or false, a runtime and a Worker created from it have the plugin when it
+/// is enabled and nothing when it is disabled; neither has an Intl global,
+/// since the fake plugin defines none and Hermes no longer has its own.
+void intlFieldIsIgnored() {
+  registerEntry(goodEntry());
+  bool ok = true;
+  for (bool intl : {true, false}) {
+    for (bool plugin : {true, false}) {
+      auto parent = makeHermesRuntime(RuntimeConfig::Builder()
+                                          .withIntl(intl)
+                                          .withEnableIntlPlugin(plugin)
+                                          .build());
+      auto worker = makeHermesRuntime(makeWorkerRuntimeConfig(*parent));
+      std::string want = plugin ? "xx-detected" : "";
+      for (jsi::Runtime *rt :
+           std::initializer_list<jsi::Runtime *>{parent.get(), worker.get()}) {
+        if (fakeLocale(*rt) != want || rt->global().hasProperty(*rt, "Intl")) {
+          std::fprintf(
+              stderr,
+              "Intl=%d plugin=%d %s: plugin locale \"%s\", Intl %s\n",
+              intl,
+              plugin,
+              rt == parent.get() ? "parent" : "worker",
+              fakeLocale(*rt).c_str(),
+              rt->global().hasProperty(*rt, "Intl") ? "defined" : "undefined");
+          ok = false;
+        }
+      }
+      // Destroy the runtimes first: LeakSanitizer reports them otherwise.
+      worker.reset();
+      parent.reset();
+    }
+  }
+  std::exit(ok ? 0 : 1);
+}
+TEST_F(IntlLoaderTest, IntlFieldIsIgnored) {
+  EXPECT_EXIT(intlFieldIsIgnored(), ::testing::ExitedWithCode(0), "");
 }
 
 /// Set while markingRunner runs its function, on that thread only.
