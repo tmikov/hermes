@@ -22,6 +22,10 @@
 # Microsoft's msvcp140.dll (from the Visual C++ Redistributable of the same
 # toolset as the build, 14.44) must be in $WINE_HERMES_DIR next to
 # hermes.exe; this script makes Wine load it (WINEDLLOVERRIDES=msvcp140=n).
+# Microsoft's vcruntime140.dll, vcruntime140_1.dll and ucrtbase.dll are
+# loaded the same way when they are there too, so a run can use
+# Microsoft's whole runtime instead of Wine's builtins (Wine maps the
+# api-ms-win-crt-* names to ucrtbase.dll itself).
 #
 # Environment:
 #   WINE_HERMES_DIR  the directory holding hermes.exe (required);
@@ -51,6 +55,11 @@ for a in "$@"; do
   args+=("$a")
 done
 
-export WINEDLLOVERRIDES="msvcp140=n${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+overrides=msvcp140
+for d in vcruntime140 vcruntime140_1 ucrtbase; do
+  [ -f "$WINE_HERMES_DIR/$d.dll" ] && overrides="$overrides,$d"
+done
+
+export WINEDLLOVERRIDES="$overrides=n${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 export WINEDEBUG=${WINEDEBUG:--all}
 exec "${WINE:-wine}" "$WINE_HERMES_DIR/hermes.exe" "${args[@]}" </dev/null

@@ -153,10 +153,12 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
     the Microsoft C++ runtime matches C++ types across modules by their
     decorated names, so a `jsi::JSError` thrown in the plugin is still
     caught by the host as `jsi::JSError` and `hasNativeState<T>` still
-    works for state the plugin attached. Under Wine, with clang-cl builds,
-    both hold (the fixture pair `fake_intl_needs_dep.dll` and
-    `fake_intl_dep.dll`). With the MSVC compiler and Microsoft's runtime
-    this is unverified until the Windows checks under Phasing run.
+    works for state the plugin attached. Under Wine both hold (the fixture
+    pair `fake_intl_needs_dep.dll` and `fake_intl_dep.dll`): for builds of
+    Microsoft's compiler and of clang-cl, Release and Debug, with
+    Microsoft's runtime DLLs (`vcruntime140`, `vcruntime140_1`,
+    `msvcp140`, `ucrtbase`, or their debug versions) and with Wine's.
+    Windows itself has not run it (see Phasing).
 - Before it loads a plugin library, the loader makes the Hermes image it runs
   in global: it finds that image with `dladdr` and re-opens it with
   `RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL`, once per process. It skips this
@@ -480,18 +482,32 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
   runtime DLLs, `kernel32`, and the system DLLs Rust's standard library
   uses (`ntdll`, `bcryptprimitives`, `api-ms-win-core-synch-l1-2-0`), and
   no Hermes module.
-- The build was cross-compiled on Linux only, with clang-cl, lld-link and
-  the MSVC C runtime, C++ library and Windows SDK that xwin downloads,
-  through the committed toolchain file
-  `utils/windows-cross/clang-cl-xwin.cmake` (x64 and arm64, Release and
-  Debug). The toolchain turns Boost.Context off, because llvm-ml64
-  assembles a `lea` in Boost.Context's MASM source as an absolute address
-  and `hermes.exe` then crashes; a native MSVC build keeps the fibers. The
-  cross build also needs `-DHERMES_ENABLE_NAPI=OFF`: two Node-API test
-  addons produce the same import library name, which Ninja rejects. Three
-  fixes to Hermes's own clang-cl build were needed: `Hermes.cmake` tests
-  `MSVC` before `GCC_COMPATIBLE`, JSI gets `/EHsc` under clang-cl, and
-  `/WHOLEARCHIVE` names the archive by path.
+- The build has been cross-compiled on Linux only, with two committed
+  toolchain files:
+  - `utils/windows-cross/clang-cl-xwin.cmake`: clang-cl, lld-link and the
+    MSVC C runtime, C++ library and Windows SDK that xwin downloads (x64
+    and arm64, Release and Debug). It turns Boost.Context off, because
+    llvm-ml64 assembles a `lea` in Boost.Context's MASM source as an
+    absolute address and `hermes.exe` then crashes. Three fixes to
+    Hermes's own clang-cl build were needed: `Hermes.cmake` tests `MSVC`
+    before `GCC_COMPATIBLE`, JSI gets `/EHsc` under clang-cl, and
+    `/WHOLEARCHIVE` names the archive by path.
+  - `utils/windows-cross/msvc-wine.cmake`: Microsoft's own compiler,
+    linker and assemblers (Visual Studio 2022 17.14, MSVC 14.44, Windows
+    SDK 10.0.26100), run under Wine by msvc-wine (x64 Release and Debug,
+    arm64 Release). Boost.Context stays on and works: ml64 assembles the
+    `lea` RIP-relative. The configure line must pass
+    `-DCMAKE_POLICY_DEFAULT_CMP0141=NEW`, so that debug information is
+    embedded (`/Z7`) and cl needs no `mspdbsrv.exe`. Two fixes were
+    needed: Boost.Context's armasm rule passed `-D` and `-I` options,
+    which armasm64 rejects, and Hermes gave `/MP` to every language,
+    which armasm64 rejects (ml64 only warns); and the plugin is compiled
+    with `/utf-8`, without which cl encodes narrow string literals in the
+    build machine's code page (the plugin's unit tests failed on
+    `"\u00a0"` and `"\u95f0"`).
+
+  Both need `-DHERMES_ENABLE_NAPI=OFF`: two Node-API test addons produce
+  the same import library name, which Ninja rejects.
 - `HERMES_BUILD_INTL` stays `OFF` by default on Windows and the Windows CI
   workflow is unchanged until a native build is verified (see Phasing).
 
@@ -515,6 +531,8 @@ was done to reduce it.
 | visionOS simulator (arm64) | 19,904,712 | same |
 | Windows x64 | 19,026,944 | clang-cl cross build, Release |
 | Windows arm64 | 18,877,440 | same |
+| Windows x64 | 18,968,064 | `cl` build under Wine, Release |
+| Windows arm64 | 18,854,400 | same |
 
 The Apple rows are from Xcode 26.4. Builds with Xcode 27.1 are slightly
 smaller (macOS, for example: 39,487,160 bytes for the plugin, against
@@ -3533,9 +3551,34 @@ NumberFormat's internal plural-rules objects use it.
     Wine 9's own `msvcp140.dll` makes Hermes executables hang
     intermittently, with or without the plugin; with Microsoft's
     `msvcp140.dll` (`WINEDLLOVERRIDES=msvcp140=n`) there is no hang, so
-    the Wine runs use it. Debug builds only link (Wine has no debug C
-    runtime DLLs), and the arm64 build does not run. The native checks
-    are under Phasing.
+    the Wine runs use it.
+  - **Windows with Microsoft's toolchain and runtime**, on Linux: builds
+    with Microsoft's compiler and linker under Wine (msvc-wine, the
+    toolchain file `utils/windows-cross/msvc-wine.cmake`): x64 Release and
+    Debug, arm64 Release (compiled and linked only), with Boost.Context
+    fibers. The same DLL checks as for the clang-cl build (exports,
+    imports, the copy next to `hermesvm.dll`). Under Wine 9 with
+    Microsoft's own runtime DLLs next to the executables and forced with
+    `WINEDLLOVERRIDES` (`vcruntime140`, `vcruntime140_1`, `msvcp140`,
+    `ucrtbase`; `WINEDEBUG=+loaddll` shows them loaded as native): every
+    case of the list above for the x64 Release build, plugin-mode test262
+    with the host's totals, `IntlLoaderTests` and `IntlPluginUnitTests`,
+    no hang in repeated runs, and the JSI contract fixture for this build
+    and for the clang-cl build. Debug: Microsoft's debug runtime DLLs
+    (`vcruntime140d`, `vcruntime140_1d`, `msvcp140d`, `ucrtbased`) run
+    under Wine; a Debug `hermes.exe` with the Debug plugin works, and a
+    Debug `hermes.exe` with the Release plugin and the reverse are both
+    rejected with the message naming both values, before the plugin is
+    called (a small host that loads the mismatched plugin without the
+    check crashes in `resolve_defaults`). Hermes's Debug code asserts at
+    start under Wine, whose thread stacks have no reserved bottom region
+    (`thread_stack_bounds` in `OSCompatWindows.cpp`), so the Debug
+    `hermes.exe` used is a Debug build with assertions off; the Debug
+    plugin and the gtests' Debug runs are otherwise unchanged. Scripts
+    that compile code on Hermes's stack executor (`eval`, lazy
+    compilation) and the stack-overflow tests run with fibers, and need
+    no extra thread, which the clang-cl build (fibers off) does. The
+    arm64 builds do not run, and the native checks are under Phasing.
 
 ## Phasing
 
@@ -3615,6 +3658,9 @@ components completely: the whole public surface, including `formatToParts`,
    - Hermes builds with clang-cl (`Hermes.cmake` tests `MSVC` before
      `GCC_COMPATIBLE`, JSI gets `/EHsc`, `/WHOLEARCHIVE` names the archive
      by path);
+   - Hermes builds for arm64 with Microsoft's armasm64 (Boost.Context's
+     armasm rule no longer passes `-D` and `-I`, and `/MP` goes to the C
+     and C++ compilers only);
    - `utils/build-apple-framework.sh` builds its host `hermesc` for macOS
      even when another platform's deployment target, such as
      `XROS_DEPLOYMENT_TARGET`, is in the environment;
@@ -3718,7 +3764,7 @@ components completely: the whole public surface, including `formatToParts`,
          reads the DLL with `coff-exports.py`, the gtests, and plugin-mode
          test262; `IntlRustCoreAllocTests` is not built on Windows, since
          the C library has no `aligned_alloc`), and `IntlLoaderTests`,
-         which should build with MSVC (never tried; it does not build with
+         which builds with cl (under Wine; it does not build with
          clang-cl, where `-Werror=undef` trips on the vendored gtest).
          The loader lit tests in `test/hermes/intl-plugin` are skipped on
          win32; item 8 stands in for them.
@@ -3728,6 +3774,20 @@ components completely: the whole public surface, including `formatToParts`,
          build-x64\bin\Release` followed by the directories
          `check-intl-test262` runs (`intl/CMakeLists.txt`) gives the
          host's totals: 2696 pass, 18 js-fail, 0 problems.
+
+     Under Wine, with Microsoft's compiler, linker and runtime (Testing),
+     these have run and passed: item 4 with Ninja rather than the Visual
+     Studio generator (x64 Release and Debug, arm64 Release compiled and
+     linked, fibers on, the export, import and copy checks), item 5, item
+     6, item 7, item 8 except the error dialogs and the long path (Wine
+     shows no dialogs and has no `MAX_PATH` limit), the gtests of item 10
+     (`IntlLoaderTests` and `IntlPluginUnitTests`, Release and Debug), and
+     item 11. What only a Windows machine can show: the Visual Studio
+     generator and MSBuild (items 1 to 4), arm64 execution, the real
+     loader's error dialogs, long paths and characters outside the ANSI
+     code page (item 8), the defaults from real Windows settings (item 9,
+     Wine derives them from the Unix locale and `TZ`), and lit and cargo
+     natively (item 10).
    - **Apple, a second run on a Mac with a newer Xcode (27.1): passed,
      with two items open.** The first run (Xcode 26.4, at the first
      Apple packaging commit) passed every Apple run under Testing except
@@ -3943,11 +4003,16 @@ components completely: the whole public surface, including `formatToParts`,
   or the like gets no plugin. A Linux C library other than glibc and
   bionic whose messages differ from musl's would make an absent plugin
   look broken, which is fatal; none is known to be used with Hermes.
-- **Windows is verified only under Wine.** The JSI contract with a copy of
-  JSI in each module, the Visual Studio build, Boost.Context fibers (off
-  in the cross build), the real `GetUserDefaultGeoName` territory rows,
-  long paths and the ABI-bit check with real Debug and Release builds
-  are unverified on Windows itself (checklist under Phasing).
+- **Windows is verified only under Wine.** Under Wine, builds of
+  Microsoft's compiler and linker pass with Microsoft's runtime DLLs: the
+  JSI contract with a copy of JSI in each module, Boost.Context fibers,
+  the ABI-bit check with real Debug and Release builds, the loader cases
+  and plugin-mode test262. Unverified on Windows itself (checklist under
+  Phasing): the Visual Studio generator and MSBuild, arm64 execution, the
+  real loader (error dialogs, long paths, code pages), the real
+  `GetUserDefaultGeoName` territory rows and other defaults from Windows
+  settings, and Hermes's Debug code, which under Wine runs only with
+  assertions off.
 - **The tvOS and visionOS simulator xcframework slices list x86_64**,
   which their binaries lack (see Packaging). Xcode 27.1 and CocoaPods
   accepted this in the second Mac run (Phasing item 6); a later

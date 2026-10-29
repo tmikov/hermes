@@ -261,9 +261,10 @@ cmake --build build-win --target hermes hermes-jsi-shared hermesvm hermesintl
 For arm64, add
 `-DHERMES_WINDOWS_ARCH=arm64 -DHERMES_XWIN_DIR=$HOME/.xwin-aarch64`.
 `HERMES_ENABLE_NAPI=OFF` leaves out the Node-API test addons, whose import
-libraries share names, which Ninja rejects on Windows. Release builds
-run under Wine; Debug builds use the debug C runtime DLLs, which neither
-Wine nor xwin provides, so they only compile and link here.
+libraries share names, which Ninja rejects on Windows. This toolchain
+turns Boost.Context fibers off, because llvm-ml64 assembles its MASM code
+wrongly; the next section's toolchain keeps them. How to run the builds,
+Debug ones included, is under "Running the Windows build under Wine".
 
 On Windows the plugin is `hermesintl.dll`, in `bin/` next to the tools (in
 `bin/<Config>` with a multi-configuration generator), with a copy next to
@@ -273,39 +274,112 @@ types across modules by name. It needs the C runtime DLL (`/MD` or `/MDd`):
 configure fails with a static runtime. The loader rejects a plugin whose
 `_ITERATOR_DEBUG_LEVEL` or debug/release C runtime differs from Hermes's.
 
-No native Visual Studio build has been run yet, and the shared-type
-matching has been checked only under Wine. The spec's "Phasing" lists
+The build with Microsoft's compiler and linker, and the shared-type
+matching with Microsoft's runtime, have been checked under Wine only (next
+sections); no build has run on Windows itself. The spec's "Phasing" lists
 what a Windows machine has to check before `HERMES_BUILD_INTL` defaults
 to `ON` there.
 
+### Building with Microsoft's compiler under Wine
+
+`utils/windows-cross/msvc-wine.cmake` builds the same targets with
+Microsoft's own tools (`cl`, `link`, `lib`, `rc`, `mt`, and `ml64` or
+`armasm64`), which [msvc-wine](https://github.com/mstorsjo/msvc-wine) runs
+under Wine. It needs CMake 3.25 or newer. Install msvc-wine once (it
+needs Wine 9 and msitools, and
+running it accepts Microsoft's license); the commands below install
+Visual Studio 2022 17.14's build tools (MSVC 14.44) and the Windows SDK
+10.0.26100 for x64 and arm64:
+
+```bash
+git clone https://github.com/mstorsjo/msvc-wine ~/opt/msvc-wine
+~/opt/msvc-wine/vsdownload.py --major 17 --accept-license \
+  --architecture x64 arm64 --host-arch x64 --dest ~/opt/msvc
+~/opt/msvc-wine/install.sh ~/opt/msvc
+```
+
+Then, with the Rust target and a host build as in the previous section:
+
+```bash
+cmake -G Ninja -B build-msvc -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=utils/windows-cross/msvc-wine.cmake \
+  -DCMAKE_POLICY_DEFAULT_CMP0141=NEW \
+  -DIMPORT_HOST_COMPILERS=<host build>/ImportHostCompilers.cmake \
+  -DHERMES_BUILD_INTL=ON -DJSI_UNSTABLE=ON -DHERMES_ENABLE_NAPI=OFF
+cmake --build build-msvc --target hermes hermes-jsi-shared hermesvm hermesintl
+```
+
+`CMAKE_POLICY_DEFAULT_CMP0141=NEW` lets the toolchain file embed debug
+information in the objects (`/Z7`). Without it cl uses `/Zi`, which needs
+`mspdbsrv.exe` and Wine's winbind support, and fails with `fatal error
+C1902: Program database manager mismatch`; the toolchain file stops with a
+message naming the option. For arm64 add `-DHERMES_WINDOWS_ARCH=arm64`;
+`HERMES_MSVC_WINE_DIR` names an install other than `~/opt/msvc`. The
+wrappers use the default Wine prefix. Boost.Context fibers stay on. An x64
+Release build takes about five minutes on 16 cores.
+
 ### Running the Windows build under Wine
 
-Release builds run under Wine 9 (`apt install wine wine64`). Two things
-are needed:
+Builds of either toolchain run under Wine 9 (`apt install wine wine64`).
+Three things are needed:
 
-- **Microsoft's `msvcp140.dll`.** With Wine's own `msvcp140.dll`, Hermes
-  executables now and then hang at exit after printing their output, with
-  or without the plugin, and always after heavy allocation. Copy
-  Microsoft's x64 `msvcp140.dll` of the build's toolset, 14.44 (the file
-  the Microsoft Visual C++ Redistributable installs), next to
-  `hermes.exe`. Phase 6 used such a copy taken from an existing
-  installation; installing the redistributable in the Wine prefix to get
-  the file was not tried. Run with `WINEDLLOVERRIDES=msvcp140=n`, which
-  makes Wine load it.
-  With it, no run hung in Phase 6's tests, plugin-mode test262 included.
+- **Microsoft's C and C++ runtime.** With Wine's own `msvcp140.dll`,
+  Hermes executables now and then hang at exit after printing their
+  output, with or without the plugin, and always after heavy allocation.
+  Copy Microsoft's DLLs of the build's toolset next to `hermes.exe` (and
+  next to `hermesvm.dll`): `vcruntime140.dll`, `vcruntime140_1.dll` and
+  `msvcp140.dll`, which msvc-wine installs in
+  `VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT/`, and
+  `ucrtbase.dll`, in `Windows Kits/10/Redist/10.0.26100.0/ucrt/DLLs/x64/`.
+  A copy alone is not enough: Wine prefers its builtins for these names,
+  so run with
+  `WINEDLLOVERRIDES=vcruntime140,vcruntime140_1,msvcp140,ucrtbase=n`
+  (`WINEDEBUG=+loaddll` shows each DLL loaded as `native` or `builtin`).
+  The `api-ms-win-crt-*` names need nothing: Wine maps them to
+  `ucrtbase.dll` itself. Overriding only `msvcp140` also stops the hang.
+- **The prefix started without the override.** Wine's own programs, such
+  as `wineboot`, which Wine runs when a prefix is created or updated, need
+  Wine's `ucrtbase.dll` and fail to start under `ucrtbase=n`. Run `wine
+  wineboot` once without the override (and keep a `wineserver -p`
+  running) before the runs.
 - **stdin from `/dev/null`.** `hermes-jsi-shared.exe` waits on a terminal
   stdin under Wine.
 
 ```bash
-cp <msvcp140.dll> build-win/bin/
-WINEDLLOVERRIDES=msvcp140=n wine build-win/bin/hermes.exe test.js </dev/null
-WINEDLLOVERRIDES=msvcp140=n WINEPATH='Z:<absolute build-win>\lib' \
-  wine build-win/bin/hermes-jsi-shared.exe test.js </dev/null
+R=build-msvc  # or build-win
+C=~/opt/msvc/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT
+U="$HOME/opt/msvc/Windows Kits/10/Redist/10.0.26100.0/ucrt/DLLs/x64"
+for d in $R/bin $R/lib; do
+  cp $C/vcruntime140.dll $C/vcruntime140_1.dll $C/msvcp140.dll \
+    "$U/ucrtbase.dll" $d/
+done
+wineserver -p; wine wineboot
+export WINEDLLOVERRIDES=vcruntime140,vcruntime140_1,msvcp140,ucrtbase=n
+wine $R/bin/hermes.exe test.js </dev/null
+WINEPATH="Z:$(realpath $R/lib | tr / '\\')" \
+  wine $R/bin/hermes-jsi-shared.exe test.js </dev/null
 ```
+
+Debug builds need Microsoft's debug runtime instead: `vcruntime140d.dll`,
+`vcruntime140_1d.dll` and `msvcp140d.dll` from
+`VC/Redist/MSVC/14.44.35112/debug_nonredist/x64/Microsoft.VC143.DebugCRT/`
+and `ucrtbased.dll` from `Windows Kits/10/bin/10.0.26100.0/x64/ucrt/`.
+Wine has no builtins for these, so they need no override, and a process
+that has only the debug runtime must run without `ucrtbase=n`, which would
+also apply to Wine's own DLLs. A Debug `hermes.exe` stops at its first
+runtime under Wine with `Assertion failed: info.State == MEM_RESERVE &&
+"Reserved memory not found"` (`lib/Support/OSCompatWindows.cpp`): Wine
+commits a thread's whole stack, where Windows leaves its lowest part
+reserved. To run Hermes's Debug code under Wine, build Debug with the
+assertions off, which keeps the debug runtime and `_ITERATOR_DEBUG_LEVEL`
+2: add `-DCMAKE_C_FLAGS_DEBUG="/Ob0 /Od /RTC1 /DNDEBUG"`,
+`-DCMAKE_CXX_FLAGS_DEBUG="/Ob0 /Od /RTC1 /DNDEBUG"` and
+`-DHERMES_SLOW_DEBUG=OFF`. A Debug plugin built normally loads into it.
 
 `hermes.exe` finds `bin/hermesintl.dll` next to it; `hermes-jsi-shared.exe`
 finds the copy next to `lib/hermesvm.dll`, which `WINEPATH` makes
-loadable. A fatal error exits with status 29 under Wine. The defaults come
+loadable. A fatal error exits with status 3 with Microsoft's
+`ucrtbase.dll` (as on Windows) and 29 with Wine's. The defaults come
 from the locale and zone Wine derives from the Unix `LC_ALL` (or `LANG`)
 and `TZ`, which may not be the zone you expect: Wine picks the first
 Windows zone whose rules match, so `TZ=UTC` becomes `Greenwich Standard
@@ -315,8 +389,10 @@ Plugin-mode test262 runs under Wine through `utils/testsuite/wine-hermes`.
 Linked as `hermes` into a directory given to `test_runner.py -b`, it runs
 `$WINE_HERMES_DIR/hermes.exe` with Wine, with absolute Unix paths in its
 arguments (`-Xintl-plugin-path=` included) turned into `Z:` paths, stdin
-from `/dev/null`, and `WINEDLLOVERRIDES=msvcp140=n`; it refuses to run
-without `msvcp140.dll` next to `hermes.exe`. From the checkout's root:
+from `/dev/null`, and `WINEDLLOVERRIDES=msvcp140=n`, to which it adds
+`vcruntime140`, `vcruntime140_1` and `ucrtbase` when those DLLs are next
+to `hermes.exe`; it refuses to run without `msvcp140.dll` there. From the
+checkout's root:
 
 ```bash
 mkdir -p /tmp/wine-bin
@@ -340,7 +416,7 @@ WINE_HERMES_DIR=$PWD/build-win/bin python3 utils/test_runner.py \
 ```
 
 These are the directories `check-intl-test262` runs. With Microsoft's
-`msvcp140.dll` the results match the host's.
+runtime the results match the host's, for both toolchains' builds.
 
 ## How Hermes finds the plugin
 
