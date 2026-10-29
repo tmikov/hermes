@@ -193,10 +193,17 @@ function check_rust_for_platform {
 function build_host_hermesc {
   echo "Building hermesc"
   pushd "$HERMES_PATH" > /dev/null || exit 1
+  # hermesc runs on this Mac, but clang takes its default target from these
+  # variables when no -m*-version-min flag is given (XROS_DEPLOYMENT_TARGET=1.0
+  # makes it build for visionOS), so they are unset for the host build.
+  (
+    unset IPHONEOS_DEPLOYMENT_TARGET TVOS_DEPLOYMENT_TARGET \
+      WATCHOS_DEPLOYMENT_TARGET XROS_DEPLOYMENT_TARGET
     # Host hermesc only; no Intl plugin (it needs Rust).
     cmake -S . -B build_host_hermesc -DJSI_DIR="$JSI_PATH" -DCMAKE_BUILD_TYPE=Release \
       -DHERMES_BUILD_INTL=OFF
     cmake --build ./build_host_hermesc --target hermesc -j "${NUM_CORES}"
+  )
   popd > /dev/null || exit 1
 }
 
