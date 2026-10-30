@@ -264,6 +264,15 @@ mod tests {
         // The primary id, not CLDR's first alias Asia/Calcutta.
         assert_eq!(f("IN"), ["Asia/Kolkata"]);
         assert_eq!(f("PS"), ["Asia/Gaza", "Asia/Hebron"]);
+        // CLDR 49's POSIX-style zones (pst8pdt, est5edt, mst7mdt, cst6cdt)
+        // have no region (decision 4 (e)): not PS, ES, MS or CS from the
+        // first letters of their names.
+        assert_eq!(
+            f("ES"),
+            ["Africa/Ceuta", "Atlantic/Canary", "Europe/Madrid"]
+        );
+        assert_eq!(f("MS"), ["America/Montserrat"]);
+        assert!(f("CS").is_empty());
         let us = f("US");
         for z in [
             "America/New_York",

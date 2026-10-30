@@ -27,8 +27,8 @@
 //!   patterns for nu (arab);
 //! - the grouping and the compact patterns of such a nu are the locale's
 //!   latn ones (root aliases decimalFormats to latn, which the generator
-//!   checks; locales' own decimalFormats for such numbering systems, only
-//!   az's in CLDR 48.2, are not read);
+//!   checks; locales' own decimalFormats for such numbering systems, of
+//!   which CLDR 49 has none, are not read);
 //! - the short currency patterns of compact notation are
 //!   compact-currency.txt's, which the generator resolves the same way,
 //!   pattern by pattern, for every numbering system
@@ -638,7 +638,7 @@ fn is_alpha_next_to_number(c: char) -> bool {
     !GeneralCategoryGroup::Symbol.contains(gc) && !GeneralCategoryGroup::Separator.contains(gc)
 }
 
-/// `pattern` with CLDR's currency spacing, the one rule every CLDR 48.2
+/// `pattern` with CLDR's currency spacing, the one rule every CLDR 49
 /// locale has (update-cldr-lists.py checks it): U+00A0 between the number
 /// and a currency string that touches it with a character that is neither a
 /// symbol nor a separator. `starts` and `ends` say that of the currency
@@ -1039,19 +1039,24 @@ fn replace_currency_span(pattern: &str, with: &str) -> Option<String> {
 /// patterns in the draft's form, with `{number}` for the compact pattern (all
 /// empty for an exponent of 0).
 ///
-/// Each pattern is the one UTS 35's Compact Number Formats choose: the
-/// alphaNextToNumber alternate where the currency string touches the digits
-/// with a character that is neither a symbol nor a separator, and CLDR's
-/// currency spacing after that. The exponent is the magnitude less the
+/// Each pattern is the one UTS 35's Compact Number Formats choose
+/// (choose_short_pattern): the alphaNextToNumber alternate where the
+/// currency string touches the digits with a character that is neither a
+/// symbol nor a separator, and CLDR's currency spacing after that. The
+/// choice comes first: compaction and the exponent follow from the chosen
+/// pattern, so a pattern "0" whose alternate is chosen (zh's 10^3 with
+/// "USD") is compact. This departs from the literal order of UTS 35's
+/// steps, where step 3 (a pattern "0" is not compact) comes before step 4
+/// (the alternate). The exponent is the magnitude less the chosen
 /// pattern's digits, plus one. The pattern's text around the currency and
 /// the number stays in the sign patterns, so the signs go outside it and
 /// outside the compact text (sw's "¤ elfu -0" is not used), where CLDR's
 /// minus sign goes. CLDR has no short accounting patterns: the accounting
 /// negative pattern is the ordinary one with its currency, spacing and number
 /// replaced by the short pattern's ("($1.2K)"), unless it shows a minus sign.
-/// A count whose pattern is "0" where the others are compact (vec's 10^3
-/// "one") has the compact pattern `{0}` and empty sign patterns: JS then
-/// formats the number unscaled, without compaction (UTS 35).
+/// A count whose chosen pattern is "0" where the others are compact (vec's
+/// 10^3 "one") has the compact pattern `{0}` and empty sign patterns: JS
+/// then formats the number unscaled, without compaction (UTS 35).
 ///
 /// None for any other display or currency, or if `locale` does not parse.
 pub fn compact_currency_patterns(
@@ -1103,7 +1108,8 @@ pub fn compact_currency_patterns(
             } else {
                 other
             };
-            if pattern.plain.text == "0" {
+            let (chosen, alpha) = choose_short_pattern(pattern, starts, ends);
+            if chosen.text == "0" {
                 // No compact form for this count: JS formats the number
                 // unscaled with the ordinary patterns, so the sign patterns
                 // are not used.
@@ -1115,12 +1121,6 @@ pub fn compact_currency_patterns(
                 ]);
                 continue;
             }
-            let plain = ShortSplit::new(pattern.plain.text, false);
-            let alpha = if plain.prefix { ends } else { starts };
-            let chosen = match pattern.alt {
-                Some(alt) if alpha && plain.adjacent => alt,
-                _ => pattern.plain,
-            };
             let split = ShortSplit::new(chosen.text, alpha);
             let e = power + 1 - chosen.zeros;
             assert!(
@@ -1148,6 +1148,40 @@ pub fn compact_currency_patterns(
         }
     }
     Some(out)
+}
+
+/// The pattern UTS 35's Compact Number Formats choose of `pattern`, for a
+/// currency string whose first and last characters are (`starts`, `ends`)
+/// letters as is_alpha_next_to_number says: the alphaNextToNumber
+/// alternate where the currency touches the digits and its character next
+/// to them is one, else the pattern; and whether that character is one
+/// (CLDR's currency spacing). The side of the number the currency is on,
+/// and whether it touches the digits, come from the pattern. Where the
+/// pattern is "0" and has no currency (zh's 10^3 in CLDR 49, whose
+/// alternate is "¤ 0K"), only the side comes from the alternate, which is
+/// chosen when the character on that side is a letter; adjacency is not
+/// tested. The caller decides compaction from the chosen pattern: none
+/// where it is "0".
+fn choose_short_pattern(
+    pattern: cldr::ShortCurrencyPattern,
+    starts: bool,
+    ends: bool,
+) -> (cldr::ShortPattern, bool) {
+    let side = |p: &cldr::ShortPattern| {
+        let split = ShortSplit::new(p.text, false);
+        (if split.prefix { ends } else { starts }, split.adjacent)
+    };
+    if pattern.plain.text != "0" {
+        let (alpha, adjacent) = side(&pattern.plain);
+        return match pattern.alt {
+            Some(alt) if alpha && adjacent => (alt, true),
+            _ => (pattern.plain, alpha),
+        };
+    }
+    match pattern.alt {
+        Some(alt) if side(&alt).0 => (alt, true),
+        _ => (pattern.plain, false),
+    }
 }
 
 /// A currency pattern in the draft's form: the zero pattern, and the
@@ -1671,7 +1705,7 @@ mod tests {
     /// ones, with the numbering system's signs (ICU4C 78.2).
     /// Compact currency patterns: CLDR's short currency formats split into
     /// the sign patterns, with the currency and its spacing, and the
-    /// compact pattern; the expected strings are CLDR 48.2's patterns.
+    /// compact pattern; the expected strings are CLDR 49's patterns.
     #[test]
     fn compact_currency_patterns_of_locales() {
         let cc = |l, nu, c, d, a| list(compact_currency_patterns(l, nu, c, d, a));
@@ -1737,6 +1771,40 @@ mod tests {
         let vec = cc("vec", "latn", "EUR", "symbol", false);
         assert_eq!(vec[1..3], ["3", "3"]);
         assert_eq!(vec[3 + 4..3 + 8], ["{0}", "", "", ""]);
+        // zh's 10^3 is "0" with the alternate "¤\u{a0}0K" (CLDR 49), chosen
+        // first (Review Focus 2): "US$" touches the number with "$", not a
+        // letter, so the "0" is chosen and 1234 is not compacted; "USD"
+        // ends in a letter, so the alternate is, and 1234 compacts with
+        // exponent 3. 10^4's "¤0万" compacts for both, with the alternate's
+        // space for "USD".
+        for nu in ["latn", "hanidec"] {
+            let zh = cc("zh", nu, "USD", "symbol", false);
+            assert_eq!(zh[1..3], ["3", "0"]);
+            assert!(zh[3..27].iter().all(String::is_empty));
+            let (e, p) = other(&zh, "4");
+            assert_eq!(e, "4");
+            assert_eq!(p[..2], ["{0}万", "{currencyPrefix}{number}"]);
+            let zh = cc("zh", nu, "USD", "code", false);
+            let (e, p) = other(&zh, "3");
+            assert_eq!(e, "3");
+            assert_eq!(
+                p,
+                [
+                    "{0}K",
+                    "{currencyPrefix}\u{a0}{number}",
+                    "{plusSign}{currencyPrefix}\u{a0}{number}",
+                    "{minusSign}{currencyPrefix}\u{a0}{number}",
+                ]
+            );
+            let (_, p) = other(&zh, "4");
+            assert_eq!(p[..2], ["{0}万", "{currencyPrefix}\u{a0}{number}"]);
+        }
+        // The narrow symbol "$" and zh-Hant's 10^3 "0" without an
+        // alternate are not compacted.
+        let zh = cc("zh", "latn", "USD", "narrowSymbol", false);
+        assert_eq!(zh[1..3], ["3", "0"]);
+        let zh = cc("zh-Hant", "latn", "USD", "code", false);
+        assert_eq!(zh[1..3], ["3", "0"]);
         // kok-u-nu-thai's 10^14 alternate "¤000LCr" has three digits.
         let (e, p) = other(&cc("kok", "thai", "USD", "code", false), "14");
         assert_eq!(e, "12");
@@ -1955,7 +2023,7 @@ mod tests {
 
     #[test]
     fn explicit_percent_negative_with_marked_signs() {
-        // No CLDR 48.2 locale has both; the sign's marks must still go
+        // No CLDR 49 locale has both; the sign's marks must still go
         // around the explicit pattern's sign, and the plus sign must take
         // its place.
         let minus = Sign::new("\u{200e}-", "");
@@ -2141,7 +2209,7 @@ mod tests {
 
         let fr = cp("fr", true);
         assert_eq!(fr[1], "3");
-        // CLDR 48.2 fr long: 1000-count-1 "mille", 1000-count-one
+        // CLDR 49 fr long: 1000-count-1 "mille", 1000-count-one
         // "0 millier", 1000-count-other "0 mille". fr has no zero, two or
         // few, which get other's, and CLDR has no many, which inherits
         // other's.

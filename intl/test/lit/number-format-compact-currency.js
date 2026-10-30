@@ -42,9 +42,13 @@ function show(nf, x) {
 }
 
 // fa's short pattern has a space after the currency that its ordinary
-// arabext pattern lacks ("\u200e¤#,##0.00").
+// arabext pattern lacks ("\u200e¤#,##0.00"). CLDR 49's fa.xml gives the
+// 10^3 count "one" (1000) the pattern "0K¤" of its own (CLDR 48.0, and so
+// Node, "\u200e¤\u00a00\u00a0هزار", as for "other").
 show(nf('fa', 'USD'), 1000);
-// CHECK: \u200e$\u00a0۱\u00a0هزار literal:\u200e|currency:$|literal:\u00a0|integer:۱|literal:\u00a0|compact:هزار ok
+// CHECK: ۱K$ integer:۱|compact:K|currency:$ ok
+show(nf('fa', 'USD'), 2000);
+// CHECK-NEXT: \u200e$\u00a0۲\u00a0هزار literal:\u200e|currency:$|literal:\u00a0|integer:۲|literal:\u00a0|compact:هزار ok
 show(nf('fa', 'USD'), -1234567);
 // CHECK-NEXT: \u200e−\u200e$\u00a0۱٫۲\u00a0میلیون literal:\u200e|minusSign:−|literal:\u200e|currency:$|literal:\u00a0|integer:۱|decimal:٫|fraction:۲|literal:\u00a0|compact:میلیون ok
 print(escape(new Intl.NumberFormat('fa', {style: 'currency', currency: 'USD'}).format(1000)));
@@ -62,6 +66,38 @@ show(nf('en', 'USD', {currencyDisplay: 'narrowSymbol'}), 1234);
 // CHECK-NEXT: $1.2K currency:$|integer:1|decimal:.|fraction:2|compact:K ok
 show(nf('ja', 'USD', {currencyDisplay: 'code'}), 12345);
 // CHECK-NEXT: USD\u00a01.2万 currency:USD|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:万 ok
+// CLDR 49's zh 10^3 is the pattern "0" with the alternate "¤\u00a00K".
+// The choice between them comes first (UTS 35 step 4 before step 3), then
+// compaction follows from the chosen one: "US$" touches the number with
+// "$", not a letter, so the "0" is chosen and 1234 is not compacted;
+// "USD" ends in a letter, so the alternate is chosen and 1234 compacts
+// with its space. 10^4's "¤0万" compacts for both. Node (CLDR 48.0, where
+// both are "0") gives "US$1234" and "USD\u00a01234".
+show(nf('zh', 'USD'), 1234);
+// CHECK-NEXT: US$1234 currency:US$|integer:1234 ok
+show(nf('zh', 'USD'), -1234);
+// CHECK-NEXT: -US$1234 minusSign:-|currency:US$|integer:1234 ok
+show(nf('zh', 'USD'), 12345);
+// CHECK-NEXT: US$1.2万 currency:US$|integer:1|decimal:.|fraction:2|compact:万 ok
+show(nf('zh', 'USD', {currencyDisplay: 'code'}), 1234);
+// CHECK-NEXT: USD\u00a01.2K currency:USD|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:K ok
+show(nf('zh', 'USD', {currencyDisplay: 'code'}), -1234);
+// CHECK-NEXT: -USD\u00a01.2K minusSign:-|currency:USD|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:K ok
+show(nf('zh', 'USD', {currencyDisplay: 'code'}), 12345);
+// CHECK-NEXT: USD\u00a01.2万 currency:USD|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:万 ok
+show(nf('zh', 'USD', {currencyDisplay: 'code', currencySign: 'accounting'}), -1234);
+// CHECK-NEXT: (USD\u00a01.2K) literal:(|currency:USD|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:K|literal:) ok
+show(nf('zh', 'USD', {currencyDisplay: 'narrowSymbol'}), 1234);
+// CHECK-NEXT: $1234 currency:$|integer:1234 ok
+show(nf('zh-u-nu-hanidec', 'USD', {currencyDisplay: 'code'}), 1234);
+// CHECK-NEXT: USD\u00a0一.二K currency:USD|literal:\u00a0|integer:一|decimal:.|fraction:二|compact:K ok
+print(escape(nf('zh', 'USD', {currencyDisplay: 'code'}).formatRange(1000, 5000)));
+// CHECK-NEXT: USD\u00a01-5K
+print(escape(nf('zh', 'USD').formatRange(1000, 5000)));
+// CHECK-NEXT: US$1000-5000
+// zh-Hant's 10^3 "0" has no alternate.
+show(nf('zh-Hant', 'USD', {currencyDisplay: 'code'}), 1234);
+// CHECK-NEXT: USD\u00a01234 currency:USD|literal:\u00a0|integer:1234 ok
 // The name display spells the number out with the decimal compact
 // patterns.
 show(nf('en', 'EUR', {currencyDisplay: 'name'}), 1234);
@@ -120,7 +156,7 @@ show(nf('vec', 'EUR'), 2000);
 // CHECK-NEXT: 2\u00a0mila\u202fEUR integer:2|literal:\u00a0|compact:mila|literal:\u202f|currency:EUR ok
 print(escape(nf('vec', 'EUR').formatRange(1000, 2000)));
 // CHECK-NEXT: 1000\u202fEUR - 2\u00a0mila\u202fEUR
-// The decimal compact patterns have the same "0" (vec only, in CLDR 48.2).
+// The decimal compact patterns have the same "0" (vec only, in CLDR 49).
 var vecCompact = new Intl.NumberFormat('vec', {notation: 'compact'});
 show(vecCompact, 1000);
 // CHECK-NEXT: 1000 integer:1000 ok
@@ -161,8 +197,10 @@ show(nf('en', 'CHF', {currencySign: 'accounting'}), -1234);
 // CHECK-NEXT: (CHF\u00a01.2K) literal:(|currency:CHF|literal:\u00a0|integer:1|decimal:.|fraction:2|compact:K|literal:) ok
 show(nf('fr', 'EUR', {currencySign: 'accounting'}), -1234);
 // CHECK-NEXT: (1,2\u00a0k\u00a0€) literal:(|integer:1|decimal:,|fraction:2|literal:\u00a0|compact:k|literal:\u00a0|currency:€|literal:) ok
+// CLDR 49's fa accounting pattern is "#,##0.00\u00a0¤;(#,##0.00\u00a0¤)",
+// without CLDR 48.0's U+200E before the parenthesis.
 show(nf('fa', 'USD', {currencySign: 'accounting'}), -1234);
-// CHECK-NEXT: \u200e($\u00a0۱٫۲\u00a0هزار) literal:\u200e(|currency:$|literal:\u00a0|integer:۱|decimal:٫|fraction:۲|literal:\u00a0|compact:هزار|literal:) ok
+// CHECK-NEXT: ($\u00a0۱٫۲\u00a0هزار) literal:(|currency:$|literal:\u00a0|integer:۱|decimal:٫|fraction:۲|literal:\u00a0|compact:هزار|literal:) ok
 show(nf('en', 'USD', {currencySign: 'accounting', signDisplay: 'always'}), 1234);
 // CHECK-NEXT: +$1.2K plusSign:+|currency:$|integer:1|decimal:.|fraction:2|compact:K ok
 // de's accounting pattern is its standard one, with a minus sign.
@@ -172,13 +210,14 @@ show(nf('de', 'EUR', {currencySign: 'accounting'}), -1234567);
 // Other numbering systems. Below the first compact magnitude en-u-nu-arab
 // has root's arab currency pattern, as ICU4C gives; its short patterns are
 // en's latn ones, since root has no short ones for arab. ba-u-nu-deva has
-// ba's.
+// ba's, with CLDR 49 ba.xml's latn decimal separator ",", which its deva
+// symbols inherit.
 show(nf('en-u-nu-arab', 'USD'), 999);
 // CHECK-NEXT: ٩٩٩\u00a0$ integer:٩٩٩|literal:\u00a0|currency:$ ok
 show(nf('en-u-nu-arab', 'USD'), -1234567);
 // CHECK-NEXT: \u061c-$١٫٢M literal:\u061c|minusSign:-|currency:$|integer:١|decimal:٫|fraction:٢|compact:M ok
 show(nf('ba-u-nu-deva', 'USD'), 1234);
-// CHECK-NEXT: १.२\u00a0мең\u00a0$ integer:१|decimal:.|fraction:२|literal:\u00a0|compact:мең|literal:\u00a0|currency:$ ok
+// CHECK-NEXT: १,२\u00a0мең\u00a0$ integer:१|decimal:,|fraction:२|literal:\u00a0|compact:мең|literal:\u00a0|currency:$ ok
 // kok's 10^14 alternate: latn's has the pattern's digits. kok.xml gives
 // thai (and deva) the alternate "¤000LCr", whose three digits make the
 // exponent 12; ICU4C, which does not use the alternate, gives

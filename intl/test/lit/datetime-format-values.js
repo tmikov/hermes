@@ -69,9 +69,10 @@ print(
 print(fmt('en', {hour: 'numeric', minute: 'numeric', hourCycle: 'h12'}, Date.UTC(2026, 0, 5, 12, 30)));
 // CHECK-NEXT: 12:30\u202fPM
 
-// Years: 2 BC (the era year), and 2026 and 2005 2-digit.
+// Years: 2 BC (the era year), and 2026 and 2005 2-digit, which take CLDR
+// 49's en "yy", "’yy".
 print(fmt('en', {year: 'numeric', era: 'short'}, -62198755200000), '|', fmt('en', {year: '2-digit'}), '|', fmt('en', {year: '2-digit'}, Date.UTC(2005, 0, 1)));
-// CHECK-NEXT: 2 BC | 26 | 05
+// CHECK-NEXT: 2 BC | ’26 | ’05
 print(parts('en', {year: 'numeric', era: 'long'}, -62198755200000));
 // CHECK-NEXT: year:2|literal: |era:Before Christ
 
@@ -99,15 +100,16 @@ print(fmt('en', {hour: 'numeric', dayPeriod: 'short'}, Date.UTC(2026, 0, 5, 12))
 // CHECK-NEXT: 12 noon | 12:30 in the afternoon
 print(fmt('en', {dayPeriod: 'narrow'}, Date.UTC(2026, 0, 5, 12)), '|', fmt('en', {dayPeriod: 'narrow'}, Date.UTC(2026, 0, 5, 23)));
 // CHECK-NEXT: n | at night
-// CLDR 48.2 has no flexible day period names for lij and scn, so a day
-// period shows the hour's AM/PM name in the same width (the Task 1 ruling;
-// Node gives the same).
+// CLDR 49 has no flexible day period names for scn, so a day period shows
+// the hour's AM/PM name in the same width (the Task 1 ruling; Node gives
+// the same). lij has them since CLDR 49: "da mattin" (morning1,
+// abbreviated) and "de poidisnâ" (afternoon1, wide).
 var morning = Date.UTC(2026, 0, 5, 9, 30);
 var afternoon = Date.UTC(2026, 0, 5, 15, 30);
 print(fmt('lij', {dayPeriod: 'short'}, morning), fmt('lij', {dayPeriod: 'long'}, afternoon), fmt('scn', {dayPeriod: 'short'}, morning), fmt('scn', {dayPeriod: 'narrow'}, afternoon));
-// CHECK-NEXT: AM PM AM PM
+// CHECK-NEXT: da mattin de poidisnâ AM PM
 print(parts('lij', {dayPeriod: 'short'}, morning));
-// CHECK-NEXT: dayPeriod:AM
+// CHECK-NEXT: dayPeriod:da mattin
 
 // Time zone names.
 print(fmt('en', {timeZone: 'America/New_York', timeZoneName: 'short'}, Date.UTC(2026, 6, 1, 12)));
@@ -132,8 +134,8 @@ print(fmt('en', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
 
 // Plan Review Focus 1: each instant and zone in every timeZoneName width,
 // through format and formatToParts, whose values join to format's result;
-// no "Exception in HostFunction:" appears. Node differs in three places,
-// each from ICU4X's names (plan decision 4): the generic names of UTC are
+// no "Exception in HostFunction:" appears. Node differs in four places.
+// Three come from ICU4X's names (plan decision 4): the generic names of UTC are
 // ICU4X's "UTC" and "Coordinated Universal Time" (ICU4C: "GMT+0" and
 // "GMT+00:00"); before 1970 a zone's names use its 1970 metazone, and a
 // local mean time offset matches none of its offsets, so New York's
@@ -141,7 +143,9 @@ print(fmt('en', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
 // format "New York Time"); and the far future's names follow ICU4X's last
 // metazone (plan decision 17), so New York in July 275000 is "EDT",
 // "Eastern Daylight Time", "ET" and "Eastern Time" (ICU4C: "GMT-4",
-// "GMT-04:00" and "New York Time").
+// "GMT-04:00" and "New York Time"). The fourth comes from the data: Dublin's
+// long generic name is "Irish Time" from CLDR 49's new Irish metazone,
+// where Node's CLDR 48 gives the location format "Ireland Time".
 var instants = [
   ['UTC', 8.64e15],
   ['UTC', -8.64e15],
@@ -195,7 +199,7 @@ for (var i = 0; i < instants.length; i++) {
 // CHECK-NEXT: Australia/Lord_Howe Jul 15, 2026, 10:30:00.000\u202fAM | GMT+10:30 | Lord Howe Standard Time | GMT+10:30 | GMT+10:30 | Lord Howe Island Time | Lord Howe Time
 // CHECK-NEXT: America/New_York Jan 1, 1800, 7:03:58.000\u202fAM | GMT-4:56:02 | GMT-04:56:02 | GMT-4:56:02 | GMT-04:56:02 | GMT-4:56:02 | GMT-04:56:02
 // CHECK-NEXT: America/New_York Jul 1, 275000, 8:00:00.000\u202fAM | EDT | Eastern Daylight Time | GMT-4 | GMT-04:00 | ET | Eastern Time
-// CHECK-NEXT: Europe/Dublin Jul 1, 2026, 1:00:00.000\u202fPM | GMT+1 | Irish Standard Time | GMT+1 | GMT+01:00 | Ireland Time | Ireland Time
+// CHECK-NEXT: Europe/Dublin Jul 1, 2026, 1:00:00.000\u202fPM | GMT+1 | Irish Standard Time | GMT+1 | GMT+01:00 | Ireland Time | Irish Time
 
 // TimeClip (PartitionDateTimePattern step 1): NaN and values beyond
 // 8.64e15 are a RangeError; a fraction is truncated toward zero, and -0 is

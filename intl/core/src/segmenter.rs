@@ -9,14 +9,16 @@
 //! all computed at once and kept; FindBoundary is a binary search over
 //! them. Indices are UTF-16 code-unit indices into the original string.
 //!
-//! ICU4X 2.3's word segmentation has bugs, all found against Node (ICU4C),
+//! ICU4X 2.4's word segmentation has bugs, all found against Node (ICU4C),
 //! which this module works around:
-//! - the UTF-16 word path truncates characters above U+FFFF in Chinese and
-//!   Japanese runs (`word.rs:988`, `:991`), so word segmentation runs on a
-//!   UTF-8 copy of the text;
+//! - the UTF-16 word path gives a run of consecutive supplementary Chinese
+//!   or Japanese characters no dictionary breaks ("𠀀𠀁𠀂" is one segment):
+//!   it finds the script runs by code unit, and a surrogate is in none of
+//!   the dictionary scripts (`ComplexScriptIteratorUtf16`,
+//!   `rule_segmenter_v1/script_iter.rs:104` in `icu_segmenter` 2.4). So
+//!   word segmentation runs on a UTF-8 copy of the text;
 //! - it puts boundaries before characters that UAX #29's rule WB4 ignores
-//!   (Word_Break Extend, Format or ZWJ): the Thai dictionary splits the
-//!   tone mark U+0E48 of "ช่" from its base, and a soft hyphen after Thai
+//!   (Word_Break Extend, Format or ZWJ): a soft hyphen after Thai
 //!   ("ก\u{AD}") becomes a segment of its own. Such a boundary is repaired
 //!   by dropping it, unless it follows the start of the text, CR, LF or a
 //!   Word_Break Newline character (WB3a), and the segments on either side
@@ -32,8 +34,7 @@
 //!   ignored characters ("\u{E48}" alone) is reported word-like, so such a
 //!   segment is word-like only if one of them is Ideographic.
 //!
-//! Remove each when an ICU4X upgrade fixes it (2.4 rewrote the UTF-16
-//! path).
+//! Remove each when an ICU4X upgrade fixes it.
 
 use crate::locale::language_id;
 use icu::properties::props::{Ideographic, WordBreak};
@@ -150,7 +151,7 @@ fn trimmed_for_recheck(c: char) -> bool {
     is_ignored(c) || word_break(c) == WordBreak::SingleQuote
 }
 
-/// The word type of a segment that ICU4X 2.3 gets wrong when it is made
+/// The word type of a segment that ICU4X 2.4 gets wrong when it is made
 /// only of ignored characters: word-like only if one of them is
 /// Ideographic (U+16FE4 KHITAN SMALL SCRIPT FILLER, as in ICU4C). None for
 /// any other segment.
@@ -277,6 +278,15 @@ impl Segments {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The time limit for segmenting a long run. Segmenting one normally
+    /// takes about 0.1 s in the dev profile; with ICU4X 2.3's per-break
+    /// copy of the pending breaks restored (in a patched icu_segmenter),
+    /// which makes it quadratic, the Han run took 1.65 s and the Thai run,
+    /// split after every code point, 4.75 s. The limit leaves room for a
+    /// loaded machine below those.
+    const LONG_RUN_LIMIT: Duration = Duration::from_secs(1);
 
     /// The segmenter of `locale` and `granularity`, which must exist.
     fn seg(locale: &str, granularity: &str) -> Segmenter {
@@ -355,18 +365,38 @@ mod tests {
             "我*|爱*|北京*|天安门*"
         );
         assert_eq!(render("th", "word", "ทุกสองสัปดาห์"), "ทุก*|สอง*|สัปดาห์*");
+        // ICU4X 2.4 shrank its Thai, Lao, Khmer and Burmese dictionaries by
+        // 42% together; these sentences still segment as in Node 24.
+        assert_eq!(
+            render("lo", "word", "ພາສາລາວເປັນພາສາທີ່ສວຍງາມ"),
+            "ພາສາ*|ລາວ*|ເປັນ*|ພາສາ*|ທີ່*|ສວຍງາມ*"
+        );
+        assert_eq!(
+            render("km", "word", "ប្រទេសកម្ពុជាមានប្រវត្តិសាស្ត្រយូរលង់"),
+            "ប្រទេស*|កម្ពុជា*|មាន*|ប្រវត្តិសាស្ត្រ*|យូរលង់*"
+        );
+        assert_eq!(
+            render("my", "word", "ကျွန်တော်မြန်မာစကားပြောတတ်တယ်"),
+            "ကျွန်တော်*|မြန်မာ*|စကားပြော*|တတ်*|တယ်*"
+        );
     }
 
-    /// The two ICU4X 2.3 word bugs plan decision 9 works around.
+    /// Supplementary characters in Chinese and Japanese runs, alone and
+    /// consecutive (which ICU4X's UTF-16 word path keeps together), as in
+    /// Node.
     #[test]
-    fn word_workarounds() {
-        // Supplementary characters in Chinese and Japanese runs, which the
-        // UTF-16 path truncates.
+    fn word_supplementary() {
         assert_eq!(render("en", "word", "𠀀𠀁𠀂 𪚥𪚥"), "𠀀*|𠀁*|𠀂*| |𪚥*|𪚥*");
         assert_eq!(
             render("ja", "word", "日本語𠀀テスト"),
             "日本語*|𠀀*|テスト*"
         );
+        assert_eq!(render("zh", "word", "我爱𠀀北京"), "我*|爱*|𠀀*|北京*");
+    }
+
+    /// The word-type re-check of the module comment.
+    #[test]
+    fn word_recheck() {
         // A word that ends in Word_Break Extend, Format or ZWJ, followed by
         // more text.
         for (locale, text, first) in [
@@ -517,8 +547,8 @@ mod tests {
         ("\u{110bd} x", "\u{110bd}*| |x*"),
     ];
 
-    /// The Thai text whose tone mark ICU4X 2.3's dictionary splits from
-    /// its base.
+    /// A Thai text with the tone mark U+0E48 on its base ช in "ช่", which
+    /// must stay on it (ICU4X 2.3's dictionary split it).
     const THAI: &str = "วัดไทรตีระฆังเบาลงช่วงเข้าพรรษา";
 
     /// Check that no word boundary of `text` by `locale` falls before a
@@ -625,8 +655,7 @@ mod tests {
     /// Rule A: boundaries before characters WB4 ignores are repaired.
     #[test]
     fn boundaries_before_ignored() {
-        // ICU4X splits the tone mark U+0E48 from its base ช; the pieces are
-        // merged.
+        // The tone mark U+0E48 stays on its base ช.
         assert_eq!(
             render("th", "word", THAI),
             "วัด*|ไทร*|ตีระ*|ฆั*|งเ*|บาล*|งช่*|วง*|เข้า*|พรรษา*"
@@ -636,7 +665,10 @@ mod tests {
         // U+0E33 is Grapheme_Cluster_Break SpacingMark but Word_Break Other:
         // nothing is merged, as in Node.
         assert_eq!(render("th", "word", " \u{e33}"), " |\u{e33}*");
-        assert_eq!(render("th", "word", "\u{e48}\u{e33}"), "\u{e48}|\u{e33}*");
+        // Node gives "\u{e48}|\u{e33}*". ICU4X 2.4's Thai dictionary, on
+        // Unicode 18's data, keeps a leading tone mark and U+0E33 as one
+        // word, and ECMA-402 leaves segmentation to the implementation.
+        assert_eq!(render("th", "word", "\u{e48}\u{e33}"), "\u{e48}\u{e33}*");
         // Node gives "a.\u{e33}*": ICU4C treats Thai letters as ALetter, so
         // WB6 and WB7 keep the period; ICU4X does not.
         assert_eq!(render("th", "word", "a.\u{e33}"), "a*|.|\u{e33}*");
@@ -705,7 +737,7 @@ mod tests {
         }
     }
 
-    /// Rules B and C: the word types ICU4X 2.3 gets wrong.
+    /// Rules B and C: the word types ICU4X 2.4 gets wrong.
     #[test]
     fn word_types() {
         // B: Hebrew letters keep a trailing apostrophe (WB7a), and the word
@@ -799,6 +831,38 @@ mod tests {
             }
         }
         assert_no_boundary_before_ignored("en", &text);
+    }
+
+    /// Plan Review Focus 5: a long unbroken Han run, which ICU4X 2.3
+    /// segmented in time quadratic in its words, takes well under a second:
+    /// 30,000 copies of 我|爱|北京|天安门, 210,000 code units.
+    #[test]
+    fn long_han_run() {
+        let han = u16s(&"我爱北京天安门".repeat(30_000));
+        let start = Instant::now();
+        let segments = seg("zh", "word").segment(&han);
+        let elapsed = start.elapsed();
+        assert!(elapsed < LONG_RUN_LIMIT, "{elapsed:?}");
+        assert_eq!(segments.boundaries.len(), 120_001);
+        assert_eq!(segments.find_boundary(209_999, false), Some(209_997));
+        assert_eq!(segments.find_boundary(209_999, true), Some(210_000));
+        assert_eq!(segments.is_word_like(209_997), Some(true));
+    }
+
+    /// Plan Review Focus 5: a long Thai run, ก and 199,999 tone marks
+    /// U+0E48 (200,000 code units), is one segment, made in well under a
+    /// second (ICU4X 2.3 took time quadratic in its length).
+    #[test]
+    fn long_thai_run() {
+        let mut thai = u16s("ก");
+        thai.extend(std::iter::repeat_n(0xE48, 199_999));
+        let start = Instant::now();
+        let segments = seg("th", "word").segment(&thai);
+        let elapsed = start.elapsed();
+        assert!(elapsed < LONG_RUN_LIMIT, "{elapsed:?}");
+        assert_eq!(segments.boundaries, [0, 200_000]);
+        assert_eq!(segments.find_boundary(199_999, false), Some(0));
+        assert_eq!(segments.is_word_like(0), Some(true));
     }
 
     #[test]

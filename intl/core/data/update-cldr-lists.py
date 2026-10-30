@@ -16,12 +16,13 @@ explicit-number-systems.txt from common/main/*.xml, for the explicit data of
 numbering systems that cldr-json leaves out; compact-currency.txt from both.
 date-patterns.txt comes from cldr-dates-full and the cldr-cal-*-full
 packages, and for the iso8601 calendar from common/main/*.xml along each
-locale's CLDR chain, root first (zh adds intervals of its own);
+locale's CLDR chain, root first (some locales, such as zh, add values of
+their own);
 day-periods.txt from cldr-core and cldr-dates-full; display-names.txt from
 cldr-localenames-full and cldr-dates-full.
 
 Run it when the ICU4X version (and so its CLDR version) changes, and commit
-the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-48-2.
+the output. Usage: update-cldr-lists.py <cldr-release-tag>, e.g. release-49.
 """
 
 import json
@@ -98,6 +99,19 @@ def write_table(name, tag, comment, table):
             f.write(key + " " + " ".join(table[key]) + "\n")
 
 
+def currency_codes(currency):
+    """The currency codes of bcp47/currency.xml `currency`, uppercased: the
+    types of key cu (key cf, the currency format, has types such as
+    "standard" that are not currencies), less those marked deprecated
+    (CLDR 49's cnx), which CLDR has no display names for. ECMA-402's
+    AvailableCanonicalCurrencies are the codes DisplayNames names."""
+    return [
+        t.get("name").upper()
+        for t in currency.findall(".//key[@name='cu']/type")
+        if t.get("deprecated") != "true"
+    ]
+
+
 def calendar_names(calendar):
     """Map CLDR calendar names to BCP 47 types: an alias becomes its type's
     name ("gregorian" -> "gregory"); a name stays as it is, even when another
@@ -150,12 +164,19 @@ def hour_cycles(supplemental):
     return table
 
 
+# CLDR 49's POSIX-style zones (cst6cdt, est5edt, mst7mdt, pst8pdt): zones
+# of their own with no region attribute, whose names do not start with one.
+POSIX_ZONE = re.compile(r"[a-z]{3}[0-9]{1,2}[a-z]{3}\Z")
+
+
 def time_zones_by_region(timezone):
     """Decision 2 of the Phase 1 plan: a non-deprecated zone belongs to its
-    `region` attribute, or else to the first two letters of its name,
-    uppercased. utc, gmt, unk, utce* and utcw* belong to no region. Each zone
-    is given by the first alias of its type (the host maps it to the primary
-    identifier)."""
+    `region` attribute, or else to the first two letters of its name (five
+    letters, a UN/LOCODE), uppercased. utc, gmt, unk, utce*, utcw* and the
+    POSIX-style zones (POSIX_ZONE) belong to no region; exit on any other
+    zone without a region attribute whose name is not five letters. Each
+    zone is given by the first alias of its type (the host maps it to the
+    primary identifier)."""
     table = {}
     for t in timezone.findall(".//key[@name='tz']/type"):
         name = t.get("name")
@@ -163,10 +184,16 @@ def time_zones_by_region(timezone):
             continue
         if name in ("utc", "gmt", "unk") or name.startswith(("utce", "utcw")):
             continue
+        region = t.get("region")
+        if region is None and POSIX_ZONE.match(name):
+            continue
         aliases = (t.get("alias") or "").split()
         if not aliases:
             sys.exit(f"time zone {name} has no alias")
-        region = t.get("region") or name[:2].upper()
+        if region is None:
+            if not re.fullmatch(r"[a-z]{5}", name):
+                sys.exit(f"time zone {name}: no region, and not a five-letter name")
+            region = name[:2].upper()
         if len(region) != 2 or not (region.isascii() and region.isalpha()):
             sys.exit(f"time zone {name}: bad region {region!r}")
         table.setdefault(region.upper(), []).append(aliases[0])
@@ -546,7 +573,7 @@ def units_lines(tree, tags, sanctioned):
 
 # The currency spacing that intl/core/src/number.rs implements: U+00A0
 # between a digit and a currency string whose character next to it is
-# neither a symbol (S) nor a separator (Z). CLDR 48.2's root has it, and no
+# neither a symbol (S) nor a separator (Z). CLDR 49's root has it, and no
 # locale overrides it; check_currency_spacing checks that it stays so.
 CURRENCY_SPACING_SIDE = {
     "currencyMatch": "[[:^S:]&[:^Z:]]",
@@ -1160,14 +1187,19 @@ def compact_currency_lines(tree, tags, load_xml):
     zeros long at 10^n and one longer at each next magnitude (0 for the
     pattern "0", the same at each), with the pattern and alphaNextToNumber
     alternate (left out where it is the pattern) of each count that
-    differs; delta (+2) is how much longer the alternate's digit run is,
-    when it is not the pattern's. Every count of a magnitude has the same
-    digits.
+    differs; delta (+2) is how much longer the alternate's digit run is
+    than zeros, when it is not as long. Every count of a magnitude has the
+    same digits, and so has every alternate (in place of its count's
+    pattern where it has none). A pattern "0" may have an alternate that is
+    not "0" (zh's 10^3 "0" and "¤ 0K" in CLDR 49): the magnitude is then
+    compact only where the alternate is chosen, and on a line whose
+    patterns are all "0" (zeros 0) the alternate's delta is its whole digit
+    run.
 
     A locale's own numbering systems (those cldr-json has currency formats
     for) have cldr-json's resolved data. Another numbering system whose
     patterns some locale of the XML chain (`load_xml` returns common/main
-    files by name) has explicitly (ba's and kok's in CLDR 48.2) has, pattern
+    files by name) has explicitly (kok's in CLDR 49) has, pattern
     by pattern, the nearest explicit one, else the locale's latn one, which
     root's aliases point to; an alternate is the explicit one, else latn's,
     else the pattern. Any other numbering system has the locale's latn
@@ -1238,23 +1270,29 @@ def compact_currency_lines(tree, tags, load_xml):
                 what = f"{tag} short currency {nu} 10^{power} {count}"
                 p = short_currency_shape(plain, what)
                 a = short_currency_shape(alt, what) if alt else None
-                if a is not None and (a[1] == 0) != (p[1] == 0):
-                    sys.exit(f"{what}: only one of the pattern and alternate is 0")
+                # A compact pattern's alternate is compact too; a pattern "0"
+                # may have a compact alternate (zh's 10^3 in CLDR 49).
+                if a is not None and a[1] == 0 and p[1] != 0:
+                    sys.exit(f"{what}: the alternate is 0 and the pattern is not")
                 # An alternate's digit run may differ from the pattern's (kok
                 # deva's 10^14 "¤0हज'.'निख'.'" and "¤000LCr").
-                delta = a[1] - p[1] if a else 0
                 shaped.setdefault(nu, {})[(power, count)] = (
                     p[1],
                     p[0],
                     a[0] if a else "",
-                    delta,
+                    a[1] if a else p[1],
                 )
         # A count's pattern may be "0" where the others are not (vec's 10^3
-        # "one"); the others must have the same digits.
+        # "one"); the others must have the same digits, and so must the
+        # alternates, a count without one counting with its pattern's
+        # (number.rs chooses the alternate or the pattern for every count
+        # alike and gives a magnitude one exponent).
         for nu, t in shaped.items():
             for power in {k[0] for k in t}:
-                at = [v for k, v in t.items() if k[0] == power and v[1] != "0"]
-                if len({v[0] for v in at}) > 1 or len({v[3] for v in at}) > 1:
+                at = [v for k, v in t.items() if k[0] == power]
+                plains = {v[0] for v in at if v[1] != "0"}
+                alts = {v[3] for v in at if v[1] != "0" or v[2]}
+                if len(plains) > 1 or len(alts) > 1:
                     sys.exit(
                         f"{tag} short currency {nu} 10^{power}: "
                         "the counts' digits differ"
@@ -1330,10 +1368,15 @@ def compact_currency_lines(tree, tags, load_xml):
             for power in sorted(by_power):
                 counts = by_power[power]
                 zeros = max(v[0] for v in counts.values())
+
+                def alternate(v):
+                    if not v[2]:
+                        return ""
+                    delta = v[3] - zeros
+                    return f",{index[v[2]]}" + (f"{delta:+d}" if delta else "")
+
                 items = " ".join(
-                    f"{c}={index[counts[c][1]]}"
-                    + (f",{index[counts[c][2]]}" if counts[c][2] else "")
-                    + (f"{counts[c][3]:+d}" if counts[c][3] else "")
+                    f"{c}={index[counts[c][1]]}" + alternate(counts[c])
                     for c in PLURAL_KEYS
                     if c in counts
                 )
@@ -1368,7 +1411,8 @@ def compact_currency_lines(tree, tags, load_xml):
 # gregorian, comes second so that later calendars can be written as equal to
 # it; no locale formats with it. iso8601 has no cldr-json data: it comes from
 # common/main/*.xml along each locale's CLDR chain, root.xml first, with the
-# values of the locales of the chain over it (zh's intervals in CLDR 48.2).
+# values of the locales of the chain over it (zh's intervals, and cv's and
+# kok-Latn's formats, among others, in CLDR 49).
 DATE_CALENDARS = [
     ("gregory", "cldr-dates-full", "gregorian"),
     ("generic", "cldr-dates-full", "generic"),
@@ -1395,27 +1439,80 @@ LEAP_MONTH_CALENDARS = ("chinese", "dangi")
 DATE_WIDTHS = ["full", "long", "medium", "short"]
 # The pattern letters of decision 6's table, which a kept pattern may have.
 DATE_PATTERN_LETTERS = set("GyUrMLdEcabBhHKkmsSzOv")
+# The letter counts of decision 6's table (cldrFieldOf in
+# intl/js/51-datetime-patterns.js), by letter; None for any count.
+DATE_PATTERN_COUNTS = {
+    **{c: range(1, 6) for c in "GMLabB"},
+    **{c: None for c in "yUrS"},
+    **{c: range(1, 3) for c in "dhHKkms"},
+    "E": range(1, 7),
+    "c": range(3, 7),
+    "z": range(1, 5),
+    "O": (1, 4),
+    "v": (1, 4),
+}
 # The letters of fields ECMA-402 does not have: an availableFormats or
 # intervalFormats entry whose skeleton has one is left out.
 DATE_DROPPED_LETTERS = set("QwWDFgeuYxXZV")
+# The time zone letters of DATE_DROPPED_LETTERS (forms ECMA-402 does not
+# have), which make keep_pattern leave out an availableFormats or
+# intervalFormats entry for a time zone skeleton.
+DATE_DROPPED_ZONE_LETTERS = set("ZXxV")
+# UTS 35's date field letters, the only letters a skeleton may have.
+DATE_FIELD_LETTERS = set("GyYuUrQqMLlwWdDFgEecabBhHKkjJCmsSAzZOvVXx")
+# The keys of a dateTimeFormats object of cldr-json: the
+# dateTimeFormatLengths (full to short) and the three kinds of formats the
+# file has; and the elements of dateTimeFormats and of intervalFormats in
+# the XML (an alias is checked on its own).
+DATE_TIME_FORMATS_KEYS = set(DATE_WIDTHS) | {
+    "availableFormats",
+    "appendItems",
+    "intervalFormats",
+}
+DATE_TIME_FORMATS_ELEMENTS = (
+    "alias",
+    "dateTimeFormatLength",
+    "availableFormats",
+    "appendItems",
+    "intervalFormats",
+)
+INTERVAL_FORMATS_ELEMENTS = ("alias", "intervalFormatFallback", "intervalFormatItem")
+# CLDR 49's elements that ECMA-402 does not use, which the readers skip by
+# name, each only under its own parent: numericSeparators in
+# dateTimeFormats (the separators of numeric dates and times) and
+# intervalFormatRanges in intervalFormats (the range patterns between two
+# formatted dates). Any other element they do not know, and either one
+# elsewhere, is an error.
+DATE_SKIPPED = {
+    "dateTimeFormats": "numericSeparators",
+    "intervalFormats": "intervalFormatRanges",
+}
 # The keys every calendar of und has (and lp for LEAP_MONTH_CALENDARS).
 DATE_REQUIRED_KEYS = [
     f"{p}{i}" for p in "dtc" for i in range(len(DATE_WIDTHS))
 ] + ["fb", "tz"]
 # The atTime dateTimeFormat of root.xml's iso8601 that is its standard one.
 AT_TIME_ALIAS = "../dateTimeFormat[@type='standard']"
+# The appendItems of root.xml's iso8601 that are gregorian's (CLDR 49).
+APPEND_ITEMS_ALIAS = "../../../calendar[@type='gregorian']/dateTimeFormats/appendItems"
 # xml_iso8601_entries's value of an atTime format that is AT_TIME_ALIAS: the
 # requesting locale's resolved standard format of the same width, as CLDR
 # resolves an alias (iso8601_of replaces it).
 AT_TIME_IS_STANDARD = ("standard",)
+# xml_iso8601_entries's tz value where the appendItems are
+# APPEND_ITEMS_ALIAS: the requesting locale's resolved gregorian tz
+# (date_patterns_lines replaces it).
+TZ_IS_GREGORIAN = ("gregorian",)
 
 
 def normalize_date_pattern(pattern, what):
-    """`pattern`, a CLDR date pattern, with the two misspellings CLDR 48.2
+    """`pattern`, a CLDR date pattern, with the two misspellings CLDR 49
     has for letters of decision 6's table rewritten outside quotes: Y (the
-    week-based year) as y, and e (the local day of the week; ko's "e요일"
-    means "E요일") as E, with the same letter count. Exit if any other letter
-    outside quotes is not in the table."""
+    week-based year; ksh's japanese yM "Y-MM") as y, and e (the local day
+    of the week; kek's GyMEd interval "e, dd-MM-y - E, dd-MM-y G") as E,
+    with the same letter count. Exit if any other letter outside quotes is
+    not in the table, or its count is not (DATE_PATTERN_COUNTS: CLDR 49's
+    ordinal day "ddd" is not)."""
     out = []
     quoted = False
     i = 0
@@ -1437,6 +1534,9 @@ def normalize_date_pattern(pattern, what):
             c = "E"
         if c not in DATE_PATTERN_LETTERS:
             sys.exit(f"{what}: pattern letter {pattern[i:j]!r} in {pattern!r}")
+        counts = DATE_PATTERN_COUNTS[c]
+        if counts is not None and n not in counts:
+            sys.exit(f"{what}: pattern field {pattern[i:j]!r} in {pattern!r}")
         out.append(c * n)
         i = j
     if quoted:
@@ -1446,16 +1546,34 @@ def normalize_date_pattern(pattern, what):
 
 def keep_skeleton(skeleton, what):
     """Whether an availableFormats or intervalFormats entry with `skeleton`
-    is kept: not if it has a letter of DATE_DROPPED_LETTERS. Exit on any
-    other letter outside decision 6's table."""
+    is kept: not if it has a letter of DATE_DROPPED_LETTERS, or the ordinal
+    day "ddd" (a technical preview of CLDR 49, which ECMA-402 does not
+    have: its day is d or dd). Exit on a letter that is not a date field
+    letter (a key that is not a skeleton), and on any other letter outside
+    decision 6's table."""
     if not re.fullmatch(r"[A-Za-z]+", skeleton):
         sys.exit(f"{what}: bad skeleton {skeleton!r}")
     letters = set(skeleton)
-    if letters & DATE_DROPPED_LETTERS:
+    if letters - DATE_FIELD_LETTERS:
+        sys.exit(f"{what}: not a skeleton: {skeleton!r}")
+    if letters & DATE_DROPPED_LETTERS or "ddd" in skeleton:
         return False
     if letters - DATE_PATTERN_LETTERS:
         sys.exit(f"{what}: unknown letters in skeleton {skeleton!r}")
     return True
+
+
+def keep_pattern(key, pattern):
+    """Whether the entry `key` with the CLDR date pattern `pattern` is
+    kept: not if it is an availableFormats or intervalFormats entry (f. or
+    i.) whose skeleton has a time zone (z or v) and whose pattern writes it,
+    outside quotes, with a letter of DATE_DROPPED_ZONE_LETTERS, as for a
+    skeleton with one (CLDR 49's fa generic "HHmmv" is "HH:mm (Z)", the RFC
+    822 offset). Any other letter outside decision 6's table stays an
+    error (normalize_date_pattern)."""
+    if not key.startswith(("f.", "i.")) or not set(key.split(".")[1]) & set("zv"):
+        return True
+    return not set(re.sub(r"'[^']*'", "", pattern)) & DATE_DROPPED_ZONE_LETTERS
 
 
 # The placeholders of the values of date-patterns.txt that have some, by the
@@ -1506,14 +1624,21 @@ def json_calendar_entries(cal, j, what):
     lp (chinese and dangi), tz, then the availableFormats (f.<skeleton>) and
     intervalFormats (i.<skeleton>.<letter>) entries in CLDR's order.
     Alternates (-alt-) and count variants (-count-) are left out, and so are
-    the entries whose skeleton keep_skeleton rejects."""
+    the entries whose skeleton keep_skeleton rejects or whose pattern
+    keep_pattern rejects, and the keys DATE_SKIPPED skips; exit on a
+    dateTimeFormats key that is not in DATE_TIME_FORMATS_KEYS."""
     out = {}
 
     def put(key, value):
-        out[key] = date_value(json_date_pattern(value, f"{what} {key}"), key, what)
+        value = json_date_pattern(value, f"{what} {key}")
+        if keep_pattern(key, check_value(value, f"{what} {key}")):
+            out[key] = date_value(value, key, what)
 
     try:
         dt = j["dateTimeFormats"]
+        unknown = set(dt) - DATE_TIME_FORMATS_KEYS - {DATE_SKIPPED["dateTimeFormats"]}
+        if unknown:
+            sys.exit(f"{what}: unknown dateTimeFormats keys {sorted(unknown)}")
         at = j.get("dateTimeFormats-atTime", {}).get("standard", {})
         for prefix, section in (
             ("d", j["dateFormats"]),
@@ -1535,7 +1660,9 @@ def json_calendar_entries(cal, j, what):
             if keep_skeleton(skeleton, what):
                 put(f"f.{skeleton}", value)
         for skeleton, items in dt["intervalFormats"].items():
-            if skeleton == "intervalFormatFallback" or "-alt-" in skeleton:
+            if skeleton in ("intervalFormatFallback", DATE_SKIPPED["intervalFormats"]):
+                continue
+            if "-alt-" in skeleton:
                 continue
             if not keep_skeleton(skeleton, what):
                 continue
@@ -1555,12 +1682,16 @@ def xml_iso8601_entries(root, locale_id):
     the CLDR locale `locale_id` has for the iso8601 calendar, as
     json_calendar_entries gives them, in its order: root.xml's must have
     every pattern of each kind it lists; another locale's are the values it
-    has explicitly ({} for none; zh's intervals in CLDR 48.2), which go over
+    has explicitly ({} for none; zh's intervals in CLDR 49), which go over
     its parent's. A value xml_value drops (an inheritance marker, a draft
-    neither cldr-json nor ICU includes) is not there. An atTime
-    dateTimeFormat that aliases the standard one is AT_TIME_IS_STANDARD;
-    exit on any other alias in dateFormats, timeFormats and dateTimeFormats, and
-    if root.xml has no iso8601 calendar."""
+    neither cldr-json nor ICU includes) or keep_pattern drops is not there.
+    An atTime dateTimeFormat that aliases the standard one is
+    AT_TIME_IS_STANDARD, and the tz of appendItems that alias gregorian's
+    (APPEND_ITEMS_ALIAS) is TZ_IS_GREGORIAN. The elements DATE_SKIPPED
+    names are skipped under their parents. Exit on any other alias in
+    dateFormats, timeFormats and dateTimeFormats, on an element of
+    dateTimeFormats or intervalFormats it does not know, and if root.xml
+    has no iso8601 calendar."""
     is_root = locale_id == "und"
     what = f"date patterns {locale_id} iso8601"
     cals = [
@@ -1573,19 +1704,39 @@ def xml_iso8601_entries(root, locale_id):
     if not cals:
         return {}
     cal = cals[0]
+    for el in cal.iterfind("dateTimeFormats"):
+        for parent, children, known in (
+            ("dateTimeFormats", list(el), DATE_TIME_FORMATS_ELEMENTS),
+            (
+                "intervalFormats",
+                el.findall("intervalFormats/*"),
+                INTERVAL_FORMATS_ELEMENTS,
+            ),
+        ):
+            for child in children:
+                if child.tag not in known + (DATE_SKIPPED[parent],):
+                    sys.exit(f"{what}: unknown element {child.tag} in {parent}")
+
+    def check_aliases(parent, section):
+        for child in parent:
+            if DATE_SKIPPED.get(parent.tag) == child.tag:
+                continue
+            check_aliases(child, section)
+            if child.tag != "alias":
+                continue
+            if (
+                parent.tag == "dateTimeFormat"
+                and parent.get("type") == "atTime"
+                and child.get("path") == AT_TIME_ALIAS
+            ):
+                continue
+            if parent.tag == "appendItems" and child.get("path") == APPEND_ITEMS_ALIAS:
+                continue
+            sys.exit(f"{what}: unhandled alias {child.attrib} in {section}")
+
     for section in ("dateFormats", "timeFormats", "dateTimeFormats"):
-        for el in cal.iterfind(f"{section}"):
-            for parent in el.iter():
-                for child in parent:
-                    if child.tag != "alias":
-                        continue
-                    if (
-                        parent.tag == "dateTimeFormat"
-                        and parent.get("type") == "atTime"
-                        and child.get("path") == AT_TIME_ALIAS
-                    ):
-                        continue
-                    sys.exit(f"{what}: unhandled alias {child.attrib} in {section}")
+        for el in cal.iterfind(section):
+            check_aliases(el, section)
 
     def plain(el, tag):
         """The first child `tag` of `el` with no alt and no count, or None."""
@@ -1603,9 +1754,10 @@ def xml_iso8601_entries(root, locale_id):
     out = {}
 
     def put(key, el):
-        """Add the value of `el` under `key`; root's must be there."""
+        """Add the value of `el` under `key` unless keep_pattern drops it;
+        root's must be there."""
         value = xml_value(el, f"{what} {key}")
-        if value or is_root:
+        if (value or is_root) and keep_pattern(key, value):
             out[key] = date_value(value, key, what)
 
     for prefix, section, length, fmt in (
@@ -1648,7 +1800,9 @@ def xml_iso8601_entries(root, locale_id):
         for e in dt.findall("appendItems/appendItem")
         if e.get("request") == "Timezone"
     ]
-    if timezone or is_root:
+    if dt.find(f"appendItems/alias[@path=\"{APPEND_ITEMS_ALIAS}\"]") is not None:
+        out["tz"] = TZ_IS_GREGORIAN
+    elif timezone or is_root:
         put("tz", timezone[0] if timezone else None)
     for item in dt.findall("availableFormats/dateFormatItem"):
         skeleton = item.get("id") or ""
@@ -1745,7 +1899,12 @@ def date_patterns_lines(tree, tags, load_xml):
         for cal, package, name in DATE_CALENDARS:
             what = f"date patterns {tag} {cal}"
             if package is None:
-                resolved[(tag, cal)] = iso8601_of(d)
+                out = iso8601_of(d)
+                # Gregorian's appendItems are the locale's, resolved
+                # (gregory comes first in DATE_CALENDARS).
+                if out.get("tz") is TZ_IS_GREGORIAN:
+                    out["tz"] = resolved[(tag, "gregory")]["tz"]
+                resolved[(tag, cal)] = out
                 continue
             j = tree.load(package, "main", d, f"ca-{name}.json")
             if j is None:
@@ -2250,7 +2409,7 @@ def write_date_files(tree, tag, load_xml):
         tag,
         "Date patterns (cldr-dates-full and cldr-cal-*-full ca-*.json; "
         "for iso8601,\n# common/main/*.xml along the CLDR chain, root.xml "
-        "first, zh adding intervals):\n# a string table, then per locale 'locale "
+        "first, locales adding their own):\n# a string table, then per locale 'locale "
         "<tag> <parent>' and per calendar (BCP 47\n# ids; generic is CLDR's) "
         "'<calendar> <key>=<index>...' with the entries that differ\n# from "
         "its parent's, or '<calendar> = <other>' where the locale's data for "
@@ -2358,8 +2517,9 @@ def write_number_files(tree, tag, load_xml):
         "<n>[-<m>] <zeros> <count>=<index>[,<alt>[<delta>]]...'\n# for the "
         "magnitudes 10^n to 10^m (zeros digits at 10^n, one more at each next; "
         "0 for the\n# pattern \"0\"), with the alphaNextToNumber alternate "
-        "where it differs and delta more digits.\n# Entries that differ from "
-        "the parent chain's, or for nu other than latn, from latn's.",
+        "where it differs and delta more digits\n# than zeros. Entries that "
+        "differ from the parent chain's, or for nu other than latn, from\n# "
+        "latn's.",
         compact_currency,
     )
 
@@ -2386,17 +2546,11 @@ def write_json_data(tag):
 
 def main():
     tag = sys.argv[1]
-    # currency.xml also holds key cf (currency format), whose types
-    # ("standard", "account") are not currencies; take key cu only.
-    currency = fetch(tag, "bcp47/currency.xml")
     write(
         "currencies.txt",
         tag,
-        "ISO 4217 codes CLDR knows (bcp47/currency.xml, key cu).",
-        [
-            t.get("name").upper()
-            for t in currency.findall(".//key[@name='cu']/type")
-        ],
+        "ISO 4217 codes CLDR knows (bcp47/currency.xml, key cu, not deprecated).",
+        currency_codes(fetch(tag, "bcp47/currency.xml")),
     )
     numbering = fetch(tag, "supplemental/numberingSystems.xml")
     write(

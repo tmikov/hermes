@@ -158,6 +158,79 @@ class ExtensionValueAliasesTest(unittest.TestCase):
             extract(loop)
 
 
+# Shaped like CLDR 49's bcp47/currency.xml.
+FIXTURE_CURRENCY = """<ldmlBCP47><keyword>
+  <key name="cf">
+    <type name="standard"/>
+    <type name="account"/>
+  </key>
+  <key name="cu" alias="currency">
+    <type name="usd" description="US Dollar"/>
+    <type name="cnx" description="Chinese People’s Bank Dollar" deprecated="true"/>
+    <type name="xxx" description="Unknown currency"/>
+  </key>
+</keyword></ldmlBCP47>"""
+
+
+class CurrencyCodesTest(unittest.TestCase):
+    def test_key_cu_without_deprecated_types(self):
+        # CLDR 49 deprecates cnx and has no names for it; key cf's types
+        # are not currencies.
+        codes = gen.currency_codes(ET.fromstring(FIXTURE_CURRENCY))
+        self.assertEqual(codes, ["USD", "XXX"])
+
+
+# Shaped like CLDR 49's bcp47/timezone.xml.
+FIXTURE_TZ = """<ldmlBCP47><keyword>
+  <key name="tz" alias="timezone">
+    <type name="usnyc" alias="America/New_York US/Eastern"/>
+    <type name="uslax" alias="America/Los_Angeles US/Pacific"/>
+    <type name="usndcnt" alias="America/North_Dakota/Center" region="US"/>
+    <type name="ancur" alias="America/Curacao" region="CW"/>
+    <type name="gazastrp" alias="Asia/Gaza" region="PS"/>
+    <type name="gaza" deprecated="true" preferred="gazastrp"/>
+    <type name="est5edt" alias="EST5EDT"/>
+    <type name="pst8pdt" alias="PST8PDT"/>
+    <type name="utc" alias="Etc/UTC UTC"/>
+    <type name="utcw05" alias="Etc/GMT+5"/>
+    <type name="unk" alias="Etc/Unknown"/>
+  </key>
+</keyword></ldmlBCP47>"""
+
+
+class TimeZonesByRegionTest(unittest.TestCase):
+    def test_regions(self):
+        table = gen.time_zones_by_region(ET.fromstring(FIXTURE_TZ))
+        self.assertEqual(
+            table,
+            {
+                "US": [
+                    "America/Los_Angeles",
+                    "America/New_York",
+                    "America/North_Dakota/Center",
+                ],
+                "CW": ["America/Curacao"],
+                "PS": ["Asia/Gaza"],
+            },
+        )
+
+    def test_posix_zones_have_no_region(self):
+        # CLDR 49's est5edt and pst8pdt have no region attribute; they are
+        # not put in ES and PS by the first letters of their names.
+        table = gen.time_zones_by_region(ET.fromstring(FIXTURE_TZ))
+        self.assertNotIn("ES", table)
+        self.assertEqual(table["PS"], ["Asia/Gaza"])
+        zones = [z for zs in table.values() for z in zs]
+        self.assertNotIn("EST5EDT", zones)
+        self.assertNotIn("PST8PDT", zones)
+
+    def test_unknown_names_without_a_region_fail(self):
+        for name in ("usnycx", "us1ny", "e5edt"):
+            xml = FIXTURE_TZ.replace('name="est5edt"', f'name="{name}"')
+            with self.assertRaisesRegex(SystemExit, name, msg=name):
+                gen.time_zones_by_region(ET.fromstring(xml))
+
+
 def symbols(decimal, percent="%", infinity="∞"):
     return {
         "decimal": decimal,
@@ -1017,6 +1090,70 @@ class CompactCurrencyTest(unittest.TestCase):
         self.assertEqual(en[("arab", 3, "other")], ("¤0K", "¤000L"))
         self.assertEqual(en[("arab", 3, "one")], ("¤0K", "¤000L"))
 
+    def test_zero_pattern_with_a_compact_alternate(self):
+        # CLDR 49's zh: 10^3 "other" is "0" with the alternate "¤ 0K"; the
+        # file keeps both, on a line of zeros 0 whose delta is the
+        # alternate's whole digit run.
+        n = dict(COMPACT_NUMBERS)
+        zh = {
+            **EN_SHORT,
+            "1000-count-one": "0",
+            "1000-count-other": "0",
+            "1000-count-other-alt-alphaNextToNumber": "¤\u00a00K",
+        }
+        del zh["1000-count-one-alt-alphaNextToNumber"]
+        n["en-AU"] = {"currencyFormats-numberSystem-latn": short_currency(zh)}
+        lines = self.lines(n)
+        au = parse_compact_currency(lines)["en-AU"][1]
+        self.assertEqual(au[("latn", 3, "other")], ("0", "¤\u00a00K"))
+        self.assertEqual(au[("latn", 3, "one")], ("0", ""))
+        strings = lines[1 : 1 + int(lines[0].split(" ")[1])]
+        alt = strings.index("¤\u00a00K")
+        zero = strings.index("0")
+        self.assertIn(f"latn\t3\t0\tone={zero} other={zero},{alt}+1", lines)
+        # A "0" count with a compact alternate on a line whose other count
+        # is compact: the delta is relative to the line's digits.
+        n["en-AU"] = {
+            "currencyFormats-numberSystem-latn": short_currency(
+                {
+                    **EN_SHORT,
+                    "1000-count-one": "0",
+                    "1000-count-one-alt-alphaNextToNumber": "¤\u00a00K",
+                    "1000-count-other": "¤0k",
+                    "1000-count-other-alt-alphaNextToNumber": "¤\u00a00k",
+                }
+            )
+        }
+        lines = self.lines(n)
+        au = parse_compact_currency(lines)["en-AU"][1]
+        self.assertEqual(au[("latn", 3, "one")], ("0", "¤\u00a00K"))
+        self.assertEqual(au[("latn", 3, "other")], ("¤0k", "¤\u00a00k"))
+        strings = lines[1 : 1 + int(lines[0].split(" ")[1])]
+        alt, zero = strings.index("¤\u00a00K"), strings.index("0")
+        k, k_alt = strings.index("¤0k"), strings.index("¤\u00a00k")
+        self.assertIn(f"latn\t3\t1\tone={zero},{alt} other={k},{k_alt}", lines)
+        # The alternate of a "0" pattern must have the other counts'
+        # alternate digits.
+        n["en-AU"] = {
+            "currencyFormats-numberSystem-latn": short_currency(
+                {
+                    **EN_SHORT,
+                    "1000-count-one": "0",
+                    "1000-count-one-alt-alphaNextToNumber": "¤\u00a000K",
+                }
+            )
+        }
+        with self.assertRaisesRegex(SystemExit, "digits differ"):
+            self.lines(n)
+        # A compact pattern whose alternate is "0" is not handled.
+        n["en-AU"] = {
+            "currencyFormats-numberSystem-latn": short_currency(
+                {**EN_SHORT, "1000-count-one-alt-alphaNextToNumber": "0"}
+            )
+        }
+        with self.assertRaisesRegex(SystemExit, "the alternate is 0"):
+            self.lines(n)
+
     def test_shapes(self):
         self.assertEqual(gen.short_currency_shape("¤00K", "w"), ("¤0K", 2))
         self.assertEqual(gen.short_currency_shape("0", "w"), ("0", 0))
@@ -1109,7 +1246,11 @@ def calendar_json(entries, day_periods=None):
         "dateTimeFormats": {
             "availableFormats": {},
             "appendItems": {"Day": "{0} ({2}: {1})", "Era": "{0} {1}"},
-            "intervalFormats": {},
+            # CLDR 49's elements ECMA-402 does not use.
+            "intervalFormats": {
+                "intervalFormatRanges": {"mixed": "{0} – {1}", "numeric": "{0}–{1}"},
+            },
+            "numericSeparators": {"numericDateSeparator": "/"},
         },
         "dateTimeFormats-atTime": {"standard": {}},
         "dateTimeFormats-relative": {"standard": {"full": "{1} 'at' {0}"}},
@@ -1208,8 +1349,20 @@ EN_DROPPED = {
         "yQQQ": "QQQ y",
         "Ed-alt-variant": "d e",
         "ed": "d e",
+        # CLDR 49's fa generic "HHmmv": a kept skeleton whose pattern has
+        # a Z, a field ECMA-402 does not have.
+        "HHmmv": "HH:mm (Z)",
+        # CLDR 49's ordinal day (a technical preview), and uk's skeleton of
+        # it with a plain day.
+        "MMMddd": "MMM ddd",
+        "GyMMMddd": "d MMM y G",
     },
-    "intervalFormats": {"yMMMd": {"d-alt-variant": "MMM d-d, y"}, "yw": {"y": "w y"}},
+    "intervalFormats": {
+        "yMMMd": {"d-alt-variant": "MMM d-d, y"},
+        "yw": {"y": "w y"},
+        "Hv": {"H": "HH–HH Z"},
+        "MMMddd": {"d": "MMM ddd – ddd"},
+    },
 }
 
 # Names of day periods (the format context), {width: {period: name}}.
@@ -1254,7 +1407,7 @@ FIXTURE_DATES = {
     ),
 }
 
-# The day period rules of dayPeriods.json: en's CLDR 48.2 ones; bg's
+# The day period rules of dayPeriods.json: en's CLDR 49 ones; bg's
 # night1 crosses midnight; es_CO's are its own (written with an underscore,
 # as dayPeriods.xml has it); und's are am and pm.
 FIXTURE_RULES = {
@@ -1345,7 +1498,9 @@ DAY_PERIOD_TAGS = ["en", "en-AU", "es", "es-CO", "zh", "zh-Hant", "zh-HK", "lij"
 DATE_PARENTS = {"en-AU": "en-001", "zh-Hant": "root"}
 DATE_LIKELY = {"zh-HK": "zh-Hant-HK", "zh": "zh-Hans-CN"}
 
-# root.xml's iso8601 calendar, as CLDR 48.2 has it, shortened.
+# root.xml's iso8601 calendar, as CLDR 49 has it, shortened: its
+# appendItems alias gregorian's, and it has the numericSeparators and
+# intervalFormatRanges ECMA-402 does not use.
 ISO8601_XML = """<calendar type="iso8601">
 <months><alias source="locale" path="../../calendar[@type='gregorian']/months"/></months>
 <dateFormats>
@@ -1380,10 +1535,16 @@ ISO8601_XML = """<calendar type="iso8601">
 <dateFormatItem id="yQQQ">y QQQ</dateFormatItem>
 </availableFormats>
 <appendItems>
-<appendItem request="Day">{0} ({2}: {1})</appendItem>
-<appendItem request="Timezone">{0} {1}</appendItem>
+<alias source="locale" path="../../../calendar[@type='gregorian']/dateTimeFormats/appendItems"/>
 </appendItems>
+<numericSeparators>
+<numericDateSeparator>-</numericDateSeparator>
+<numericTimeSeparator>:</numericTimeSeparator>
+</numericSeparators>
 <intervalFormats>
+<intervalFormatRanges>
+<alias source="locale" path="../../../../calendar[@type='gregorian']/dateTimeFormats/intervalFormats/intervalFormatRanges"/>
+</intervalFormatRanges>
 <intervalFormatFallback>{0} – {1}</intervalFormatFallback>
 <intervalFormatItem id="yMMMd">
 <greatestDifference id="d">y MMM d–d</greatestDifference>
@@ -1665,8 +1826,9 @@ class DatePatternsTest(unittest.TestCase):
             self.lines(locales=d)
 
     def test_date_pattern_normalizes_cldr_typos(self):
-        # CLDR 48.2 writes Y for y (gl's dateFormats full) and eee for EEE:
-        # they are read as the letters meant. Quoted text is kept.
+        # CLDR 49 writes Y for y (ksh's japanese yM) and e for E (kek's
+        # intervals): they are read as the letters meant. Quoted text is
+        # kept.
         d = dict(FIXTURE_DATES)
         greg = {
             **EN_AU_GREGORIAN,
@@ -1704,7 +1866,7 @@ class DatePatternsTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "en_001.*iso8601"):
             self.lines(xml={"en_001": en_xml})
         # A locale of the file with iso8601 values of its own (zh's
-        # intervals in CLDR 48.2) has them over root's, and so do its
+        # intervals in CLDR 49) has them over root's, and so do its
         # children; a marked or provisional value is not one.
         child = (
             '<ldml><dates><calendars><calendar type="iso8601"><dateTimeFormats>'
@@ -1762,6 +1924,151 @@ class DatePatternsTest(unittest.TestCase):
         self.assertEqual(en["a2"], "{1} 'at' {0}")
         self.assertEqual(read_date_pair(p, "en-AU", "iso8601"), en)
         self.assertEqual(read_date_pair(p, "und", "iso8601"), ISO8601_ENTRIES)
+
+    def test_iso8601_append_items_alias_resolved_per_locale(self):
+        # root's iso8601 appendItems alias gregorian's (CLDR 49): each
+        # locale's iso8601 tz is its own resolved gregorian one, unless the
+        # chain has an iso8601 one of its own.
+        d = dict(FIXTURE_DATES)
+        greg = {**EN_AU_GREGORIAN, "tz": "{0} ({1})"}
+        d["en-AU"] = date_locale(
+            greg, EN_AU_GENERIC, EN_AU_NAMES, buddhist=EN_AU_BUDDHIST
+        )
+        p = self.parsed(locales=d)
+        self.assertEqual(read_date_pair(p, "en-AU", "iso8601")["tz"], "{0} ({1})")
+        self.assertEqual(read_date_pair(p, "en", "iso8601")["tz"], "{0} {1}")
+        child = (
+            '<ldml><dates><calendars><calendar type="iso8601"><dateTimeFormats>'
+            '<appendItems><appendItem request="Timezone">{0}, {1}</appendItem>'
+            "</appendItems></dateTimeFormats></calendar></calendars></dates></ldml>"
+        )
+        p = self.parsed(locales=d, xml={"en": child})
+        self.assertEqual(read_date_pair(p, "en-AU", "iso8601")["tz"], "{0}, {1}")
+        # Explicit appendItems in root (CLDR 48.2) are root's.
+        explicit = ROOT_DATES_XML.replace(
+            "<alias source=\"locale\" path=\"../../../calendar[@type='gregorian']"
+            "/dateTimeFormats/appendItems\"/>",
+            '<appendItem request="Timezone">{1} {0}</appendItem>',
+        )
+        self.assertNotEqual(explicit, ROOT_DATES_XML)
+        p = self.parsed(locales=d, xml={"root": explicit})
+        self.assertEqual(read_date_pair(p, "en-AU", "iso8601")["tz"], "{1} {0}")
+
+    def test_cldr_49_elements_skipped_by_name(self):
+        # numericSeparators and intervalFormatRanges, in the fixture's XML
+        # and JSON, give no entries; any other element or key fails.
+        p = self.parsed()
+        for tag in ("und", "en"):
+            for cal in ("gregory", "iso8601"):
+                keys = read_date_pair(p, tag, cal)
+                self.assertFalse(
+                    [k for k in keys if "Ranges" in k or "Separator" in k], (tag, cal)
+                )
+        # Each skipped element is skipped only under its own parent.
+        for where, extra, error in (
+            ("<availableFormats>", "<fooFormats/><availableFormats>", "fooFormats"),
+            (
+                "<intervalFormatFallback>",
+                "<fooRanges/><intervalFormatFallback>",
+                "fooRanges",
+            ),
+            (
+                "<availableFormats>",
+                "<intervalFormatRanges/><availableFormats>",
+                "intervalFormatRanges in dateTimeFormats",
+            ),
+            (
+                "<intervalFormatFallback>",
+                "<numericSeparators/><intervalFormatFallback>",
+                "numericSeparators in intervalFormats",
+            ),
+        ):
+            xml = ROOT_DATES_XML.replace(where, extra, 1)
+            pattern = "unknown element " + error
+            with self.assertRaisesRegex(SystemExit, pattern, msg=extra):
+                self.lines(xml={"root": xml})
+        # An alias inside a skipped element is not read; one elsewhere is.
+        xml = ROOT_DATES_XML.replace(
+            "<numericDateSeparator>-</numericDateSeparator>",
+            '<alias source="locale" path="../x"/>',
+        )
+        self.assertEqual(self.lines(xml={"root": xml}), self.lines())
+        # In cldr-json, a dateTimeFormats key, or an intervalFormats key
+        # that is not a skeleton, the skipped keys under the other parent
+        # included.
+        for section, key in (
+            ("dateTimeFormats", "fooFormats"),
+            ("intervalFormats", "intervalFormatFoo"),
+            ("dateTimeFormats", "intervalFormatRanges"),
+            ("intervalFormats", "numericSeparators"),
+        ):
+            tree = make_date_tree(
+                tempfile.mkdtemp(dir=self._tmp.name),
+                FIXTURE_DATES,
+                DATE_PARENTS,
+                DATE_LIKELY,
+                FIXTURE_RULES,
+            )
+            path = os.path.join(
+                tree.root,
+                "cldr-dates-full",
+                "package",
+                "main",
+                "en-AU",
+                "ca-gregorian.json",
+            )
+            with open(path, encoding="utf-8") as f:
+                j = json.load(f)
+            cal = j["main"]["en-AU"]["dates"]["calendars"]["gregorian"]
+            dt = cal["dateTimeFormats"]
+            (dt if section == "dateTimeFormats" else dt["intervalFormats"])[key] = {}
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(j, f)
+            with self.assertRaisesRegex(SystemExit, key, msg=key):
+                gen.date_patterns_lines(
+                    tree,
+                    ["en", "en-AU"],
+                    lambda name: ET.fromstring(
+                        ROOT_DATES_XML if name == "root" else "<ldml/>"
+                    ),
+                )
+
+    def test_ordinal_day_is_left_out(self):
+        # CLDR 49's skeletons with the ordinal day "ddd" are left out, with
+        # their patterns; a "ddd" in a kept pattern fails, as does any count
+        # outside decision 6's table.
+        en = read_date_pair(self.parsed(), "en", "gregory")
+        self.assertFalse([k for k in en if "ddd" in k])
+        self.assertFalse([v for v in en.values() if "ddd" in v])
+        self.assertFalse(gen.keep_skeleton("yyyyMMMEddd", "w"))
+        self.assertTrue(gen.keep_skeleton("MMMdd", "w"))
+        for bad in ("MMM ddd", "HHH:mm", "cc", "OO", "vvv", "zzzzz", "EEEEEEE"):
+            with self.assertRaisesRegex(SystemExit, "pattern field", msg=bad):
+                gen.normalize_date_pattern(bad, "w")
+        for good in ("MMMMM d", "ccc", "O", "vvvv", "zzzz", "EEEEEE", "SSSS yyyy"):
+            self.assertEqual(gen.normalize_date_pattern(good, "w"), good)
+        d = dict(FIXTURE_DATES)
+        greg = {**EN_AU_GREGORIAN, "f.yMMMd": "MMM ddd, y"}
+        d["en-AU"] = date_locale(greg, EN_AU_GENERIC, EN_AU_NAMES)
+        with self.assertRaisesRegex(SystemExit, "en-AU gregory.*ddd"):
+            self.lines(locales=d)
+
+    def test_date_pattern_with_a_dropped_zone_letter_is_left_out(self):
+        # A time zone skeleton whose availableFormats or intervalFormats
+        # pattern writes the zone in a form ECMA-402 does not have (CLDR
+        # 49's fa generic "HHmmv", "HH:mm (Z)") is left out, as one whose
+        # skeleton has such a letter is.
+        en = read_date_pair(self.parsed(), "en", "gregory")
+        self.assertNotIn("f.HHmmv", en)
+        self.assertNotIn("i.Hv.H", en)
+        self.assertFalse(gen.keep_pattern("f.Hmv", "HH:mm (Z)"))
+        self.assertFalse(gen.keep_pattern("i.hz.h", "h–h a x"))
+        self.assertTrue(gen.keep_pattern("f.Hmv", "HH:mm 'Z' v"))
+        # Not for another skeleton or another letter, or the main formats:
+        # those fail (test_date_pattern_rejects_symbols).
+        self.assertTrue(gen.keep_pattern("f.Hm", "HH:mm Z"))
+        self.assertTrue(gen.keep_pattern("f.yMMMdv", "QQQ d, y v"))
+        self.assertTrue(gen.keep_pattern("t0", "h:mm:ss a Z"))
 
     def test_date_patterns_reader(self):
         lines = ["strings 2", "y", "M", "locale und -", "gregory d0=1 f.y=0"]
@@ -2265,7 +2572,7 @@ class DisplayNamesTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "display names en-AU.*ca.roc"):
             self.lines(locales=self.fixture("en-AU", localeDisplayNames=names))
         # A child with its own name for a code its parent's name equals
-        # (CLDR 48.2's nn "tivi", hi-Latn short "America") inherits the eq
+        # (CLDR 49's nn "tivi", hi-Latn short "America") inherits the eq
         # entry, which applies only where ICU4X has no name; ICU4X has the
         # child's.
         territories = {"US": "United States", "US-alt-short": "USA"}

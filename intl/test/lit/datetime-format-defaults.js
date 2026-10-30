@@ -11,8 +11,9 @@
 // {year, month, day: "numeric"}: best fit must pick each locale's numeric
 // pattern, not a text month that costs less by BasicFormatMatcher's
 // penalties (plan decision 6, refined). The values are Node's (ICU 78.2),
-// except und: Node has no und and falls back to en-US, while the plugin
-// resolves und itself, whose root pattern is "y-MM-dd".
+// except two: Node has no und and falls back to en-US, while the plugin
+// resolves und itself, whose root pattern is "y-MM-dd"; and tr's yMd is
+// "d.M.y" in CLDR 49, where Node's CLDR 48 has "dd.MM.y".
 
 var LOCALES = [
   'en', 'en-GB', 'en-AU', 'en-001', 'en-IN', 'fr', 'de', 'it', 'es', 'pt-BR',
@@ -39,7 +40,7 @@ for (var i = 0; i < LOCALES.length; i++) {
 // CHECK-NEXT: pt-BR numeric 2-digit 2-digit | numeric 2-digit 2-digit
 // CHECK-NEXT: ru numeric 2-digit 2-digit | numeric 2-digit 2-digit
 // CHECK-NEXT: sv numeric 2-digit 2-digit | numeric 2-digit 2-digit
-// CHECK-NEXT: tr numeric 2-digit 2-digit | numeric 2-digit 2-digit
+// CHECK-NEXT: tr numeric numeric numeric | numeric numeric numeric
 // CHECK-NEXT: nl numeric numeric numeric | numeric numeric numeric
 // CHECK-NEXT: pl numeric 2-digit numeric | numeric 2-digit numeric
 // CHECK-NEXT: ja numeric numeric numeric | numeric numeric numeric

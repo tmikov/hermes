@@ -127,8 +127,10 @@ for (var ci = 0; ci < cases.length; ci++) {
 // CHECK-NEXT: weekday:Do.:startRange|literal:, :startRange|day:01:startRange|literal:.:startRange|month:06:startRange|literal:.:startRange|year:1:startRange|literal: :startRange|era:v. Chr.:startRange|literal:, :startRange|hour:00:startRange|literal: Uhr:startRange|literal:\u2009–\u2009:shared|weekday:Fr.:endRange|literal:, :endRange|day:01:endRange|literal:.:endRange|month:06:endRange|literal:.:endRange|year:1:endRange|literal: :endRange|era:n. Chr.:endRange|literal:, :endRange|hour:00:endRange|literal: Uhr:endRange
 // CHECK-NEXT: de {"dateStyle":"long"}: 1. Juni 1 v. Chr.\u2009–\u20091. Juni 1 n. Chr. [eras]
 // CHECK-NEXT: day:1:startRange|literal:. :startRange|month:Juni:startRange|literal: :startRange|year:1:startRange|literal: :startRange|era:v. Chr.:startRange|literal:\u2009–\u2009:shared|day:1:endRange|literal:. :endRange|month:Juni:endRange|literal: :endRange|year:1:endRange|literal: :endRange|era:n. Chr.:endRange
-// CHECK-NEXT: de {"dateStyle":"full","timeStyle":"short"}: Donnerstag, 1. Juni 1 v. Chr. um 00:00\u2009–\u2009Freitag, 1. Juni 1 n. Chr. um 00:00 [eras]
-// CHECK-NEXT: weekday:Donnerstag:startRange|literal:, :startRange|day:1:startRange|literal:. :startRange|month:Juni:startRange|literal: :startRange|year:1:startRange|literal: :startRange|era:v. Chr.:startRange|literal: um :startRange|hour:00:startRange|literal:::startRange|minute:00:startRange|literal:\u2009–\u2009:shared|weekday:Freitag:endRange|literal:, :endRange|day:1:endRange|literal:. :endRange|month:Juni:endRange|literal: :endRange|year:1:endRange|literal: :endRange|era:n. Chr.:endRange|literal: um :endRange|hour:00:endRange|literal:::endRange|minute:00:endRange
+// de's full date with an era takes CLDR 49's new gregorian GyMMMMEd,
+// "d MMMM Y G, E".
+// CHECK-NEXT: de {"dateStyle":"full","timeStyle":"short"}: 1 Juni 1 v. Chr., Donnerstag um 00:00\u2009–\u20091 Juni 1 n. Chr., Freitag um 00:00 [eras]
+// CHECK-NEXT: day:1:startRange|literal: :startRange|month:Juni:startRange|literal: :startRange|year:1:startRange|literal: :startRange|era:v. Chr.:startRange|literal:, :startRange|weekday:Donnerstag:startRange|literal: um :startRange|hour:00:startRange|literal:::startRange|minute:00:startRange|literal:\u2009–\u2009:shared|day:1:endRange|literal: :endRange|month:Juni:endRange|literal: :endRange|year:1:endRange|literal: :endRange|era:n. Chr.:endRange|literal:, :endRange|weekday:Freitag:endRange|literal: um :endRange|hour:00:endRange|literal:::endRange|minute:00:endRange
 // CHECK-NEXT: en-u-ca-japanese {"year":"numeric"}: 31 Heisei\u2009–\u20091 Reiwa [eras]
 // CHECK-NEXT: year:31:startRange|literal: :startRange|era:Heisei:startRange|literal:\u2009–\u2009:shared|year:1:endRange|literal: :endRange|era:Reiwa:endRange
 // CHECK-NEXT: en-u-ca-japanese {"month":"long","day":"numeric"}: April 30, 31 Heisei\u2009–\u2009May 1, 1 Reiwa [eras]
@@ -199,24 +201,25 @@ show('en-u-ca-japanese', {day: 'numeric'}, REIWA, Date.parse('2019-06-09T00:00:0
 // CHECK-NEXT: month:5:startRange|literal:/:startRange|day:1:startRange|literal:\u2009–\u2009:shared|month:6:endRange|literal:/:endRange|day:9:endRange
 
 // An R that shows its era takes CLDR's interval for an era difference
-// only if both halves show the era. CLDR 48.2's ko GyMMMd and GyMd
-// intervals for G, "G y년 M월 d일 ~ y년 M월 d일", lack the second era (as
-// ICU4C shows, "헤이세이 31년 4월 30일 ~ 1년 5월 1일"), so [[Era]] is
-// FB(P), with both eras.
+// only if both halves show the era. CLDR 49's ko GyMMMd intervals for G
+// in the japanese and roc calendars, "G y년 M월 d일~y년 M월 d일", lack the
+// second era (as ICU4C shows with CLDR 48's, which have spaces around the
+// "~": "헤이세이 31년 4월 30일 ~ 1년 5월 1일"), so [[Era]] is FB(P), with
+// both eras, joined by those calendars' CLDR 49 fallback "{0}~{1}".
 var MINGUO1 = Date.parse('1911-06-01T00:00:00Z');
 var MINGUO2 = Date.parse('1913-06-01T00:00:00Z');
 show('ko-u-ca-japanese', {year: 'numeric', month: 'short', day: 'numeric'}, HEISEI, REIWA, true);
-// CHECK-NEXT: ko-u-ca-japanese {"year":"numeric","month":"short","day":"numeric"}: 헤이세이 31년 4월 30일 ~ 레이와 1년 5월 1일 [eras]
-// CHECK-NEXT: era:헤이세이:startRange|literal: :startRange|year:31:startRange|literal:년 :startRange|month:4월:startRange|literal: :startRange|day:30:startRange|literal:일:startRange|literal: ~ :shared|era:레이와:endRange|literal: :endRange|year:1:endRange|literal:년 :endRange|month:5월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
+// CHECK-NEXT: ko-u-ca-japanese {"year":"numeric","month":"short","day":"numeric"}: 헤이세이 31년 4월 30일~레이와 1년 5월 1일 [eras]
+// CHECK-NEXT: era:헤이세이:startRange|literal: :startRange|year:31:startRange|literal:년 :startRange|month:4월:startRange|literal: :startRange|day:30:startRange|literal:일:startRange|literal:~:shared|era:레이와:endRange|literal: :endRange|year:1:endRange|literal:년 :endRange|month:5월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
 show('ko-u-ca-japanese', {year: 'numeric', day: 'numeric'}, HEISEI, REIWA, true);
-// CHECK-NEXT: ko-u-ca-japanese {"year":"numeric","day":"numeric"}: 헤이세이 31년 4월 30일 ~ 레이와 1년 5월 1일 [eras]
-// CHECK-NEXT: era:헤이세이:startRange|literal: :startRange|year:31:startRange|literal:년 :startRange|month:4월:startRange|literal: :startRange|day:30:startRange|literal:일:startRange|literal: ~ :shared|era:레이와:endRange|literal: :endRange|year:1:endRange|literal:년 :endRange|month:5월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
+// CHECK-NEXT: ko-u-ca-japanese {"year":"numeric","day":"numeric"}: 헤이세이 31년 4월 30일~레이와 1년 5월 1일 [eras]
+// CHECK-NEXT: era:헤이세이:startRange|literal: :startRange|year:31:startRange|literal:년 :startRange|month:4월:startRange|literal: :startRange|day:30:startRange|literal:일:startRange|literal:~:shared|era:레이와:endRange|literal: :endRange|year:1:endRange|literal:년 :endRange|month:5월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
 show('ko-u-ca-roc', {year: 'numeric', month: 'short', day: 'numeric'}, MINGUO1, MINGUO2, true);
-// CHECK-NEXT: ko-u-ca-roc {"year":"numeric","month":"short","day":"numeric"}: 중화민국전 1년 6월 1일 ~ 중화민국 2년 6월 1일 [eras]
-// CHECK-NEXT: era:중화민국전:startRange|literal: :startRange|year:1:startRange|literal:년 :startRange|month:6월:startRange|literal: :startRange|day:1:startRange|literal:일:startRange|literal: ~ :shared|era:중화민국:endRange|literal: :endRange|year:2:endRange|literal:년 :endRange|month:6월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
+// CHECK-NEXT: ko-u-ca-roc {"year":"numeric","month":"short","day":"numeric"}: 중화민국전 1년 6월 1일~중화민국 2년 6월 1일 [eras]
+// CHECK-NEXT: era:중화민국전:startRange|literal: :startRange|year:1:startRange|literal:년 :startRange|month:6월:startRange|literal: :startRange|day:1:startRange|literal:일:startRange|literal:~:shared|era:중화민국:endRange|literal: :endRange|year:2:endRange|literal:년 :endRange|month:6월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
 show('ko-u-ca-roc', {year: 'numeric', day: 'numeric'}, MINGUO1, MINGUO2, true);
-// CHECK-NEXT: ko-u-ca-roc {"year":"numeric","day":"numeric"}: 중화민국전 1년 6월 1일 ~ 중화민국 2년 6월 1일 [eras]
-// CHECK-NEXT: era:중화민국전:startRange|literal: :startRange|year:1:startRange|literal:년 :startRange|month:6월:startRange|literal: :startRange|day:1:startRange|literal:일:startRange|literal: ~ :shared|era:중화민국:endRange|literal: :endRange|year:2:endRange|literal:년 :endRange|month:6월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
+// CHECK-NEXT: ko-u-ca-roc {"year":"numeric","day":"numeric"}: 중화민국전 1년 6월 1일~중화민국 2년 6월 1일 [eras]
+// CHECK-NEXT: era:중화민국전:startRange|literal: :startRange|year:1:startRange|literal:년 :startRange|month:6월:startRange|literal: :startRange|day:1:startRange|literal:일:startRange|literal:~:shared|era:중화민국:endRange|literal: :endRange|year:2:endRange|literal:년 :endRange|month:6월:endRange|literal: :endRange|day:1:endRange|literal:일:endRange
 
 // Chinese and dangi have no eras, so their ranges have no [[Era]].
 show('en-u-ca-chinese', {day: 'numeric'}, BC, AD);

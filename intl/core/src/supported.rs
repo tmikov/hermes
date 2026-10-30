@@ -8,11 +8,11 @@
 //! checks this): calendars by DateTimeFormat, collations by Collator, and so
 //! on. The "unit" list is the ECMA-402 table and lives in JS.
 //!
-//! The numbering systems are CLDR's numeric ones, which in CLDR 48.2 are
+//! The numbering systems are CLDR's numeric ones, which in CLDR 49 are
 //! exactly ECMA-402's table of numbering systems with simple digit mappings;
-//! the list must include every row of that table. ICU4X's compiled data has
-//! digits for only 27 of them, so NumberFormat must supply the digits of the
-//! others itself; the table and CLDR's numberingSystems.xml give the ten
+//! the list must include every row of that table. ICU4X 2.4's compiled data
+//! has digits for only 23 of them, so NumberFormat must supply the digits of
+//! the others itself; the table and CLDR's numberingSystems.xml give the ten
 //! digits of each.
 
 use crate::host::primary_time_zone;

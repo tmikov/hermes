@@ -50,10 +50,13 @@ show('fa', {});
 // CHECK-NEXT: ۱۳۹۹/۳/۱۲ || year:۱۳۹۹|literal:/|month:۳|literal:/|day:۱۲
 
 // 2-digit fields keep the last two code points, not code units: each
-// mathbold digit is two code units.
+// mathbold digit is two code units. CLDR 49's en "yy" is "’yy", so the
+// year is not the first part.
 show('en-u-nu-mathbold', {year: '2-digit', month: '2-digit', day: '2-digit'});
 // CHECK-NEXT: 𝟎𝟔/𝟎𝟏/𝟐𝟎 || month:𝟎𝟔|literal:/|day:𝟎𝟏|literal:/|year:𝟐𝟎
-var twoDigits = new Intl.DateTimeFormat('en-u-nu-mathbold', {year: '2-digit'}).formatToParts(t)[0].value;
+var twoDigits = new Intl.DateTimeFormat('en-u-nu-mathbold', {year: '2-digit'})
+  .formatToParts(t)
+  .filter(function (p) { return p.type === 'year'; })[0].value;
 print(twoDigits.length, twoDigits.codePointAt(0).toString(16), twoDigits.codePointAt(2).toString(16));
 // CHECK-NEXT: 4 1d7d0 1d7ce
 show('en-u-nu-mathbold', {hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3}, t + 45045);

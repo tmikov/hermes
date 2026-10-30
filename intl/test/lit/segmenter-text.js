@@ -170,8 +170,9 @@ all('zh', '\u5317\u4eac\ud800\u5929\u5b89\u95e8');
 // CHECK-NEXT: word ok \u5317\u4eac*|\ud800|\u5929\u5b89\u95e8*
 // CHECK-NEXT: sentence ok \u5317\u4eac\ud800\u5929\u5b89\u95e8
 
-// ICU4X 2.3 word bugs that native code works around (plan decision 9).
-// Supplementary Han, which ICU4X's UTF-16 path truncates.
+// ICU4X 2.4 word bugs that native code works around (plan decision 9).
+// Consecutive supplementary Han, which ICU4X's UTF-16 path keeps as one
+// segment.
 print(word('en', '\ud840\udc00\ud840\udc01\ud840\udc02 \ud869\udea5\ud869\udea5'));
 // CHECK-NEXT: ok \ud840\udc00*|\ud840\udc01*|\ud840\udc02*| |\ud869\udea5*|\ud869\udea5*
 // A word that ends in a code point with Word_Break Extend, Format or ZWJ,
@@ -214,12 +215,9 @@ print(sentence('el', greek));
 print(sentence('en', greek));
 // CHECK-NEXT: ok \u03a4\u03b9 \u03ba\u03ac\u03bd\u03b5\u03b9\u03c2; \u039a\u03b1\u03bb\u03ac. |\u039d\u03b1\u03b9;\u038c\u03c7\u03b9
 
-// Another ICU4X 2.3 word bug: it puts word boundaries before characters
-// that WB4 ignores (Word_Break Extend, Format or ZWJ). Its Thai dictionary
-// splits the tone mark U+0E48 of "\u0e0a\u0e48" in the second Thai line from
-// its base. Native code repairs such a boundary by dropping it unless it
-// follows the start of the text, CR, LF or a Newline character, so
-// "\u0e07\u0e0a\u0e48" is one piece.
+// ICU4X 2.4's Thai dictionary keeps the tone mark U+0E48 of "\u0e0a\u0e48"
+// in the second Thai line on its base, so "\u0e07\u0e0a\u0e48" is one piece;
+// the line stays as a regression case (ICU4X 2.3 split the mark off).
 //
 // What remains are implementation-defined results that differ from ICU4C
 // and that plan decision 9 accepts, pinned to the plugin's output. Common
@@ -236,21 +234,28 @@ print(word('ko', '\ud55c\uad6d\uc5b4 MB\uac00 \ud14c\uc2a4\ud2b8'));
 print(word('ko', '\ucc98\ubd84\uad8c\u00b7\uc218\uc775\uad8c'));
 // CHECK-NEXT: ok \ucc98\ubd84\uad8c\u00b7\uc218\uc775\uad8c*
 
-// The repair, as in Node. A soft hyphen (Format) after Thai stays on the
-// word. U+0E33 is Grapheme_Cluster_Break SpacingMark but Word_Break Other,
-// so nothing is merged before it: " \u0e33".containing(1) is "\u0e33" at 1.
-// After CR and U+2028 (Newline) the boundary before the marks stays.
+// Another ICU4X 2.4 word bug: it puts word boundaries before characters
+// that WB4 ignores (Word_Break Extend, Format or ZWJ), as before a soft
+// hyphen after Thai. Native code repairs such a boundary by dropping it
+// unless it follows the start of the text, CR, LF or a Newline character,
+// as in Node: the soft hyphen stays on the word. U+0E33 is
+// Grapheme_Cluster_Break SpacingMark but Word_Break Other, so nothing is
+// merged before it: " \u0e33".containing(1) is "\u0e33" at 1. Node gives
+// "\u0e48|\u0e33*" for "\u0e48\u0e33"; ICU4X 2.4's Thai dictionary, on
+// Unicode 18's data, keeps a leading tone mark and U+0E33 as one word, and
+// ECMA-402 leaves segmentation to the implementation. After CR and U+2028
+// (Newline) the boundary before the marks stays.
 print(word('th', '\u0e01\u00ad x'));
 // CHECK-NEXT: ok \u0e01\u00ad*| |x*
 print(word('th', ' \u0e33'), esc(JSON.stringify(new Intl.Segmenter('th', {granularity: 'word'}).segment(' \u0e33').containing(1))));
 // CHECK-NEXT: ok  |\u0e33* {"segment":"\u0e33","index":1,"input":" \u0e33","isWordLike":true}
 print(word('th', '\u0e48\u0e33'));
-// CHECK-NEXT: ok \u0e48|\u0e33*
+// CHECK-NEXT: ok \u0e48\u0e33*
 print(word('en', '\r\u0301\u0301x'));
 // CHECK-NEXT: ok \u000d|\u0301\u0301|x*
 print(word('en', '\u2028\u0301\u0301 x'));
 // CHECK-NEXT: ok \u2028|\u0301\u0301| |x*
-// Word types ICU4X 2.3 gets wrong, as in Node: a Hebrew word that ends in
+// Word types ICU4X 2.4 gets wrong, as in Node: a Hebrew word that ends in
 // an apostrophe (WB7a) is word-like; a segment made only of ignored
 // characters is not, also merged with a space, unless one of them is
 // Ideographic (U+16FE4 KHITAN SMALL SCRIPT FILLER).
@@ -284,3 +289,72 @@ print(bigPair.length, g.containing(999999).index, esc(g.containing(999999).segme
 var s = new Intl.Segmenter('en', {granularity: 'sentence'}).segment(big);
 print(s.containing(big.length - 1).index, s.containing(big.length - 1).segment.length, s.containing(1e6), s.containing(NaN).index);
 // CHECK-NEXT: 0 1000000 undefined 0
+
+// Long unbroken Han and Thai runs (plan Review Focus 5), which ICU4X 2.3
+// segmented in time quadratic in their words: 30,000 copies of
+// \u6211|\u7231|\u5317\u4eac|\u5929\u5b89\u95e8 (210,000 code units),
+// and \u0e01 and 199,999 tone marks U+0E48 (200,000 code units), one
+// segment. Segmenting them, which the first containing does, takes well
+// under a second (about 40 ms in the Debug ASan build).
+var han = '\u6211\u7231\u5317\u4eac\u5929\u5b89\u95e8';
+
+/// The number of segments of segments and the milliseconds that iterating
+/// them takes.
+function iterate(segments) {
+  var start = Date.now();
+  var count = 0;
+  var it = segments[Symbol.iterator]();
+  for (var r = it.next(); !r.done; r = it.next()) count++;
+  return {count: count, ms: Date.now() - start};
+}
+
+/// Segment string in locale, then iterate it: the length, the segment
+/// containing the last index, the segment count, and whether segmenting
+/// was fast. Returns the segments.
+function longRun(locale, string) {
+  var start = Date.now();
+  var segments = new Intl.Segmenter(locale, {granularity: 'word'}).segment(string);
+  var c = segments.containing(string.length - 1);
+  var ms = Date.now() - start;
+  var r = iterate(segments);
+  print(string.length, c.index, c.segment.length, c.isWordLike, r.count, ms < 1000 ? 'fast' : 'slow: ' + ms + ' ms');
+  return segments;
+}
+var whole = longRun('zh', han.repeat(30000));
+// CHECK-NEXT: 210000 209997 3 true 120000 fast
+longRun('th', '\u0e01' + '\u0e48'.repeat(199999));
+// CHECK-NEXT: 200000 0 200000 true 1 fast
+
+// A not-quadratic guard on the iteration: its time per segment over the
+// whole Han run is under twice that over a run of an eighth of it (15,000
+// segments, iterated four times). It is about 1 when the iteration is
+// linear (about 12 microseconds per segment in the Debug ASan build), and
+// about 4 with a linear rescan of the boundaries at each step. It is a
+// ratio because a parallel test load makes the iteration about three
+// times slower, so an absolute bound that never fails on a loaded machine
+// would also pass a quadratic iteration. The two are measured in three
+// interleaved rounds, alternating which goes first, and each takes its
+// fastest round, so that neither a pause nor a change of load between
+// the measurements decides the ratio.
+var eighth = new Intl.Segmenter('zh', {granularity: 'word'}).segment(han.repeat(3750));
+eighth.containing(0);
+/// The milliseconds that iterating eighth four times takes.
+function eighthPass() {
+  var ms = 0;
+  for (var k = 0; k < 4; k++) ms += iterate(eighth).ms;
+  return ms;
+}
+var wholeMs = Infinity;
+var eighthMs = Infinity;
+for (var round = 0; round < 3; round++) {
+  if (round % 2 === 0) {
+    wholeMs = Math.min(wholeMs, iterate(whole).ms);
+    eighthMs = Math.min(eighthMs, eighthPass());
+  } else {
+    eighthMs = Math.min(eighthMs, eighthPass());
+    wholeMs = Math.min(wholeMs, iterate(whole).ms);
+  }
+}
+var ratio = (wholeMs / 120000) / (eighthMs / 60000);
+print(ratio < 2 ? 'linear' : 'not linear: ' + ratio);
+// CHECK-NEXT: linear

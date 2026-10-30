@@ -70,12 +70,15 @@ that the plugin's ICU4X version uses. When ICU4X is upgraded, regenerate
 them from that release's tag and commit the result:
 
 ```
-python3 intl/core/data/update-cldr-lists.py release-48-2
+python3 intl/core/data/update-cldr-lists.py release-49
 ```
 
 The generator's docstring lists the files and where each comes from, and
 each file's header comment gives its format. `check-intl-data` tests the
-generator. `core/data/LICENSE` is the Unicode License V3 for these files.
+generator. It stops on any CLDR element or alias it does not know, so a new
+release can need a rule for each new shape, with a test in
+`core/data/test_update_cldr_lists.py`; skipping one silently is not an
+option. `core/data/LICENSE` is the Unicode License V3 for these files.
 
 Some lists are kept by hand and need checking at an upgrade too:
 `core/data/locales.txt` is the set of locales ICU4X's compiled data covers

@@ -45,7 +45,7 @@ print([...calendarsSeen].sort().join(), '|', [...numberingSeen].sort().join());
 // CHECK-NEXT: buddhist,gregory,persian | adlm,arab,arabext,beng,latn,mymr
 // A few of them, checked against Node 24 (ICU 78.2). Node's format writes
 // U+0020 for CLDR's U+202F (ru), and its ko AM/PM names are "AM" and "PM",
-// where CLDR 48.2's ko format names are "오전" and "오후".
+// where CLDR 49's ko format names are "오전" and "오후".
 function full(locale) {
   return escape(new Intl.DateTimeFormat(locale, {dateStyle: 'full', timeStyle: 'full'}).format(d));
 }
@@ -75,3 +75,12 @@ print(enDayPeriod.format(nine), '|', deDayPeriod.format(nine));
 // CHECK-NEXT: in the morning | morgens
 print(enDayPeriod.resolvedOptions().dayPeriod, deDayPeriod.resolvedOptions().dayPeriod, deDayPeriod.resolvedOptions().hourCycle);
 // CHECK-NEXT: short short undefined
+
+// CLDR 49 makes h23 the preferred hour cycle of AR, CL, PY, UY and ZM
+// (hour-cycles.txt); Node 24's CLDR 48 prefers h12 there and gives
+// "2:05 p. m." and "2:05 pm", with hourCycle "h12".
+var fourteen = Date.UTC(2026, 0, 5, 14, 5);
+var esAR = new Intl.DateTimeFormat('es-AR', {hour: 'numeric', minute: 'numeric'});
+var enZM = new Intl.DateTimeFormat('en-ZM', {hour: 'numeric', minute: 'numeric'});
+print(esAR.format(fourteen), esAR.resolvedOptions().hourCycle, '|', enZM.format(fourteen), enZM.resolvedOptions().hourCycle);
+// CHECK-NEXT: 14:05 h23 | 14:05 h23

@@ -13,7 +13,7 @@
 // Record, with plan decision 3's comparisons (the month by its code, the
 // chinese and dangi year by the related year) and decision 11's range
 // patterns. The expected strings are Node 24's (ICU 78.2) except where a
-// comment says why the plugin's differ. CLDR 48.2's en interval patterns
+// comment says why the plugin's differ. CLDR 49's en interval patterns
 // put U+2009 around the dash; Node's formatRange writes U+0020 where CLDR
 // has U+202F before AM and PM, a V8 compatibility change its
 // formatRangeToParts does not make; the plugin writes CLDR's U+202F in
@@ -297,15 +297,16 @@ print(
 // interval pattern's day period, AM/PM and hour widths stay (rulings 79,
 // 127 and 132), and its names are loaded. zh-TW's AM/PM interval for h,
 // "ah時至ah時", shows the AM/PM, and its hour interval "Bh時至h時" a day
-// period (the all-pairs check below covers it); zh's and it's hour
-// intervals keep "HH".
+// period (the all-pairs check below covers it); zh's, it's and ru's hour
+// intervals keep "HH" (ru's is "HH—HH" in CLDR 49, with an em dash and
+// without CLDR 48's "\u00a0'ч'").
 var zt = {weekday: 'short', hour: 'numeric'};
 print(range('zh-TW', zt, b, b + 5 * H));
 // CHECK-NEXT: 週一 上午9時至下午2時
 print(rangeParts('zh-TW', zt, b, b + 5 * H));
 // CHECK-NEXT: weekday:週一:shared|literal: :shared|dayPeriod:上午:startRange|hour:9:startRange|literal:時至:shared|dayPeriod:下午:endRange|hour:2:endRange|literal:時:shared
 print(range('zh', {month: 'numeric', day: 'numeric', hour: 'numeric'}, b, b + 2 * H), '|', range('zh', zt, b, b + 2 * H), '|', range('it', zt, b, b + 2 * H), '|', range('ru', {month: 'numeric', day: 'numeric', hour: 'numeric'}, b, b + 2 * H));
-// CHECK-NEXT: 1/5 09–11 | 周一 09–11 | lun, 09–11 | 05.01, 09–11\u00a0ч
+// CHECK-NEXT: 1/5 09–11 | 周一 09–11 | lun, 09–11 | 05.01, 09—11
 // The widths compare the letter counts of the format's own pattern (ruling
 // 132), not those of a separately fitted time part: be's and lt's
 // {weekday, hour} patterns write "h", their time parts "hh"; hr's and

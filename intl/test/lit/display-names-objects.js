@@ -101,7 +101,7 @@ print(
   sub.of('en-GB'),
   of.call(sub, 'fr'),
 );
-// CHECK-NEXT: true true {"locale":"de","style":"short","type":"language","fallback":"code","languageDisplay":"dialect"} Englisch (GB) Französisch
+// CHECK-NEXT: true true {"locale":"de","style":"short","type":"language","fallback":"code","languageDisplay":"dialect"} Englisch (UK) Französisch
 
 // Without new, Intl.DisplayNames throws, whatever this is, and does not
 // touch an instance it is called on.

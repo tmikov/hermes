@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! The CLDR number data ICU4X 2.3 lacks (decision 4 of the Phase 3 plan),
+//! The CLDR number data ICU4X 2.4 lacks (decision 4 of the Phase 3 plan),
 //! from five generated files in core/data, each parsed once on first use:
 //!
 //! - `number-symbols.txt`: per locale and numbering system, the percent
@@ -355,7 +355,9 @@ pub(crate) struct ShortPattern {
 }
 
 /// A short currency pattern of one magnitude and plural count, and its
-/// alphaNextToNumber alternate where it has one that differs.
+/// alphaNextToNumber alternate where it has one that differs. A pattern
+/// `0` may have a compact alternate (zh's 10^3 in CLDR 49); number.rs
+/// chooses between them before it decides compaction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ShortCurrencyPattern {
     /// The pattern.
@@ -431,6 +433,9 @@ fn parse_compact_currency(text: &'static str) -> CompactCurrencyFile {
                 Some(i) => (&a[..i], a[i..].parse::<i8>().unwrap()),
                 None => (a, 0),
             });
+            // The line's digits grow by one per magnitude unless they are
+            // 0 (its patterns are all "0"); an alternate has delta more,
+            // which on a line of 0 is its whole digit run.
             for power in first..=last {
                 let step = if zeros == 0 { 0 } else { power - first };
                 let shape = |text: &'static str, delta: i8| ShortPattern {
@@ -908,10 +913,13 @@ mod tests {
         assert_eq!(sym("ar-EG", "arabext", EXPLICIT_NAN), Some("ليس\u{a0}رقمًا"));
         assert_eq!(sym("ko", "arab", EXPLICIT_MINUS_SIGN), Some("\u{200f}-"));
         // Root aliases other numbering systems to latn, and a locale's
-        // explicit value applies where the chain has one (cv's NaN).
+        // explicit value applies where the chain has one: CLDR 49 so.xml's
+        // bali NaN "NaN" (its latn one is "MaL"); its other bali symbols
+        // are inheritance markers, and so is cv.xml's bali NaN in CLDR 49.
         assert_eq!(sym("en", "beng", EXPLICIT_DECIMAL), None);
-        assert_eq!(sym("cv", "bali", EXPLICIT_NAN), Some("хисеп\u{a0}мар"));
-        assert_eq!(sym("cv", "bali", EXPLICIT_DECIMAL), None);
+        assert_eq!(sym("so", "bali", EXPLICIT_NAN), Some("NaN"));
+        assert_eq!(sym("so", "bali", EXPLICIT_DECIMAL), None);
+        assert_eq!(sym("cv", "bali", EXPLICIT_NAN), None);
         assert_eq!(explicit_percent_pattern(&id("en"), "arab"), Some("#,##0%"));
         assert_eq!(
             explicit_percent_pattern(&id("nl"), "arab"),
@@ -1004,6 +1012,16 @@ mod tests {
             p("0\u{a0}mila\u{202f}¤", 1)
         );
         assert_eq!(at("ja", "latn", 3, "other").unwrap().plain, p("0", 0));
+        // CLDR 49's zh 10^3 is "0" with a compact alternate, for latn and
+        // hanidec (zh.xml's hanidec patterns are its latn ones).
+        let zh = ShortCurrencyPattern {
+            plain: p("0", 0),
+            alt: Some(p("¤\u{a0}0K", 1)),
+        };
+        assert_eq!(at("zh", "latn", 3, "other"), Some(zh));
+        assert_eq!(at("zh", "hanidec", 3, "other"), Some(zh));
+        assert_eq!(at("zh-SG", "latn", 3, "other"), Some(zh));
+        assert_eq!(at("zh-Hant", "latn", 3, "other").unwrap().alt, None);
         assert_eq!(at("ja", "latn", 19, "other").unwrap().plain.zeros, 4);
         assert_eq!(at("ja", "latn", 3, "one"), None);
     }
@@ -1012,7 +1030,8 @@ mod tests {
     fn compact_currency_lines() {
         let file = parse_compact_currency(
             "# comment\nstrings 3\n0\n¤0K\n¤ 0K\nlocale\tund\t-\nlatn\t3-5\t1\tother=1,2\n\
-             latn\t6\t0\tother=0\nlocale\tx\tund\nthai\t14\t1\tone=1,2+2\n",
+             latn\t6\t0\tother=0\nlocale\tx\tund\nthai\t14\t1\tone=1,2+2\n\
+             thai\t2\t0\tother=0,2+1\n",
         );
         let und = &file["und"].patterns["latn"];
         assert_eq!(
@@ -1040,6 +1059,21 @@ mod tests {
         let x = &file["x"];
         assert_eq!(x.parent, Some("und"));
         assert_eq!(x.patterns["thai"][&(14, 1)].alt.unwrap().zeros, 3);
+        // A pattern "0" with a compact alternate (zh's 10^3 in CLDR 49): on
+        // a line of zeros 0, the delta is the alternate's whole digit run.
+        assert_eq!(
+            x.patterns["thai"][&(2, 5)],
+            ShortCurrencyPattern {
+                plain: ShortPattern {
+                    text: "0",
+                    zeros: 0
+                },
+                alt: Some(ShortPattern {
+                    text: "¤ 0K",
+                    zeros: 1
+                }),
+            }
+        );
     }
 
     #[test]

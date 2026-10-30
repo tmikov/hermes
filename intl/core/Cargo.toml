@@ -15,26 +15,26 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# ICU4X is pinned to 2.3 (CLDR 48.2): `~` keeps `cargo update` within 2.3.x.
-icu = { version = "~2.3.1", features = ["sync"] }
-icu_provider = "~2.3"
-# Not used directly. icu 2.3 asks for it with a caret requirement, which a
-# plain `cargo update` would satisfy with 2.4; this keeps it at 2.3.
-icu_locale_core = "~2.3"
+# ICU4X is pinned to 2.4 (CLDR 49): `~` keeps `cargo update` within 2.4.x.
+icu = { version = "~2.4.0", features = ["sync"] }
+icu_provider = "~2.4"
+# Not used directly. icu 2.4 asks for it with a caret requirement, which a
+# plain `cargo update` could satisfy with a later 2.x; this keeps it at 2.4.
+icu_locale_core = "~2.4"
 # Plural ranges (PluralRulesWithRanges, RawPluralOperands) and the compact
 # decimal data need the `unstable` feature.
-icu_plurals = { version = "~2.3", features = ["unstable"] }
-icu_decimal = { version = "~2.3", features = ["unstable"] }
+icu_plurals = { version = "~2.4", features = ["unstable"] }
+icu_decimal = { version = "~2.4", features = ["unstable"] }
 # The currency data structs (decision 4 of the Phase 3 plan), and the
 # decimals the number data APIs take.
-icu_experimental = "~0.6"
+icu_experimental = "~0.7"
 fixed_decimal = "~0.7"
 # The items of ICU4X's currency and compact patterns, and the VarULE trait
 # of the plural data that holds them.
-icu_pattern = "~0.5"
+icu_pattern = "~0.5.1"
 zerovec = "~0.11"
 # The key type of icu_experimental's dialect name map, at the version ICU4X
-# 2.3 uses.
+# 2.4 uses.
 potential_utf = "~0.1.6"
 # TryWriteable, which writes ICU4X's formatted date and time names.
 writeable = "~0.6"

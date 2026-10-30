@@ -10,7 +10,7 @@ section has the design, including the mapping from builds to Rust targets.
 ## Rust
 
 The CMake option `HERMES_BUILD_INTL` needs a Rust toolchain, 1.88 or newer
-(the MSRV of `icu` 2.3), or 1.95 or newer for tvOS and visionOS. Without
+(the MSRV of `icu` 2.4), or 1.95 or newer for tvOS and visionOS. Without
 one, configure fails and names the option; `-DHERMES_BUILD_INTL=OFF` gives
 a Rust-free build. Configure uses the `cargo` on `PATH`, else the one in
 `$CARGO_HOME/bin` or `~/.cargo/bin`, where rustup installs it (a Gradle

@@ -86,7 +86,7 @@ print(JSON.parse(ro('en', {calendar: 'dangi', era: 'long', year: 'numeric', mont
 
 // The calendar: the locale's preferred one, the -u-ca keyword, an option
 // for a calendar ICU4X does not implement (the locale's default), an
-// alias, and a value that is not a type (RangeError). CLDR 48.2 prefers
+// alias, and a value that is not a type (RangeError). CLDR 49 prefers
 // gregory to islamic-umalqura in SA, as Node does.
 print(JSON.parse(ro('th')).calendar, JSON.parse(ro('fa')).calendar, JSON.parse(ro('ar-SA')).calendar);
 // CHECK-NEXT: buddhist persian gregory

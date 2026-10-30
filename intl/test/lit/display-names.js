@@ -86,8 +86,10 @@ print(of('en', 'language', 'und'));
 print(of('en', 'language', 'sgn-GR', code));
 // CHECK-NEXT: "gss"
 // The locale's patterns and separators, and the short region in short.
+// CLDR 49 has no de short name for en-GB (CLDR 48's "Englisch (GB)"), so
+// the short dialect name is composed like the standard one.
 print(of('de', 'language', 'zh-Hans-CN'), of('de', 'language', 'en-GB', short), of('de', 'language', 'en-GB', shortStandard));
-// CHECK-NEXT: "Chinesisch (Vereinfacht, China)" "Englisch (GB)" "Englisch (UK)"
+// CHECK-NEXT: "Chinesisch (Vereinfacht, China)" "Englisch (UK)" "Englisch (UK)"
 print(of('zh-Hant', 'language', 'sr-Latn-RS'), of('zh-Hant', 'language', 'zh-Hant'), of('zh-Hant', 'language', 'zh-Hant', standard));
 // CHECK-NEXT: "塞爾維亞文（拉丁字母，塞爾維亞）" "繁體中文" "中文（繁體）"
 print(of('ar', 'language', 'zh-Hans-CN'));

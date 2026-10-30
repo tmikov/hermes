@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! The CLDR date data ICU4X 2.3 lacks (decision 5 of the Phase 4 plan), from
+//! The CLDR date data ICU4X 2.4 lacks (decision 5 of the Phase 4 plan), from
 //! two generated files in core/data, each parsed once on first use:
 //!
 //! - `date-patterns.txt`: per locale and calendar, the date, time and
@@ -355,7 +355,11 @@ fn day_period_table() -> &'static DayPeriods {
 /// A period CLDR has no name for in the locale reads as `""`. None for a
 /// locale that does not parse.
 pub fn day_periods(locale: &str) -> Option<Vec<String>> {
-    let table = day_period_table();
+    day_periods_in(day_period_table(), locale)
+}
+
+/// day_periods with the table given.
+fn day_periods_in(table: &DayPeriods, locale: &str) -> Option<Vec<String>> {
     let tag = fallback_key(&language_id(locale)?, |t| table.locales.contains_key(t));
     let names_of = |period: &str| -> [&'static str; 3] {
         let mut t = Some(tag.as_str());
@@ -604,14 +608,44 @@ mod tests {
         };
         assert_eq!(first("es-CO"), "morning2");
         assert_eq!(first("es"), "morning1");
-        // ht's rules have no noon, although its chain has a noon name (fr's).
-        let ht = day_periods("ht").unwrap();
-        assert_eq!(ht[ht.len() - 3..], ["", "", ""]);
         // hi-Latn has a noon, hi has none.
         let hi = day_periods("hi").unwrap();
         assert_eq!(hi[hi.len() - 3..], ["", "", ""]);
         let latn = day_periods("hi-Latn").unwrap();
         assert!(latn[latn.len() - 3..].iter().all(|s| !s.is_empty()));
+    }
+
+    #[test]
+    fn day_periods_noon_follows_rules() {
+        // A locale whose rules have no noon shows none, although its parent
+        // chain has a noon name. No CLDR 49 locale is like this, so a table
+        // of our own stands in: fr has noon rules and a name, xx (child of
+        // fr) has rules of its own without noon, yy (child of fr) takes fr's.
+        let table = parse_day_periods(
+            "# A comment line.\n\
+             rules und\n\
+             am 0 720\n\
+             pm 720 1440\n\
+             rules fr\n\
+             morning1 0 720\n\
+             noon 720 720\n\
+             afternoon1 720 1440\n\
+             rules xx\n\
+             morning1 0 720\n\
+             afternoon1 720 1440\n\
+             locale und - und\n\
+             locale fr und fr\n\
+             noon midi\tmidi\tm\n\
+             locale xx fr xx\n\
+             locale yy fr fr\n",
+        );
+        let noon = |tag: &str| {
+            let v = day_periods_in(&table, tag).unwrap();
+            v[v.len() - 3..].to_vec()
+        };
+        assert_eq!(noon("fr"), ["midi", "midi", "m"]);
+        assert_eq!(noon("yy"), ["midi", "midi", "m"]);
+        assert_eq!(noon("xx"), ["", "", ""]);
     }
 
     /// The pattern letters outside quotes, a run of the same letter once.

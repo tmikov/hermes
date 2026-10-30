@@ -375,10 +375,10 @@ function intervalSkeletonOfFields(data, part) {
 /// pattern's own width, stand-alone flag or AM/PM or day period width,
 /// as in ICU4C. An interval for an era difference ([[Era]]) is not used
 /// either unless both its halves show the era (a refinement of decision
-/// 11): CLDR 48.2's ko GyMMMd and GyMd intervals for G, "G y년 M월 d일 ~
-/// y년 M월 d일", lack the second era, which ICU4C shows ("헤이세이 31년 4월
-/// 30일 ~ 1년 5월 1일"); FB(P) gives "헤이세이 31년 4월 30일 ~ 레이와 1년 5월
-/// 1일".
+/// 11): CLDR 49's ko GyMMMd interval for G in the japanese and roc
+/// calendars, "G y년 M월 d일~y년 M월 d일", lacks the second era, as CLDR 48's
+/// did, which ICU4C shows ("헤이세이 31년 4월 30일 ~ 1년 5월 1일"); FB(P) gives
+/// "헤이세이 31년 4월 30일~레이와 1년 5월 1일".
 function intervalRangeFormat(
   data,
   skeleton,

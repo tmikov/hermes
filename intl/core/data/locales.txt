@@ -1,6 +1,9 @@
-# The locales ICU4X 2.3 compiled data covers (its "recommended" set),
-# one per line. From magrinj/hermes-intl rust/locales/recommended.txt;
+# The locales ICU4X 2.4 compiled data covers (its "recommended" set),
+# one per line. Adapted from magrinj/hermes-intl rust/locales/recommended.txt;
 # see intl/THIRD_PARTY_NOTICES.md.
+ady
+ady-JO
+ady-TR
 af
 af-NA
 ak
@@ -58,6 +61,9 @@ ca-FR
 ca-IT
 ceb
 chr
+ckb
+ckb-IR
+cop
 cs
 csw
 cv
@@ -313,7 +319,6 @@ hi-Latn
 hr
 hr-BA
 hsb
-ht
 hu
 hy
 ia
@@ -329,8 +334,12 @@ it-VA
 ja
 jv
 ka
+kbd
+kbd-TR
 kea
+kek
 kgp
+ki
 kk
 kk-Arab
 kk-KZ
@@ -343,6 +352,7 @@ kok
 kok-Latn
 ks
 ks-Deva
+ksh
 ku
 ku-Latn-IQ
 ku-SY
@@ -354,6 +364,7 @@ kxv-Telu
 ky
 lb
 lij
+lld
 lmo
 lo
 lt
@@ -397,6 +408,7 @@ pa
 pcm
 pl
 pms
+prg
 ps
 ps-PK
 pt
@@ -414,6 +426,7 @@ pt-TL
 qu
 qu-BO
 qu-EC
+quc
 raj
 rm
 ro
@@ -455,6 +468,7 @@ sr-XK
 st
 st-LS
 su
+suz-Sunu
 sv
 sv-AX
 sv-FI

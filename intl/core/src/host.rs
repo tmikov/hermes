@@ -118,7 +118,7 @@ pub fn primary_time_zone(canonical: &str) -> &str {
 /// `GetDynamicTimeZoneInformation`, such as "Pacific Standard Time") to its
 /// primary IANA identifier, by CLDR's windowsZones table. `region` is the
 /// user's region (`GetUserDefaultGeoName`), which selects a territory's own
-/// row ("Pacific Standard Time" in CA is America/Vancouver); with no region,
+/// row ("Eastern Standard Time" in CA is America/Toronto); with no region,
 /// an unparsable one, or one that has no row for the zone, the territory
 /// `001` row is used. None if the table does not know the key.
 pub fn time_zone_from_windows(id: &str, region: Option<&str>) -> Option<String> {
@@ -247,16 +247,8 @@ mod tests {
             ("India Standard Time", None, Some("Asia/Kolkata")),
             ("UTC", None, Some("UTC")),
             // A territory's own row.
-            (
-                "Pacific Standard Time",
-                Some("CA"),
-                Some("America/Vancouver"),
-            ),
-            (
-                "Pacific Standard Time",
-                Some("ca"),
-                Some("America/Vancouver"),
-            ),
+            ("Eastern Standard Time", Some("CA"), Some("America/Toronto")),
+            ("Eastern Standard Time", Some("ca"), Some("America/Toronto")),
             (
                 "Eastern Standard Time",
                 Some("US"),
@@ -298,7 +290,7 @@ mod tests {
         }
     }
 
-    /// Every key of CLDR 48.2's windowsZones that has a territory 001 row
+    /// Every key of CLDR 49's windowsZones that has a territory 001 row
     /// maps to a primary IANA identifier (Review Focus 5).
     #[test]
     fn every_windows_zone_maps_to_a_primary_identifier() {
@@ -315,8 +307,8 @@ mod tests {
             .iter()
             .filter_map(|(key, _)| key.strip_suffix("/001").map(str::to_owned))
             .collect();
-        // cldr-core 48.2.0's windowsZones.json has 139 territory 001 rows.
-        assert_eq!(keys.len(), 139);
+        // cldr-core 49.0.0's windowsZones.json has 142 territory 001 rows.
+        assert_eq!(keys.len(), 142);
         for key in &keys {
             let zone = time_zone_from_windows(key, None)
                 .unwrap_or_else(|| panic!("{key:?} maps to nothing"));

@@ -13,11 +13,8 @@
 // after other units, fractional units, other locales and numbering
 // systems, resolvedOptions, the errors, the order of the field and option
 // reads, and supportedLocalesOf. The expected strings are Node's (ICU
-// 78.2), except where Node does not follow the draft (NaN is not integral).
-// he's " ו-" is CLDR's unit pattern "{0} ו-{1}" with U+002D: CLDR has no
-// conditional rule for the unit list (only for "standard", where ICU4X
-// gives U+2011 before a non-Hebrew element, plan decision 2), so the
-// plugin and Node agree.
+// 78.2), except where Node does not follow the draft (NaN is not integral)
+// and where CLDR 49 changed the data (he's unit list).
 
 var J = stringify;
 /// The class of the exception f throws, or 'none'.
@@ -116,10 +113,10 @@ print(J(df('ar-u-nu-arab', {style: 'digital'}).format({hours: 1, minutes: 2, sec
 // CHECK-NEXT: "١:٠٢:٠٣"
 print(J(df('ja', {style: 'narrow'}).format({hours: 1, minutes: 2, seconds: 3})));
 // CHECK-NEXT: "1h2m3s"
-// he's unit list ends in CLDR's "{0} ו-{1}", with U+002D and no
-// conditional rule, so the hyphen comes before any last element.
+// he's unit list joins every element with ", " in CLDR 49, where Node's
+// CLDR 48 ends in "{0} ו-{1}".
 print(J(df('he', {style: 'long'}).format({hours: 1, minutes: 2, seconds: 11})));
-// CHECK-NEXT: "1 שעה, שתי דקות ו-11 שניות"
+// CHECK-NEXT: "1 שעה, שתי דקות, 11 שניות"
 
 // resolvedOptions: the draft's order, no fractionalDigits when it is
 // undefined, and "numeric" for a fractional unit.

@@ -266,30 +266,30 @@ pub fn name(locale: &str, kind: &str, code: &str, style: &str) -> Option<Option<
     Some(match kind {
         "language" => Language::try_from_str(code).ok().and_then(|language| {
             names_and_short!(
-                LanguageDisplayNamesV1,
+                LocaleNamesLanguageV0,
                 &language.to_tinystr().to_unvalidated(),
                 language.as_str()
             )
         }),
         "dialect" => dialect_key(code).and_then(|key| {
-            names_and_short!(LocaleDisplayNamesV1, PotentialUtf8::from_str(&key), &key)
+            names_and_short!(LocaleNamesLocaleV0, PotentialUtf8::from_str(&key), &key)
         }),
         "region" => Region::try_from_str(code).ok().and_then(|region| {
             names_and_short!(
-                RegionDisplayNamesV1,
+                LocaleNamesRegionV0,
                 &region.to_tinystr().to_unvalidated(),
                 region.as_str()
             )
         }),
         "script" => Script::try_from_str(code).ok().and_then(|script| {
             names_and_short!(
-                ScriptDisplayNamesV1,
+                LocaleNamesScriptV0,
                 &script.to_tinystr().to_unvalidated(),
                 script.as_str()
             )
         }),
         "variant" => Variant::try_from_str(code).ok().and_then(|variant| {
-            let data = load::<VariantDisplayNamesV1>(&ExperimentalBaked, &data_locale, "");
+            let data = load::<LocaleNamesVariantV0>(&ExperimentalBaked, &data_locale, "");
             variant_name(data.as_ref().map(|p| p.get()), variant, &entries)
         }),
         "currency" => (code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase()))
@@ -431,7 +431,8 @@ mod tests {
             .lines()
             .filter(|l| !l.starts_with('#'))
             .collect();
-        assert_eq!(listed.len(), 307);
+        // CLDR 49's non-deprecated codes; every one has an English name.
+        assert_eq!(listed.len(), 306);
         let mut found = Vec::new();
         for a in b'A'..=b'Z' {
             for b in b'A'..=b'Z' {
@@ -514,35 +515,48 @@ mod tests {
     ];
 
     /// The names that some locales of locales.txt other than und lack,
-    /// each with those locales. CLDR 48.2 has no such name for them, and
-    /// their parent is root, which has none either; Node (CLDR 48.0) lacks
-    /// the same names in the same locales.
+    /// each with those locales. CLDR 49 (cldr-localenames-full 49.0.0
+    /// territories.json, scripts.json and localeDisplayNames.json,
+    /// cldr-numbers-full currencies.json) has no such name for them or
+    /// their parents short of root, which has none either. Node (CLDR
+    /// 48.0) lacks the same names in the same locales, where it has the
+    /// locale (it has none of ady, kbd, quc and suz-Sunu, and has prg
+    /// without them); CLDR 49 added lij's calendar name.
     const MISSING: [(&str, &str, &[&str]); 4] = [
         (
             "region",
             "US",
             &[
-                "bgc", "bho", "bua", "gaa", "ie", "lij", "lmo", "nds", "nds-NL", "nso", "oc",
-                "oc-ES", "pms", "raj", "rw", "st", "st-LS", "szl", "tn", "tn-BW", "vmw", "za",
+                "ady", "ady-JO", "ady-TR", "bgc", "bho", "bua", "gaa", "ie", "kbd", "kbd-TR",
+                "lij", "lmo", "nds", "nds-NL", "nso", "oc", "oc-ES", "pms", "prg", "quc", "raj",
+                "rw", "st", "st-LS", "suz-Sunu", "szl", "tn", "tn-BW", "vmw", "za",
             ],
         ),
-        ("script", "Latn", &["bgc", "bho", "bua", "raj"]),
+        (
+            "script",
+            "Latn",
+            &[
+                "ady", "ady-JO", "ady-TR", "bgc", "bho", "bua", "kbd", "kbd-TR", "raj", "suz-Sunu",
+            ],
+        ),
         (
             "calendar",
             "gregory",
             &[
-                "bgc", "bho", "bua", "csw", "gaa", "kok-Latn", "lij", "lmo", "nds", "nds-NL",
-                "nqo", "nso", "oc", "oc-ES", "pms", "raj", "rw", "sah", "st", "st-LS", "szl", "tn",
-                "tn-BW", "vmw", "za",
+                "ady", "ady-JO", "ady-TR", "bgc", "bho", "bua", "ckb", "ckb-IR", "csw", "gaa",
+                "kbd", "kbd-TR", "ki", "kok-Latn", "lmo", "nds", "nds-NL", "nqo", "nso", "oc",
+                "oc-ES", "pms", "prg", "quc", "raj", "rw", "sah", "st", "st-LS", "suz-Sunu", "szl",
+                "tn", "tn-BW", "vmw", "za",
             ],
         ),
         (
             "currency",
             "USD",
             &[
-                "bgc", "bho", "bua", "csw", "gaa", "ie", "ii", "kok-Latn", "lij", "lmo", "mt",
-                "nds", "nds-NL", "nso", "oc", "oc-ES", "pms", "raj", "rw", "st", "st-LS", "szl",
-                "tn", "tn-BW", "to", "tyv", "vmw", "za",
+                "ady", "ady-JO", "ady-TR", "bgc", "bho", "bua", "ckb", "ckb-IR", "csw", "gaa",
+                "ie", "ii", "kbd", "kbd-TR", "kok-Latn", "lij", "lmo", "mt", "nds", "nds-NL",
+                "nso", "oc", "oc-ES", "pms", "prg", "quc", "raj", "rw", "st", "st-LS", "suz-Sunu",
+                "szl", "tn", "tn-BW", "to", "tyv", "vmw", "za",
             ],
         ),
     ];
@@ -613,7 +627,7 @@ mod tests {
 
     #[test]
     fn code_equal_variants() {
-        // CLDR 48.2 has no code-equal variant name, so a table of our own
+        // CLDR 49 has no code-equal variant name, so a table of our own
         // stands in. Its eq keys are CLDR's uppercase variant keys.
         let table = synthetic(
             "# A comment line.\n\

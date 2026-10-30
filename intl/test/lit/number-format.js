@@ -11,7 +11,8 @@
 // The basic surface of Intl.NumberFormat with the decimal and percent
 // styles: the resolved options, grouping, signs, non-finite values, the
 // constructor without new, supportedLocalesOf and the bound format. The
-// expected strings are ICU4C's (Node 24, ICU 78.2).
+// expected strings are ICU4C's (Node 24, ICU 78.2), except blo's grouping
+// separator, which CLDR 49 changed.
 
 /// The parts of nf.formatToParts(x), as type:value, separated by "|" and
 /// escaped.
@@ -80,12 +81,13 @@ print(
 );
 // CHECK-NEXT: ১,২৩৪,৫৬৭% ১২,৩৪,৫৬৭
 // blo's percent pattern "% #,#0" has a primary size of 2, and its decimal
-// pattern one of 3.
+// pattern one of 3. Its grouping separator is U+202F in CLDR 49 (U+00A0
+// in CLDR 48).
 print(
   stringify(new Intl.NumberFormat('blo', {style: 'percent'}).format(12345678.9)),
   stringify(new Intl.NumberFormat('blo').format(1234567890)),
 );
-// CHECK-NEXT: "%\u00a012\u00a034\u00a056\u00a078\u00a090" "1\u00a0234\u00a0567\u00a0890"
+// CHECK-NEXT: "%\u00a012\u202f34\u202f56\u202f78\u202f90" "1\u202f234\u202f567\u202f890"
 print(new Intl.NumberFormat('en-IN', {style: 'percent'}).format(1234567));
 // CHECK-NEXT: 12,34,56,700%
 

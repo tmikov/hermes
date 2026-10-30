@@ -171,8 +171,8 @@ print(escape(new Intl.NumberFormat('fr-CH').format(-123.5)));
 // A numbering system root aliases to latn has the locale's latn
 // symbols, the currency separators included, whether nu is an option or
 // the -u-nu- keyword; the decimal style next to each keeps the plain
-// separators. fr-CH's group separator is "'" in CLDR 48.2, U+202F in
-// ICU4C's CLDR 48.0.
+// separators. fr-CH's group separator is "'" in CLDR 49 (and 48.2),
+// U+202F in ICU4C's CLDR 48.0.
 show(currencyFormat('de-AT', 'EUR', {numberingSystem: 'deva'}), 1234.5);
 // CHECK-NEXT: €\u00a0१.२३४,५० currency:€|literal:\u00a0|integer:१|group:.|integer:२३४|decimal:,|fraction:५० ok
 show(currencyFormat('de-AT-u-nu-deva', 'EUR'), 1234.5);

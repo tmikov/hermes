@@ -1262,7 +1262,7 @@ function compactEntryOfExponent(table, x, exponent) {
 /// Whether the compact pattern compactSubPattern chooses for the rounded
 /// significand x with the String formattedString and the non-zero exponent
 /// is CLDR's "0" (`{0}` alone in the compact table): no compact form, so
-/// the number is not compacted. CLDR 48.2 has it for one count of a
+/// the number is not compacted. CLDR 49 has it for one count of a
 /// magnitude whose other counts are compact only in vec, for the decimal
 /// and the currency patterns. An exact-0 or exact-1 pattern that applies
 /// is never "0".

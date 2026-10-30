@@ -16,9 +16,9 @@ test262-commit: c9aa6126e8f6fe2c6f668c65bfba771ffc8a6096
 test/intl402/Collator/usage-de.js both ICU4X's compiled data has no search collations, so usage "search" sorts as "sort"
 test/intl402/DateTimeFormat/canonicalize-timezone.js both the draft of October 24, 2026 stores the primary time zone identifier; test262's canonical-tz feature (Temporal) keeps the identifier as given
 test/intl402/DateTimeFormat/canonicalize-utc-timezone.js both the draft of October 24, 2026 stores the primary time zone identifier; test262's canonical-tz feature (Temporal) keeps the identifier as given
-test/intl402/DateTimeFormat/prototype/format/numbering-system.js both expects V8's web-compatibility replacement of U+202F by U+0020 in format(); the draft and CLDR 48.2 keep U+202F (V8's formatToParts keeps it too)
+test/intl402/DateTimeFormat/prototype/format/numbering-system.js both expects V8's web-compatibility replacement of U+202F by U+0020 in format(); the draft and CLDR 49 keep U+202F (V8's formatToParts keeps it too)
 test/intl402/DateTimeFormat/timezone-case-insensitive.js both the draft of October 24, 2026 stores the primary time zone identifier; test262's canonical-tz feature (Temporal) keeps the identifier as given
 test/intl402/DateTimeFormat/timezone-not-canonicalized.js both the draft of October 24, 2026 stores the primary time zone identifier; test262's canonical-tz feature (Temporal) keeps the identifier as given
-test/intl402/PluralRules/prototype/resolvedOptions/plural-categories-order.js both gv is not an available locale: ICU4X 2.3's compiled data does not include it, so it resolves to the default locale
+test/intl402/PluralRules/prototype/resolvedOptions/plural-categories-order.js both gv is not an available locale: it is not in the plugin's locales.txt, so it resolves to the default locale
 test/intl402/PluralRules/prototype/select/notation.js both CLDR defines the e operand only for non-negative exponents; for fr 1e-6 in scientific notation i = 0 selects "one", not test262's "many"
 test/intl402/PluralRules/prototype/selectRange/argument-tonumber-throws.js both the draft converts with ToIntlMathematicalValue, which accepts BigInt; this test262 commit still expects ToNumber's TypeError

@@ -56,7 +56,7 @@ if(_triples_error)
     "Apple platform.")
 endif()
 
-# The MSRV of icu 2.3. rustup ships the standard library for the tvOS and
+# The MSRV of icu 2.4. rustup ships the standard library for the tvOS and
 # visionOS targets from Rust 1.95.
 set(HERMES_INTL_RUST_MIN_VERSION 1.88)
 if(HERMES_INTL_RUST_TRIPLES MATCHES "-apple-(tvos|visionos)")

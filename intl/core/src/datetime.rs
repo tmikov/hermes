@@ -809,7 +809,7 @@ mod tests {
         let f = make("en", "roc", "UTC", &["G", "GGGG"]);
         let v = at(&f, utc(1911, 6, 1, 0, 0));
         assert_eq!((v[1].as_str(), v[2].as_str()), ("broc", "1"));
-        // CLDR 48.2 en has "B.R.O.C." for both widths, as Node shows.
+        // CLDR 49 en has "B.R.O.C." for both widths, as Node shows.
         assert_eq!(v[14..], ["B.R.O.C.", "B.R.O.C."]);
         let v = at(&f, utc(1912, 6, 1, 0, 0));
         assert_eq!((v[1].as_str(), v[2].as_str()), ("roc", "1"));

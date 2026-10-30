@@ -10,7 +10,7 @@
 // The Intl.Locale information methods on locales with little or no data.
 // Each expected line is worked out from the steps of the ECMA-402 draft of
 // October 24, 2026 ("Abstract Operations for Locale Objects") and the
-// CLDR 48.2 data of intl/core/data and ICU4X; the comments name the step
+// CLDR 49 data of intl/core/data and ICU4X; the comments name the step
 // that gives it. RegionPreference turns a missing region into the likely
 // one, or "001". CLDR's "001" calendar, hour-cycle and week data are the
 // default for every region it does not list (UTS 35 Part 4), so those data

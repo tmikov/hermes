@@ -13,7 +13,6 @@ use crate::number::{by_category, load, plural_categories, render_compact};
 use icu_experimental::provider::Baked as ExperimentalBaked;
 use icu_experimental::relativetime::provider::*;
 use icu_provider::prelude::*;
-use zerovec::ule::AsULE;
 
 /// RelativeTimeFormat's data for the language identifier of `locale` (a
 /// canonical tag) and `style` "long", "short" or "narrow". For each unit
@@ -40,9 +39,18 @@ pub fn patterns(locale: &str, style: &str) -> Option<Vec<String>> {
                     .map(render_compact),
             );
         }
-        out.push(data.relatives.len().to_string());
-        for (offset, name) in data.relatives.iter() {
-            out.push(i8::from_unaligned(*offset).to_string());
+        // icu_experimental 0.7 stores the names as a contiguous vector
+        // from offset -zero_index, with "" for an offset that has none.
+        let names: Vec<(i32, &str)> = data
+            .relatives
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| !name.is_empty())
+            .map(|(i, name)| (i as i32 - i32::from(data.zero_index), name))
+            .collect();
+        out.push(names.len().to_string());
+        for (offset, name) in names {
+            out.push(offset.to_string());
             out.push(name.to_owned());
         }
     }
@@ -54,37 +62,40 @@ pub fn patterns(locale: &str, style: &str) -> Option<Vec<String>> {
 /// month, quarter, year, each as the payload of one marker type: all 24
 /// markers have the same data struct. This is the one list of the
 /// markers. None for any other style, or if there is no data.
-fn payloads(locale: &DataLocale, style: &str) -> Option<[DataPayload<LongSecondRelativeV1>; 8]> {
+fn payloads(
+    locale: &DataLocale,
+    style: &str,
+) -> Option<[DataPayload<DatetimeRelativeSecondLongV1>; 8]> {
     Some(match style {
         "long" => [
-            unit::<LongSecondRelativeV1>(locale)?,
-            unit::<LongMinuteRelativeV1>(locale)?,
-            unit::<LongHourRelativeV1>(locale)?,
-            unit::<LongDayRelativeV1>(locale)?,
-            unit::<LongWeekRelativeV1>(locale)?,
-            unit::<LongMonthRelativeV1>(locale)?,
-            unit::<LongQuarterRelativeV1>(locale)?,
-            unit::<LongYearRelativeV1>(locale)?,
+            unit::<DatetimeRelativeSecondLongV1>(locale)?,
+            unit::<DatetimeRelativeMinuteLongV1>(locale)?,
+            unit::<DatetimeRelativeHourLongV1>(locale)?,
+            unit::<DatetimeRelativeDayLongV1>(locale)?,
+            unit::<DatetimeRelativeWeekLongV1>(locale)?,
+            unit::<DatetimeRelativeMonthLongV1>(locale)?,
+            unit::<DatetimeRelativeQuarterLongV1>(locale)?,
+            unit::<DatetimeRelativeYearLongV1>(locale)?,
         ],
         "short" => [
-            unit::<ShortSecondRelativeV1>(locale)?,
-            unit::<ShortMinuteRelativeV1>(locale)?,
-            unit::<ShortHourRelativeV1>(locale)?,
-            unit::<ShortDayRelativeV1>(locale)?,
-            unit::<ShortWeekRelativeV1>(locale)?,
-            unit::<ShortMonthRelativeV1>(locale)?,
-            unit::<ShortQuarterRelativeV1>(locale)?,
-            unit::<ShortYearRelativeV1>(locale)?,
+            unit::<DatetimeRelativeSecondShortV1>(locale)?,
+            unit::<DatetimeRelativeMinuteShortV1>(locale)?,
+            unit::<DatetimeRelativeHourShortV1>(locale)?,
+            unit::<DatetimeRelativeDayShortV1>(locale)?,
+            unit::<DatetimeRelativeWeekShortV1>(locale)?,
+            unit::<DatetimeRelativeMonthShortV1>(locale)?,
+            unit::<DatetimeRelativeQuarterShortV1>(locale)?,
+            unit::<DatetimeRelativeYearShortV1>(locale)?,
         ],
         "narrow" => [
-            unit::<NarrowSecondRelativeV1>(locale)?,
-            unit::<NarrowMinuteRelativeV1>(locale)?,
-            unit::<NarrowHourRelativeV1>(locale)?,
-            unit::<NarrowDayRelativeV1>(locale)?,
-            unit::<NarrowWeekRelativeV1>(locale)?,
-            unit::<NarrowMonthRelativeV1>(locale)?,
-            unit::<NarrowQuarterRelativeV1>(locale)?,
-            unit::<NarrowYearRelativeV1>(locale)?,
+            unit::<DatetimeRelativeSecondNarrowV1>(locale)?,
+            unit::<DatetimeRelativeMinuteNarrowV1>(locale)?,
+            unit::<DatetimeRelativeHourNarrowV1>(locale)?,
+            unit::<DatetimeRelativeDayNarrowV1>(locale)?,
+            unit::<DatetimeRelativeWeekNarrowV1>(locale)?,
+            unit::<DatetimeRelativeMonthNarrowV1>(locale)?,
+            unit::<DatetimeRelativeQuarterNarrowV1>(locale)?,
+            unit::<DatetimeRelativeYearNarrowV1>(locale)?,
         ],
         _ => return None,
     })
@@ -92,7 +103,7 @@ fn payloads(locale: &DataLocale, style: &str) -> Option<[DataPayload<LongSecondR
 
 /// The data of the relative time marker `M` for `locale`, as the payload
 /// of one marker type. None if there is no data.
-fn unit<M>(locale: &DataLocale) -> Option<DataPayload<LongSecondRelativeV1>>
+fn unit<M>(locale: &DataLocale) -> Option<DataPayload<DatetimeRelativeSecondLongV1>>
 where
     M: DataMarker<DataStruct = RelativeTimePatternData<'static>>,
     ExperimentalBaked: DataProvider<M>,

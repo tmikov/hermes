@@ -17,7 +17,7 @@ It provides:
   Array and TypedArray, and the `toLocaleString`, `toLocaleDateString` and
   `toLocaleTimeString` of Date.
 
-Its data comes from ICU4X 2.3 and CLDR 48.2, and the library bundles the
+Its data comes from ICU4X 2.4 and CLDR 49, and the library bundles the
 time zone rules of IANA tzdb 2026e.
 
 Hermes has no other `Intl`: without the plugin a runtime has no `Intl`
@@ -122,13 +122,8 @@ JavaScript, adding a native helper, and updating the CLDR data.
 
 ## Known limitations
 
-- [01a17bdc-f127](../dz/issues/01a17bdc-f127-7468-8c5a-bdb053a741fa.md):
-  `Intl.Segmenter` word segmentation is quadratic on long unbroken CJK or
-  Thai runs (ICU4X 2.3).
-- [01a18652-9cc4](../dz/issues/01a18652-9cc4-7d49-9453-abdf70345598.md):
-  upgrade the plugin's ICU4X to 2.4 and its CLDR data to 49.
 - [01a18652-9cdc](../dz/issues/01a18652-9cdc-7461-b19b-d1b6ddf96208.md):
-  the plugin is about 20 MB per platform.
+  the plugin is about 19 MB per platform.
 - Windows: no build has run on Windows itself. The spec's
   [Phasing](../doc/superpowers/specs/2026-10-22-intl-plugin-design.md#phasing)
   lists what has to be checked there before the plugin is on by default.

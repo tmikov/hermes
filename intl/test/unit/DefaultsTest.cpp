@@ -337,8 +337,8 @@ TEST(DefaultsTest, WindowsTimeZoneKeys) {
       core::timeZoneFromWindows("Pacific Standard Time", "").value_or(""),
       "America/Los_Angeles");
   EXPECT_EQ(
-      core::timeZoneFromWindows("Pacific Standard Time", "CA").value_or(""),
-      "America/Vancouver");
+      core::timeZoneFromWindows("Eastern Standard Time", "CA").value_or(""),
+      "America/Toronto");
   EXPECT_EQ(
       core::timeZoneFromWindows("India Standard Time", "US").value_or(""),
       "Asia/Kolkata");

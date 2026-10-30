@@ -2026,7 +2026,10 @@ mod tests {
         };
         let pst = b"Pacific Standard Time";
         assert_eq!(call(pst, b"").as_deref(), Some("America/Los_Angeles"));
-        assert_eq!(call(pst, b"CA").as_deref(), Some("America/Vancouver"));
+        assert_eq!(
+            call(b"Eastern Standard Time", b"CA").as_deref(),
+            Some("America/Toronto")
+        );
         assert_eq!(
             call(b"India Standard Time", b"US").as_deref(),
             Some("Asia/Kolkata")

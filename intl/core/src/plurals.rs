@@ -353,7 +353,7 @@ mod tests {
         );
         assert_eq!(categories(&rules("uz-Cyrl", false)), ["one", "other"]);
         assert_eq!(sel(&rules("sr-Latn-BA", false), "21", 0), "one");
-        // The region stays: pt-PT has its own rules (CLDR 48.2 plurals.json:
+        // The region stays: pt-PT has its own rules (CLDR 49 plurals.json:
         // pt one is "i = 0..1", pt-PT one is "i = 1 and v = 0").
         assert_eq!(sel(&rules("pt", false), "0", 0), "one");
         assert_eq!(sel(&rules("pt-PT", false), "0", 0), "other");

@@ -8,7 +8,7 @@
 // RUN: %hermes %s | %FileCheck --match-full-lines %s
 
 // The Intl.Locale information methods on locales with data. The values are
-// CLDR 48.2's, as the Rust tests in intl/core/src/info.rs pin them.
+// CLDR 49's, as the Rust tests in intl/core/src/info.rs pin them.
 
 /// JSON for v, or "undefined".
 function show(v) {

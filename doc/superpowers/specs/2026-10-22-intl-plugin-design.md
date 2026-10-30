@@ -217,7 +217,7 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
 ### Build
 
 - CMake option `HERMES_BUILD_INTL`. When it is on and no Rust toolchain
-  (1.88 or newer, the MSRV of `icu` 2.3; 1.95 or newer when a tvOS or
+  (1.88 or newer, the MSRV of `icu` 2.4; 1.95 or newer when a tvOS or
   visionOS triple is selected) is found, configure fails with a message
   naming the option. So the default configuration requires Rust;
   `-DHERMES_BUILD_INTL=OFF` gives a Rust-free build. This is the first Rust
@@ -317,7 +317,7 @@ Rust core, the ICU4X data, the JSI layer and the bytecode.
 - `Cargo.lock` is committed, and every cargo invocation from CMake uses
   `--locked` and runs from `intl/core`, at configure and at build time, so
   that a rustup toolchain override there applies to both. The ICU4X
-  crates stay on 2.3.x (CLDR 48.2): `Cargo.toml` uses `~` requirements
+  crates stay on 2.4.x (CLDR 49): `Cargo.toml` uses `~` requirements
   for them, and the lock file must not mix ICU4X minor versions. Shared
   dependencies such as `zerovec`, `yoke` and `tinystr` are not pinned
   exactly in `Cargo.toml`; the lock file holds them. Crates are
@@ -561,6 +561,30 @@ AAR from 118,552,587 to 116,262,557 bytes; `libhermesintl.so` stayed
 about the same (x86_64: 19,926,152, then 19,928,152 bytes). The
 `hermesvm.framework` sizes per slice are under Phasing, item 7.
 
+After the move to ICU4X 2.4 and CLDR 49 the plugin is 0.43 to 0.50 MB
+smaller per architecture on every platform measured, mostly from ICU4X
+2.4's smaller Southeast Asian word dictionaries (see "Segmenter" under
+Data). Bytes:
+
+| Platform | Phase 6/7 | ICU4X 2.4, CLDR 49 | Change | Build it comes from |
+|---|---:|---:|---:|---|
+| Linux x86_64, stripped | 19,931,056 | 19,435,440 | -495,616 (-2.5%) | Ninja Multi-Config Release, Clang, Linux host |
+| Linux x86_64, unstripped | 24,241,992 | 23,747,856 | -494,136 | same |
+| Android arm64-v8a | 19,768,864 | 19,268,736 | -500,128 | the AAR's copy (`:assembleRelease`), Phase 7's AAR before |
+| Android armeabi-v7a | 18,455,780 | 18,021,060 | -434,720 | same |
+| Android x86 | 19,141,280 | 18,706,200 | -435,080 | same |
+| Android x86_64 | 19,928,152 | 19,434,952 | -493,200 | same |
+| Android x86_64 | 19,925,832 | 19,434,632 | -491,200 | MinSizeRel, NDK r28c, configured as AGP does; stripped |
+| Windows x64 | 19,026,944 | 18,589,696 | -437,248 | clang-cl cross build, Release |
+
+The Linux figures are like for like: the Phase 6 build directory's
+binary gives the old figures, and the same directory rebuilt at the new
+commit gives the new ones. The Windows "before" figure is the Phase 6 one
+from the table above, not a rebuild of the old commit.
+Windows arm64, the `cl` builds and the other Android ABIs' CMake builds
+were not measured again. The Apple sizes per slice (2.2% smaller in
+each) are under Phasing, item 8.
+
 ## Loading and installation
 
 ### The plugin's entry point
@@ -648,7 +672,9 @@ Normalization:
   second closure rule of `[[AvailableLocales]]` below) reduces to nothing
   too. So `ff`, `ff-BF` and `bal`, available because of `ff-Adlm-BF` and
   `bal-Latn` but likely Latin and Arabic, are never a default;
-  `ff-Adlm-BF` and `bal-Latn` are.
+  `ff-Adlm-BF` and `bal-Latn` are. Likewise `suz` (and `suz-Deva`),
+  available because of `suz-Sunu` but likely Devanagari, formats with
+  root's data and is never a default; `suz-Sunu` is.
   - A detected value that is not well-formed, or reduces to nothing, is
     ignored, and the next source is tried.
   - In an explicit `IntlDefaultLocales`, an ill-formed element is fatal.
@@ -1303,7 +1329,7 @@ magrinj do the same.
 
 ### Number formatting
 
-ICU4X 2.3's number formatters do not fit ECMA-402. They round on their
+ICU4X 2.4's number formatters do not fit ECMA-402. They round on their
 own, produce few parts, and have no scientific notation, ranges, NaN or
 infinity. So the plugin uses only ICU4X's data for numbers, and formatting
 is JS, written step by step from the draft: FormatNumericToString,
@@ -1388,18 +1414,17 @@ leaves them ASCII; ICU4C does the same.
 
 ### Date and time formatting
 
-ICU4X 2.3's date formatters do not fit ECMA-402 either. They take field
-sets, not option bags (ICU4X's field-bag support is unstable, on its main
-branch for 2.4), and have no `h24` hour cycle, no flexible day periods and
-no ranges; its data has no CLDR `availableFormats` or `intervalFormats`.
-So formatting is JS, written step by step from the draft, as
-NumberFormat's is: FormatDateTimePattern, PartitionDateTimePattern,
-PartitionDateTimeRangePattern, FormatDateTime, FormatDateTimeToParts,
-FormatDateTimeRange, FormatDateTimeRangeToParts, BasicFormatMatcher, the
-best-fit matcher, which the draft leaves to the implementation, and
-DateTimeStyleFormat. `h24` needs nothing of its own: it is the draft's own
-step in FormatDateTimePattern, which shows hour 0 as 24. Native code
-supplies only what needs data or calendar arithmetic:
+ICU4X 2.4's date formatters do not fit ECMA-402 either. They take field sets,
+not option bags (ICU4X's field-bag support is unstable in 2.4), and have no
+`h24` hour cycle, no flexible day periods and no ranges; its data has no CLDR
+`availableFormats` or `intervalFormats`. So formatting is JS, written step by
+step from the draft, as NumberFormat's is: FormatDateTimePattern,
+PartitionDateTimePattern, PartitionDateTimeRangePattern, FormatDateTime,
+FormatDateTimeToParts, FormatDateTimeRange, FormatDateTimeRangeToParts,
+BasicFormatMatcher, the best-fit matcher, which the draft leaves to the
+implementation, and DateTimeStyleFormat. `h24` needs nothing of its own: it is
+the draft's own step in FormatDateTimePattern, which shows hour 0 as 24. Native
+code supplies only what needs data or calendar arithmetic:
 
 - the CLDR patterns of a locale and calendar (`dateTimePatterns`) and the
   locale's flexible day periods (`dayPeriods`), as lists of strings, from
@@ -1516,16 +1541,16 @@ for the same arguments.
 - It fills the ICU4X gaps found during research that need data or
   calendar arithmetic: UTC offsets at an instant, from its own reader of
   the bundled tzdb (`tz.rs`); the CLDR date patterns and flexible day
-  periods ICU4X 2.3 lacks (`date_data.rs`); and, for an instant, the
+  periods ICU4X 2.4 lacks (`date_data.rs`); and, for an instant, the
   calendar fields and names DateTimeFormat shows (`datetime.rs`). Phase 5
   adds `list.rs` (the literal text of ICU4X's list formatter),
   `relativetime.rs` (relative time patterns), `displaynames.rs` (single
   display names, with the calendar, field and code-equal names ICU4X
   lacks) and `segmenter.rs` (the boundaries of a string, with workarounds
-  for three ICU4X 2.3 word segmentation bugs); see "Data".
+  for three ICU4X 2.4 word segmentation bugs); see "Data".
 
   The research also listed DateTimeFormat's option-bag matching (until
-  ICU4X's field-bag support, unstable on ICU4X main for 2.4, can be used)
+  ICU4X's field-bag support, unstable in ICU4X 2.4, can be used)
   and the `h24` hour cycle here. Phase 4 does both in JS instead (see
   "Date and time formatting"), as NumberFormat's gaps (scientific and
   engineering notation, ranges, NaN and infinity, the parts) are filled
@@ -1581,15 +1606,15 @@ Two kinds of string cross the boundary, handled differently:
   - Collator uses ICU4X's UTF-16 comparison (`compare_utf16`), which reads
     an unpaired surrogate as U+FFFD. Two different unpaired surrogates
     therefore compare equal, and `compare(x, x)` is 0.
-  - Segmenter uses ICU4X's UTF-16 segmentation (`segment_utf16`) for
-    graphemes and sentences, and all indices are UTF-16 code-unit indices
-    into the original string. Word segmentation runs on UTF-8 instead,
-    because ICU4X 2.3's UTF-16 word path truncates characters above
-    U+FFFF in Chinese and Japanese runs: the input is transcoded with
-    each unpaired surrogate replaced by U+FFFD (both have Word_Break
-    Other, so no boundary moves, and both are one code unit), and the
-    boundaries are mapped back to UTF-16 indices (see "Data",
-    "Segmenter").
+  - Segmenter uses ICU4X's UTF-16 segmentation (`segment_utf16`) for graphemes
+    and sentences, and all indices are UTF-16 code-unit indices into the
+    original string. Word segmentation runs on UTF-8 instead, because ICU4X
+    2.4's UTF-16 word path finds script runs by code unit, so a run of
+    consecutive Chinese or Japanese characters above U+FFFF gets no dictionary
+    boundaries (`"𠀀𠀁𠀂"` is one segment): the input is transcoded with each
+    unpaired surrogate replaced by U+FFFD (both have Word_Break Other, so no
+    boundary moves, and both are one code unit), and the boundaries are mapped
+    back to UTF-16 indices (see "Data", "Segmenter").
   - Case mapping splits the input at unpaired surrogates, maps each
     well-formed run, and passes unpaired surrogates through unchanged. Each
     run is mapped on its own, so a context rule such as the final sigma does
@@ -1842,7 +1867,7 @@ NumberFormat's internal plural-rules objects use it.
   draft says, so they accept a BigInt (`select(1n)` is "one"). The pinned
   test262 still expects ToNumber's `TypeError`, so
   `selectRange/argument-tonumber-throws.js` is an expected failure.
-- **Data gaps.** ICU4X 2.3 has no plural rules for `ff`, `kab` and `bal`.
+- **Data gaps.** ICU4X 2.4 has no plural rules for `ff`, `kab` and `bal`.
   So `ff-Adlm` (12 tags) and `bal-Latn` have only "other", in PluralRules
   and in NumberFormat's plural patterns; ICU4C has one and other. `gv` is
   not in ICU4X's compiled locale set, so it resolves to the default locale,
@@ -1851,7 +1876,7 @@ NumberFormat's internal plural-rules objects use it.
 ## Data
 
 - **Locale data** is compiled into the library. The first version uses
-  ICU4X's published data crates (ICU4X 2.3, CLDR 48.2; the `compiled_data`
+  ICU4X's published data crates (ICU4X 2.4, CLDR 49; the `compiled_data`
   feature, carrying ICU4X's recommended set of about 500 locales). No
   datagen step, no CLDR download during the build. The linker drops data for
   services the code never uses.
@@ -1868,21 +1893,36 @@ NumberFormat's internal plural-rules objects use it.
   Without the closure `zh-TW` would resolve to Simplified Chinese. The cost
   is that some tags are reported available that ICU4X serves through its
   own fallback.
+
+  `locales.txt` follows ICU4X's compiled data. With ICU4X 2.4 `ht` went
+  (neither ICU4X 2.4's data nor CLDR 49's cldr-json has it) and 15
+  locales came: `ady`, `ady-JO`, `ady-TR`, `ckb`, `ckb-IR`, `cop`, `kbd`,
+  `kbd-TR`, `kek`, `ki`, `ksh`, `lld`, `prg`, `quc` and `suz-Sunu` (kept
+  with its script, since `suz`'s likely script is Devanagari and
+  cldr-json has only `suz-Sunu`). A tag that lost its data resolves as
+  any unsupported tag does: no prefix of `ht` is available, so
+  ResolveLocale takes DefaultLocale(), `supportedLocalesOf(["ht"])` is
+  empty, and `["ht", "fr"]` selects `fr`.
 - **`Intl.supportedValuesOf`.** Each list must also be accepted by the
   constructor that uses it, once that constructor exists (test262 checks
   this).
-  - Numbering systems: all 78 rows of ECMA-402 Table 30, which in CLDR 48.2
+  - Numbering systems: all 78 rows of ECMA-402 Table 30, which in CLDR 49
     are exactly CLDR's numeric systems
-    (`intl/core/data/numbering-systems.txt`). ICU4X's compiled data has
-    digits for only 27 of them, so NumberFormat takes the digits of every
+    (`intl/core/data/numbering-systems.txt`). ICU4X 2.4's compiled data has
+    digits for only 23 of them, so NumberFormat takes the digits of every
     one from the table, in JS (see "Number formatting").
   - Calendars: the calendars ICU4X implements, plus the CLDR aliases of
     those (`islamicc`, `ethiopic-amete-alem`), because 6.9.1
     AvailableCalendars must list both an alias and its canonical form or
     neither. `supportedValuesOf` drops the aliases again (8.3.2 step 2.b);
     the constructors that take a calendar must accept and canonicalize them.
-  - Currencies come from CLDR (`currencies.txt`), collations from the
-    tailorings in ICU4X's data, time zones from ICU4X's IANA data, and units
+  - Currencies come from CLDR (`currencies.txt`: the types of key `cu`
+    in `bcp47/currency.xml` that are not deprecated). CLDR 49 deprecates
+    `cnx` and has no display name for it, so leaving deprecated codes out
+    keeps every listed currency accepted by DisplayNames, as test262's
+    `currencies-accepted-by-DisplayNames.js` checks; NumberFormat checks
+    only a code's form, so it still accepts `CNX`. Collations come from
+    the tailorings in ICU4X's data, time zones from ICU4X's IANA data, and units
     from ECMA-402's table, in JS. `intl/core/data/update-cldr-lists.py`
     regenerates the CLDR lists when ICU4X is upgraded.
 - **Collator** (Phase 2). How `Intl.Collator` gets its locale data and
@@ -1903,7 +1943,7 @@ NumberFormat's internal plural-rules objects use it.
   - The constructor uses the plugin's one `[[AvailableLocales]]`
     (`isAvailableLocale`), as `getCollations` does.
   - ICU4X's compiled data has no "search" tailorings (checked in
-    `icu_collator_data` 2.3.0), and the design rules out a datagen step. So
+    `icu_collator_data` 2.4.0), and the design rules out a datagen step. So
     `usage: "search"` uses the sort tailoring, with its own default
     sensitivity, and `intl402/Collator/usage-de.js` keeps failing.
   - The resolved options reach ICU4X explicitly, not through `-u-` keywords
@@ -1938,7 +1978,7 @@ NumberFormat's internal plural-rules objects use it.
 - **NumberFormat and PluralRules** (Phase 3). Native code supplies locale
   data as lists of strings that JS reads by index (see "Number formatting"
   and "Parts"). This is where it comes from, and how JS uses it.
-  - **Sources.** ICU4X 2.3 has no unit display names for 21 of the 45
+  - **Sources.** ICU4X 2.4 has no unit display names for 21 of the 45
     sanctioned units (none for `bit`, `byte` and their multiples,
     `celsius`, `fahrenheit`, `degree`, `percent`, or any `-per-` unit), and
     its long names for the units it has are wrong (`en` long `meter`
@@ -1953,21 +1993,21 @@ NumberFormat's internal plural-rules objects use it.
     |---|---|
     | decimal and group separators, plus and minus signs, grouping sizes | ICU4X `DecimalSymbolsV1` |
     | compact patterns | ICU4X `DecimalCompactShortV1` and `DecimalCompactLongV1` |
-    | currency patterns (standard, accounting and their alphaNextToNumber forms), plural names, name patterns, fraction digits | the provider structs of `icu_experimental` 0.6: `CurrencyEssentialsV1`, `CurrencyExtendedDataV1`, `CurrencyPatternsDataV1`, `CurrencyFractionsV1`. They are read directly; `CurrencyFormatter` is never used, because it ignores the digit options, grouping and the locale's name patterns |
+    | currency patterns (standard, accounting and their alphaNextToNumber forms), plural names, name patterns, fraction digits | the provider structs of `icu_experimental` 0.7: `CurrencyEssentialsV1`, `CurrencyExtendedDataV1`, `CurrencyPatternsDataV1`, `CurrencyFractionsV1`. They are read directly; `CurrencyFormatter` is never used, because it ignores the digit options, grouping and the locale's name patterns |
     | currency symbols and narrow symbols, and per-currency formats (`<currency type="X">`'s `<pattern>`, `<decimal>` and `<group>`) | `intl/core/data/currency-symbols.txt` |
     | plural rules, plural ranges, plural categories | ICU4X `PluralRules` and `PluralRulesWithRanges` |
     | percent sign, exponent symbol, infinity, NaN, approximately sign, percent pattern, range pattern, currency decimal and group separators, and (since Phase 5, for DurationFormat) the time separator | `intl/core/data/number-symbols.txt` |
     | unit patterns | `intl/core/data/units.txt` |
     | the explicit symbols and patterns of numbering systems outside a locale's own | `intl/core/data/explicit-number-systems.txt` |
-    | the short (compact) currency patterns, which ICU4X 2.3 and `icu_experimental` 0.6 do not have (ICU4X's compact currency formatter puts its decimal compact patterns inside the ordinary currency patterns) | `intl/core/data/compact-currency.txt` |
+    | the short (compact) currency patterns, which ICU4X 2.4 and `icu_experimental` 0.7 do not have (ICU4X's compact currency formatter puts its decimal compact patterns inside the ordinary currency patterns) | `intl/core/data/compact-currency.txt` |
     | digits | ECMA-402's table, in JS |
     | the default numbering system | the `defaultNumberingSystem` helper, so that `getNumberingSystems` and NumberFormat agree |
 
-    `update-cldr-lists.py` generates the five files from CLDR 48.2, the
-    release ICU4X 2.3 uses. `number-symbols.txt`, `units.txt` and
+    `update-cldr-lists.py` generates the five files from CLDR 49, the
+    release ICU4X 2.4 uses. `number-symbols.txt`, `units.txt` and
     `currency-symbols.txt` come from the CLDR JSON packages (`cldr-core`,
-    `cldr-numbers-full` and `cldr-units-full`, npm version 48.2.0 for the
-    tag `release-48-2`), whose locale data is already resolved.
+    `cldr-numbers-full` and `cldr-units-full`, npm version 49.0.0 for the
+    tag `release-49`), whose locale data is already resolved.
     `number-symbols.txt` has a line for each locale and numbering system;
     the other two hold only what differs from a locale's parent chain, and
     the generator checks that reading them back along that chain gives
@@ -1979,8 +2019,8 @@ NumberFormat's internal plural-rules objects use it.
     one `0` so that consecutive magnitudes share a line, and the generator
     checks it the same way. `intl/core/data/LICENSE` is the Unicode License
     V3, which covers every CLDR-derived file there. Each file's header
-    comment describes its format. The five files are 0.94 MB, 0.78 MB of it
-    `units.txt` and 39 KB `compact-currency.txt`.
+    comment describes its format. The five files are 0.94 MB, 0.79 MB of it
+    `units.txt` and 40 KB `compact-currency.txt`.
   - **Lookups.** Native data is looked up by the language identifier of
     `[[Locale]]` (the `-u-` keywords are already in the slots) and the
     numbering system, passed explicitly. In the generated files the entry
@@ -2002,7 +2042,7 @@ NumberFormat's internal plural-rules objects use it.
       each currency pattern is the explicit value for `nu` of the nearest
       locale of L's chain, root included, in CLDR's XML, and where the
       chain has none, L's latn value, to which root's aliases point. CLDR
-      48.2's root defines arab and arabext symbols, and arab percent and
+      49's root defines arab and arabext symbols, and arab percent and
       currency patterns, so `en-u-nu-arab` and `de-u-nu-arab` use Arabic
       separators and signs, as ICU4C does (`"؜-١٬٢٣٤٫٥"`, `"٥٠٪؜"`); deva,
       beng and the others alias to the locale's latn data. Many locales
@@ -2012,21 +2052,21 @@ NumberFormat's internal plural-rules objects use it.
     - the short currency patterns of compact notation are a kind of data
       of their own (CLDR's `currencyFormatLength type="short"`), resolved
       pattern by pattern: the explicit pattern for `nu` of the nearest
-      locale of L's chain in CLDR's XML (only `ba` and `kok` have any in
-      CLDR 48.2: `kok`'s 10^14 alphaNextToNumber pattern for every
-      numbering system is `"¤000LCr"`), else L's latn pattern. Root's
+      locale of L's chain in CLDR's XML (only `kok` has any in CLDR 49:
+      its 10^14 alphaNextToNumber pattern for every numbering system is
+      `"¤000LCr"`; `ba`'s, explicit in CLDR 48.2, are inheritance markers
+      in 49), else L's latn pattern. Root's
       arab currency formats have no short ones, so `en-u-nu-arab` takes
       `en`'s latn ones, as ICU4C does; the generator checks that root has
       short currency formats for latn only. The signs and separators are
       the numbering system's.
 
-    ICU4X's own formatter falls back to the locale's default numbering
-    system instead, which is one reason the plugin reads the data itself.
-    A locale's own decimal formats for such a numbering system are not
-    read: in CLDR 48.2 only `az` has them, for arab and arabext, and they
-    are the text `"standart onluq kəsr0.###"`, which ICU4C prints. Nor are
-    scientific and rational formats, or miscellaneous patterns other than
-    the range pattern.
+    ICU4X's own formatter falls back to the locale's default numbering system
+    instead, which is one reason the plugin reads the data itself. A locale's
+    own decimal formats for such a numbering system are not read: CLDR 49 has
+    none (in CLDR 48.2 only `az` had them, for arab and arabext, the text
+    `"standart onluq kəsr0.###"`, which ICU4C prints). Nor are scientific and
+    rational formats, or miscellaneous patterns other than the range pattern.
   - **Currency digits** are CLDR's `digits` for the currency (not its cash
     digits), and 2 for a currency CLDR does not list. The draft asks only
     for "the number of fractional digits used when formatting quantities
@@ -2053,11 +2093,11 @@ NumberFormat's internal plural-rules objects use it.
     explicit arab and arabext symbols have no currency separators, so
     `de-AT-u-nu-arab` uses its plain ones (UTS 35: without
     `currencyGroup`, the group separator), where ICU4C takes the missing
-    symbols from latn's. No locale of CLDR 48.2 has currency separators
+    symbols from latn's. No locale of CLDR 49 has currency separators
     for a numbering system other than its own, which the generator checks.
   - **Per-currency formats.** CLDR's `<currencies><currency type="X">`
     has a pattern and decimal and grouping separators for some currencies
-    (41 patterns, 29 decimal and 27 grouping separators in CLDR 48.2:
+    (41 patterns, 29 decimal and 27 grouping separators in CLDR 49:
     en-150's and its children's EUR `"¤#,##0.00"`, `tr`'s TRY, `it`'s
     ITL; pt-PT's and pt-CV's PTE and CVE decimal `"$"`).
 
@@ -2083,11 +2123,11 @@ NumberFormat's internal plural-rules objects use it.
     ("if not present in the chain up to root") can be read as searching
     the whole chain first; the plugin follows the table, which differs
     only for en-CH, en-GE, en-NL, en-PL, en-PT, en-RO, en-SI, en-SK and
-    it-CH in CLDR 48.2. cldr-json resolves these fields vertically only,
+    it-CH in CLDR 49. cldr-json resolves these fields vertically only,
     so the generator reads them, and the locales' lateral sources, from
     the XML. The table names `symbols` `decimal` and `group`; the
     plugin puts a currency's own separator before `currencyDecimal` and
-    `currencyGroup` too, which no CLDR 48.2 locale has together. A
+    `currencyGroup` too, which no CLDR 49 locale has together. A
     per-currency pattern has no alphaNextToNumber form, so CLDR's
     currency spacing applies to it, and the fraction digits come from the
     currency's supplemental data, as for any currency pattern.
@@ -2145,7 +2185,7 @@ NumberFormat's internal plural-rules objects use it.
       produce it.
     - Currency spacing is CLDR's one rule: U+00A0 goes between the currency
       string and a digit when the currency string's character next to the
-      number is neither a symbol (S) nor a separator (Z). Every CLDR 48.2
+      number is neither a symbol (S) nor a separator (Z). Every CLDR 49
       locale uses it, which the generator checks. Where ICU4X has no
       alphaNextToNumber form of the accounting negative, the plain
       accounting pattern is used with that spacing (`ee` code `-1` is
@@ -2199,41 +2239,48 @@ NumberFormat's internal plural-rules objects use it.
       `"-mille"`.
     - Compact notation with the currency style (the code, symbol and
       narrowSymbol displays) uses CLDR's short currency patterns
-      (`compact-currency.txt`), as UTS 35's "Compact Number Formats" says:
-      their magnitudes and digits give the exponent (`ja` compacts by four
-      digits), the pattern `"0"` means that the magnitude is not compacted
-      (`de` `1234` with `EUR` is `"1234 €"`, `1234567` is `"1,2 Mio. €"`),
-      the alphaNextToNumber pattern is used where the currency string
-      touches the digits with a character that is neither a symbol nor a
-      separator (`en` `CHF` `"CHF 1.2K"`), and CLDR's currency spacing
-      applies after that. The plural category of the displayed number
-      picks the pattern. Each pattern is split in two for the draft's
-      levels of patterns: the currency, its spacing and the text beyond
-      them (bidi marks) make the sign patterns, and the number with its
-      compact text the compact pattern, so `fa` `1000` is `"\u200e$\u00a0۱\u00a0هزار"`
-      with its own space after the currency, which the ordinary arabext
-      pattern lacks. A number below the first compact magnitude, zero, NaN
-      and the infinities use the ordinary currency patterns of `(L, nu)`
-      (`en-u-nu-arab` `999` is `"٩٩٩ $"`, as in ICU4C). Where the plural
-      category of the compacted number picks the pattern `"0"` while the
-      magnitude's other counts are compact (`vec`'s 10^3 "one", for the
-      decimal and the currency patterns, the only such data in CLDR 48.2),
-      the number is not compacted, as UTS 35 says of `"0"`: it is
-      formatted again unscaled with exponent 0, like a number below the
-      first compact magnitude (`vec` `1000` is `"1000"` and
-      `"1000 EUR"`, `1400` is `"1,4 mila EUR"`). ICU4C keeps the scaled
-      number (`"1"`, `"1 EUR"`). Ranges and parts follow the number
-      shown; `Intl.PluralRules` gives `vec` compact `1000` `"other"`, the
-      category of `"1000"`, since its compacted string keeps the unscaled
-      digits (`"1.000"` with c = 3), which is never `"one"`. These
-      patterns are used whatever
-      `compactDisplay` says (`"$1.2K"`, not `"$1.2 thousand"`), as ICU4C
-      does, because CLDR has compact currency patterns only in short form;
-      the draft's GetNotationSubPattern, read literally, takes
-      `[[CompactDisplay]]`. The name display spells the number out with
-      the decimal compact patterns of `compactDisplay`
-      (`"1.2 thousand US dollars"`). `resolvedOptions` still reports
-      `[[CompactDisplay]]`.
+      (`compact-currency.txt`), as UTS 35's "Compact Number Formats" says: their
+      magnitudes and digits give the exponent (`ja` compacts by four digits),
+      the pattern `"0"` means that the magnitude is not compacted (`de` `1234`
+      with `EUR` is `"1234 €"`, `1234567` is `"1,2 Mio. €"`), the
+      alphaNextToNumber pattern is used where the currency string touches the
+      digits with a character that is neither a symbol nor a separator (`en`
+      `CHF` `"CHF 1.2K"`), and CLDR's currency spacing applies after that. The
+      choice between a pattern and its alphaNextToNumber form comes first, and
+      the chosen one then decides whether the magnitude compacts and its
+      exponent; where the pattern is `"0"`, the currency's side comes from the
+      alternate. CLDR 49's `zh` 10^3 "other" is the pattern `"0"` with the
+      alternate `"¤\u00a00K"`, so `zh` `USD` `1234` is `"US$1234"` (`"$"`
+      touches the number, a symbol, so `"0"` is chosen) and with the code
+      display `"USD\u00a01.2K"`; `zh-Hant`'s `"0"` has no alternate. This
+      departs from the literal order of UTS 35's steps, which tests `"0"` (step
+      3) before the alternate (step 4); read that way, `zh`'s alternate could
+      never apply. Node (CLDR 48.0, where both are `"0"`) gives `"US$1234"` and
+      `"USD\u00a01234"`. The plural category of the displayed number picks the
+      pattern. Each pattern is split in two for the draft's levels of patterns:
+      the currency, its spacing and the text beyond them (bidi marks) make the
+      sign patterns, and the number with its compact text the compact pattern,
+      so `fa` `2000` is `"\u200e$\u00a0۲\u00a0هزار"` with its own space after
+      the currency, which the ordinary arabext pattern lacks. A number below the
+      first compact magnitude, zero, NaN and the infinities use the ordinary
+      currency patterns of `(L, nu)` (`en-u-nu-arab` `999` is `"٩٩٩ $"`, as in
+      ICU4C). Where the plural category of the compacted number picks the
+      pattern `"0"` while the magnitude's other counts are compact (`vec`'s 10^3
+      "one", for the decimal and the currency patterns, the only such data in
+      CLDR 49), the number is not compacted, as UTS 35 says of `"0"`: it is
+      formatted again unscaled with exponent 0, like a number below the first
+      compact magnitude (`vec` `1000` is `"1000"` and `"1000 EUR"`, `1400` is
+      `"1,4 mila EUR"`). ICU4C keeps the scaled number (`"1"`, `"1 EUR"`).
+      Ranges and parts follow the number shown; `Intl.PluralRules` gives `vec`
+      compact `1000` `"other"`, the category of `"1000"`, since its compacted
+      string keeps the unscaled digits (`"1.000"` with c = 3), which is never
+      `"one"`. These patterns are used whatever `compactDisplay` says
+      (`"$1.2K"`, not `"$1.2 thousand"`), as ICU4C does, because CLDR has
+      compact currency patterns only in short form; the draft's
+      GetNotationSubPattern, read literally, takes `[[CompactDisplay]]`. The
+      name display spells the number out with the decimal compact patterns of
+      `compactDisplay` (`"1.2 thousand US dollars"`). `resolvedOptions` still
+      reports `[[CompactDisplay]]`.
     - Accounting applies with compact notation (`"($1.2K)"`), as the
       draft's patterns give; ICU4C ignores it there (`"-$1.2K"`). CLDR has
       no short accounting patterns, so the accounting negative pattern is
@@ -2325,48 +2372,71 @@ NumberFormat's internal plural-rules objects use it.
   - **List separator.** Array and TypedArray `toLocaleString` separate
     elements with `","`, as Hermes's own `Array.prototype.toLocaleString`
     does (see "Built-in overrides").
-  - **ICU4C as a reference.** The plugin's results were compared with
-    Node 24 (ICU 78.2) over samples of every style, notation and range.
-    Apart from the differences stated above, the remaining ones come from
-    ICU 78.2 shipping CLDR 48.0 against ICU4X's 48.2 (`en-150`, `en-BE` and
-    other currency patterns, `fr-CH`'s group separator), from locales
-    ICU4C has no data for (`bal-Latn`, `ht`, `za`), and from ICU4X's own
-    data (`ps` long compact patterns).
+  - **ICU4C as a reference.** In Phase 3, with CLDR 48.2, the plugin's
+    results were compared with Node 24 (ICU 78.2) over samples of every
+    style, notation and range. Apart from the differences stated above,
+    the remaining ones came from ICU 78.2 shipping CLDR 48.0 against
+    ICU4X's 48.2 (`en-150`, `en-BE` and other currency patterns, `fr-CH`'s
+    group separator), from locales ICU4C has no data for (`bal-Latn`,
+    `za`, and `ht`, which the plugin has no longer had since CLDR 49), and
+    from ICU4X's own data (`ps` long compact patterns). CLDR 49 adds more
+    data differences from Node 24; the lit tests name each one they pin.
 - **DateTimeFormat** (Phase 4). Native code supplies CLDR's date patterns
   and day periods as lists of strings, and for each instant the calendar
   fields and the names its patterns show (see "Date and time
   formatting"). This is where they come from, and how JS uses them.
-  - **Sources.** ICU4X 2.3 has no CLDR `availableFormats`,
+  - **Sources.** ICU4X 2.4 has no CLDR `availableFormats`,
     `intervalFormats` or flexible day periods, so `update-cldr-lists.py`
-    generates two more files from CLDR 48.2:
-    - `date-patterns.txt` (820 KB): for each locale of `locales.txt` (and
+    generates two more files from CLDR 49:
+    - `date-patterns.txt` (870 KB): for each locale of `locales.txt` (and
       `und`) and each of the 16 supported calendars, the `dateFormats`,
       `timeFormats`, `dateTimeFormats` (standard and `atTime`),
       `availableFormats`, `intervalFormats` with their
       `intervalFormatFallback`, the `Timezone` append item, and for
       `chinese` and `dangi` the numeric leap month pattern (`zh` `"闰{0}"`,
       `en` `"{0}bis"`). It comes from `cldr-dates-full` and the
-      `cldr-cal-*-full` packages (npm version 48.2.0), except `iso8601`,
+      `cldr-cal-*-full` packages (npm version 49.0.0), except `iso8601`,
       which cldr-json lacks: its patterns are root's from the XML, with
-      what each locale of the CLDR chain defines over them (in CLDR 48.2
-      only `zh`, 14 intervals that its children inherit). It has the form
+      what each locale of the CLDR chain defines over them. CLDR 49's root
+      aliases iso8601's `appendItems` to gregorian's, and the alias is
+      followed in each locale, as CLDR resolves an alias inside the
+      locale: a locale's iso8601 `Timezone` append item is its own
+      gregorian one, not root's (`bg`, `cv`, `my` and `sq` differ from
+      root's). So in CLDR 49, 18 locales besides `und` have iso8601 data
+      that differs from their parent's: `zh`'s 14 intervals, which its
+      children inherit, patterns of their own in `ar`, `cv`, `fi`, `kok`,
+      `kok-Latn`, `mk` and `te`, and in the rest only the append item (in
+      CLDR 48.2, only `zh`'s intervals). It has the form
       of `units.txt`, with a line `<calendar> = <other calendar>` where a
       locale's whole data for a calendar equals its data for another.
       Alternates (`-alt-ascii`, `-alt-variant`) and count variants are left
       out, and so is an entry whose skeleton has a field ECMA-402 does not
       have (`Q`, `w`, `W`, `D`, `F`, `g`, `e`, `u`, `Y`, `x`, `X`, `Z`,
-      `V`). Any such letter in a kept pattern fails generation, except two
-      that CLDR 48.2 writes for the letters meant: `Y` (week-based year) is
-      read as `y`, and `e` (local day of the week) as `E`, with the same
-      count (`gl`'s full date format, `te`'s `yyyyMMMM`, `ak`'s and `ko`'s
-      interval patterns).
+      `V`). CLDR 49 adds two kinds of entry that are left out by rule:
+      skeletons with `ddd`, its preview of ordinal days (about 20,000, such
+      as `MMMddd` and `GyMMMEddd`; they are left out because, when kept,
+      their three-letter day field broke DateTimeFormat in `en` and `fr`),
+      and entries whose skeleton has the zone letter `z` or `v` but whose
+      pattern writes the zone with `Z`, `X`, `x` or `V` (`fa`'s `HHmmv`,
+      `"HH:mm (Z)"`). The
+      generator checks each field's letter count against the counts JS
+      accepts. Any letter ECMA-402 does not have in a kept pattern fails
+      generation, except two that CLDR 49 writes for the letters meant:
+      `Y` (week-based year) is read as `y`, and `e` (local day of the
+      week) as `E`, with the same count (`Y` in `gl`'s full date format,
+      `te`'s `yyyyMMMM`, `de`'s `GyMMMMEd` and `ak`'s interval patterns;
+      `e` in `kek`'s interval patterns). The new `intervalFormatRanges`
+      element under `intervalFormats` and `numericSeparators` under
+      `dateTimeFormats` are skipped by name, each only under its own
+      parent, because ECMA-402 does not use them; any other element the
+      generator does not know fails generation.
     - `day-periods.txt` (51 KB): CLDR's `dayPeriodRuleSet` of each
       language, and each locale's format-context names of its periods
       (abbreviated, wide and narrow). A locale's rules are found as ICU
       finds them, by truncating its tag until a rule set has it (`zh-Hant`
       uses `zh`'s, though its CLDR parent is root, and so does its child
       `zh-HK`); its names follow its parent chain. The times are CLDR
-      48.2's: in `en`, `morning1` is 0:00 to 12:00 and `night1` 21:00 to
+      49's: in `en`, `morning1` is 0:00 to 12:00 and `night1` 21:00 to
       24:00.
 
     The generator checks that every locale and calendar reads back to its
@@ -2419,14 +2489,14 @@ NumberFormat's internal plural-rules objects use it.
       year 0 shows as `"1"` and year −1 as `"2"`, as in ICU4C, and its
       `{era}` gives no part.
   - **Names.** Month, weekday, era, cyclic year, AM/PM and time zone names
-    are ICU4X 2.3's, through its public
+    are ICU4X 2.4's, through its public
     `FixedCalendarDateTimeNames<C, CompositeFieldSet>`, one for each CLDR
     symbol the formatter's patterns use (`MMMM`, `ccc`, `zzzz`...),
     loaded with `include_for_pattern` for a one-symbol pattern and
     formatted with `with_pattern_unchecked`; `C` is the ICU4X type of
     the formatter's calendar (`iso8601` uses `Gregorian`'s names). The
     field set is `CompositeFieldSet` because `CompositeDateTimeFieldSet`
-    has no time zone data in 2.3, so it cannot load the names of `z`, `O`
+    has no time zone data in 2.4, so it cannot load the names of `z`, `O`
     or `v`. ICU4X's handling of leap months (Hebrew Adar I, Chinese leap
     months), era codes and cyclic years is therefore the plugin's. Each
     name is formatted for the instant's `ZonedDateTime`, whose
@@ -2444,7 +2514,7 @@ NumberFormat's internal plural-rules objects use it.
       that time; it ignores the variant it is given. So the tzdb's
       [[InDST]] does not choose the name, and where the tzdb's offset
       matches neither of CLDR's (local mean time, or a rule newer than
-      CLDR 48.2), the name is the localized GMT format: `America/New_York`
+      CLDR 49), the name is the localized GMT format: `America/New_York`
       in 1800 is `"GMT-4:56:02"`, as in ICU4C.
     - Time zone names are formatted with Latin digits, and JS writes the
       ASCII digits of the `timeZoneName` part in [[NumberingSystem]]'s
@@ -2457,7 +2527,7 @@ NumberFormat's internal plural-rules objects use it.
     minute or second (`"12 noon"`, `"12:30 in the afternoon"`); "midnight"
     never, as in ICU4C (in `en`, 0:00 is `"12 in the morning"`, which
     test262's `dayPeriod-*-en.js` accept). A period CLDR names in no width
-    (`lij`, `scn`) shows the hour's AM/PM name of the same width, as ICU
+    (`scn`) shows the hour's AM/PM name of the same width, as ICU
     does.
   - **Records.** A CLDR pattern becomes a DateTime Format Record: a pattern
     with the draft's placeholders and a width for each field (`n`
@@ -2651,7 +2721,7 @@ NumberFormat's internal plural-rules objects use it.
   - **Calendars and numbering systems.** `[[LocaleData]].[[L]].[[ca]]` is
     the first calendar of L's CalendarsOfLocale that
     `Intl.supportedValuesOf("calendar")` lists (`th` `buddhist`, `fa`
-    `persian`; CLDR 48.2 puts `gregory` first for `ar-SA`, as Node shows),
+    `persian`; CLDR 49 puts `gregory` first for `ar-SA`, as Node shows),
     then the other supported calendars in that list's order. `"islamic"`
     and `"islamic-rgsa"`, which ICU4X does not implement, are not in it,
     so a request for them resolves to the locale's default calendar,
@@ -2796,23 +2866,25 @@ NumberFormat's internal plural-rules objects use it.
       day, and is in both halves of a range over two days. The one
       exception is the rule above: a 24-hour `dayPeriod` with an hour is
       dropped.
-  - **ICU4C as a reference.** The plugin's results were compared with
-    Node 24 (ICU 78.2, CLDR 48.0) over thousands of option bags, locales,
-    calendars and ranges. Apart from CLDR 48.0 against 48.2 (`ko`'s AM/PM
-    names are `"오전"` and `"오후"` in 48.2, where Node prints `"PM"`), the
-    differences are these, each with its reason:
-    - **U+202F.** CLDR 48.2 puts U+202F before `en`'s AM/PM and in other
-      places (`ru` `"2026 г."`), and the plugin keeps it, as the draft
+  - **ICU4C as a reference.** In Phase 4, with CLDR 48.2, the plugin's
+    results were compared with Node 24 (ICU 78.2, CLDR 48.0) over
+    thousands of option bags, locales, calendars and ranges. Apart from
+    CLDR 48.0 against 48.2 (`ko`'s AM/PM names are `"오전"` and `"오후"` in
+    48.2, where Node prints `"PM"`), the differences are these, each with
+    its reason (CLDR 49 adds data differences, which the lit tests name
+    where they pin them):
+    - **U+202F.** CLDR (48.2 and 49) puts U+202F before `en`'s AM/PM and
+      in other places (`ru` `"2026 г."`), and the plugin keeps it, as the draft
       and CLDR do. V8 replaces it with a space in `format()`, the Date
       methods and a collapsed `formatRange()`, for web compatibility, but
       not in its parts, so V8's parts do not join to its `format()`
       string. test262's `prototype/format/numbering-system.js` expects
       V8's replacement and is an expected failure.
-    - **`iso8601`** uses CLDR root's patterns with Gregorian names, the
-      only `iso8601` data CLDR 48.2 has (`zh`'s intervals aside):
-      `dateStyle: "long"` is `"2026 January 5"`, where ICU4C prints
-      `"2026  5"`, and `ar-EG` joins a full date to a time with root's
-      `"{1} {0}"`, where ICU4C uses `"في"`.
+    - **`iso8601`** uses CLDR root's patterns with Gregorian names, which most
+      locales keep (in CLDR 49, 18 locales have some `iso8601` data of their
+      own; see "Sources"): `en` `dateStyle: "long"` is `"2026 January 5"`, where
+      ICU4C prints `"2026  5"`, and `ar-EG` joins a full date to a time with
+      root's `"{1} {0}"`, where ICU4C uses `"في"`.
     - **`japanese` before Meiji** uses ICU4X's eras, `ce` and `bce`, where
       ICU4C has every historical era: `ja-u-ca-japanese` 1850-01-01 is
       `"西暦1850年1月1日"`, ICU4C `"嘉永3年1月1日"`.
@@ -2821,8 +2893,11 @@ NumberFormat's internal plural-rules objects use it.
       d일"`, lack the second era, and ICU4C shows them as they are
       (`ko-u-ca-japanese` from Heisei to Reiwa is `"헤이세이 31년 4월 30일
       ~ 1년 5월 1일"`). The plugin uses an interval for [[Era]] only if
-      both halves show the era, else FB(P): `"헤이세이 31년 4월 30일 ~
-      레이와 1년 5월 1일"`.
+      both halves show the era, else FB(P). CLDR 49's `GyMMMd` interval
+      for `G` in the `japanese` and `roc` calendars, `"G y년 M월 d일~y년
+      M월 d일"`, still lacks it (its `GyMd` has both eras), so the plugin
+      gives `"헤이세이 31년 4월 30일~레이와 1년 5월 1일"` with those calendars'
+      CLDR 49 fallback `"{0}~{1}"`.
     - **Years before a calendar's epoch** follow the draft's 1 − year
       step: `fa` in June of the year 2 is `"۶۲۰"`, where ICU4C gives
       `"‎−۶۱۹"`.
@@ -2950,7 +3025,7 @@ NumberFormat's internal plural-rules objects use it.
     - **The ends of the time range.** Node 24 prints only `","` for
       `en-u-ca-chinese` `dateStyle: "full"` at 8.64 × 10^15; the plugin
       gives `"Saturday, Seventh Month 30, 275760(geng-shen)"`.
-- **ListFormat** (Phase 5). ICU4X 2.3's `ListFormatter` (`try_new_and`,
+- **ListFormat** (Phase 5). ICU4X 2.4's `ListFormatter` (`try_new_and`,
   `try_new_or` and `try_new_unit` for the types `conjunction`,
   `disjunction` and `unit`, with `ListLength::Wide`, `Short` and `Narrow`
   for the styles `long`, `short` and `narrow`) has data for every locale
@@ -2975,20 +3050,25 @@ NumberFormat's internal plural-rules objects use it.
   - Two differences from ICU4C follow ICU4X's data. In the `conjunction`
     type, Hebrew before a non-Hebrew element is `" ו‑"` with U+2011, where
     ICU4C and UTS 35's example have U+002D; ICU4X's rule exists for that
-    type only, so the `unit` type keeps CLDR's `"ו-"` with U+002D. And
+    type only (CLDR 48.2's `unit` lists kept their `"ו-"` with U+002D;
+    CLDR 49's Hebrew `unit` lists have no `"ו"`, joining with `", "` or a
+    space). And
     Spanish `"11.000"` and `"11,5"` take `u` after an `o`-joined list (UTS
     35's rule), where ICU4C gives `o`.
 - **RelativeTimeFormat** (Phase 5).
-  - **Data.** `icu_experimental` 0.6's 24 markers
-    `{Long,Short,Narrow}{Second,Minute,Hour,Day,Week,Month,Quarter,Year}RelativeV1`
-    (`RelativeTimePatternData`: the relative names, and the past and
-    future patterns), read with `number.rs`'s loader and plural category
-    helpers. They load for every locale of `locales.txt`, and the research
-    found them equal to CLDR 48.2's `dateFields.json` in every value, so no
-    file is generated. `relativeTimePatterns` returns them; a category the
-    locale lacks gets "other"'s pattern. The style `long` gives the draft's
-    fields `"second"` to `"year"`, and `short` and `narrow` its fields
-    `"second-short"` and so on.
+  - **Data.** `icu_experimental` 0.7's 24 markers
+    `DatetimeRelative{Second,Minute,Hour,Day,Week,Month,Quarter,Year}{Long,Short,Narrow}V1`
+    (`RelativeTimePatternData`: the relative names, as a list with the index of
+    offset 0, and the past and future patterns), read with `number.rs`'s loader
+    and plural category helpers. They load for every locale of `locales.txt`,
+    and `relativeTimePatterns` gives the values of CLDR 49's `dateFields.json`
+    for every locale, style and unit (checked for the 2.4 upgrade, as the
+    research had for 0.6 and CLDR 48.2), except the "one" patterns of `ff-Adlm`
+    and `bal-Latn`, whose plural rules ICU4X lacks, and of `yrl`, which has no
+    CLDR plural rules; none of those is ever selected. So no file is generated.
+    `relativeTimePatterns` returns them; a category the locale lacks gets
+    "other"'s pattern. The style `long` gives the draft's fields `"second"` to
+    `"year"`, and `short` and `narrow` its fields `"second-short"` and so on.
   - `[[NumberFormat]]` is `CreateNumberFormat(locale, {__proto__: null,
     numberingSystem: nu})`, and `[[PluralRules]]`
     `CreatePluralRules(locale, undefined)` (see "Resistance to
@@ -3023,21 +3103,21 @@ NumberFormat's internal plural-rules objects use it.
 - **DisplayNames** (Phase 5). `of` makes one native lookup per name, and
   there is no native state; the draft's [[Fields]] is what the lookups
   read.
-  - **Names.** Language, dialect, region, script and variant names come
-    from `icu_experimental` 0.6's data, read as data structs:
-    `LanguageDisplayNamesV1` (a language subtag), `LocaleDisplayNamesV1`
-    (the dialect names, keyed by `language-script` or `language-region`),
-    `RegionDisplayNamesV1`, `ScriptDisplayNamesV1` and
-    `VariantDisplayNamesV1`. Currency names come from
-    `CurrencyDisplaynameV1` (the singular display name, with the ISO code
-    as the marker attribute; Phase 3's currency data has only the plural
-    names). For language, dialect, region and script names, the style
-    `long` reads `names`, and `short` and `narrow` read `short_names`
-    (CLDR's `alt="short"`), then `names`, as V8 does. Variants have no
-    short names, and currency names have one style.
-    `long_names` and `menu_names` are never used, and neither is ICU4X's
-    `LocaleDisplayNamesFormatter`, whose separators are fixed English text
-    and which cannot report a missing part.
+  - **Names.** Language, dialect, region, script and variant names come from
+    `icu_experimental` 0.7's data, read as data structs: `LocaleNamesLanguageV0`
+    (a language subtag), `LocaleNamesLocaleV0` (the dialect names, keyed by
+    `language-script` or `language-region`), `LocaleNamesRegionV0`,
+    `LocaleNamesScriptV0` and `LocaleNamesVariantV0` (0.6 called them
+    `LanguageDisplayNamesV1` and so on; the `V0` marks a data model ICU4X
+    considers unstable). Currency names come from `CurrencyDisplaynameV1` (the
+    singular display name, with the ISO code as the marker attribute; Phase 3's
+    currency data has only the plural names). For language, dialect, region and
+    script names, the style `long` reads `names`, and `short` and `narrow` read
+    `short_names` (CLDR's `alt="short"`), then `names`, as V8 does. Variants
+    have no short names, and currency names have one style. `long_names` and
+    `menu_names` are never used, and neither is ICU4X's
+    `LocaleDisplayNamesFormatter`, whose separators are fixed English text and
+    which cannot report a missing part.
   - **Names equal to their codes.** ICU4X's data leaves out every name
     that equals its code (en's short region `"US"` and `"UN"`, the script
     `"Thai"`). `display-names.txt` lists them as `eq` entries, and a lookup
@@ -3062,7 +3142,7 @@ NumberFormat's internal plural-rules objects use it.
     codes mapped to CLDR's fields: `weekOfYear` is `week`, `dayPeriod`
     `dayperiod`, `timeZoneName` `zone`, and the rest the same word.
   - **The file.** `update-cldr-lists.py` writes `display-names.txt`
-    (252 KB) from `cldr-localenames-full` and `cldr-dates-full`, in
+    (262 KB) from `cldr-localenames-full` and `cldr-dates-full`, in
     `day-periods.txt`'s layout: `locale <tag> <parent>` lines, with the
     parents of `units.txt`, each followed by `<key>\t<value>` lines for
     what differs from the parent chain. The keys are `ca.<calendar>` (BCP
@@ -3106,34 +3186,34 @@ NumberFormat's internal plural-rules objects use it.
     gives `undefined`). `"und"` has CLDR's name, `"Unknown language"` (V8
     gives `undefined`).
   - Some locales whose CLDR parent is root have no name for common codes:
-    CLDR 48.2 has none for the region `US` in 22 locales of `locales.txt`,
-    the script `Latn` in 4, the calendar `gregory` in 25 and the currency
-    `USD` in 28, and Node lacks the same names in the same locales. A Rust
+    CLDR 49 has none for the region `US` in 30 locales of `locales.txt`,
+    the script `Latn` in 10, the calendar `gregory` in 35 and the currency
+    `USD` in 38 (22, 4, 25 and 28 in CLDR 48.2; most of the growth is the
+    locales added with ICU4X 2.4), and Node (CLDR 48.0) lacks the same
+    names in the same locales where it has the locale. A Rust
     test pins these lists; every other locale but `und` has a name for
     `en`, `US`, `Latn`, `gregory`, `USD` and `year`.
 - **DurationFormat** (Phase 5). The draft step by step, with these
   decisions:
-  - `[[DigitalFormat]]` is per numbering system, and the draft's
-    constructor never picks the entry of the resolved one; the plugin
-    reads the entry of `[[NumberingSystem]]`. Its
-    `[[HourMinuteSeparator]]` and `[[MinuteSecondSeparator]]` are both
-    CLDR's `timeSeparator` for the language identifier of `[[Locale]]` and
-    `[[NumberingSystem]]`, entry 21 of `numberSymbols`, as V8 shows (`da`
-    `"1.02.03"`). `update-cldr-lists.py` adds it as the last column of
-    `number-symbols.txt` (from `symbols-numberSystem-<nu>.timeSeparator`
-    of `cldr-numbers-full`) and to the explicit symbols of
-    `explicit-number-systems.txt`, and it resolves along the chain as the
-    other symbols do (see "Numbering systems" under NumberFormat). In
-    CLDR 48.2 a locale's own numbering systems have `":"`, except latn
-    `"."` in da, da-GL, en-DK, en-FI, fi, id, ms-ID, si, su and sv-FI,
-    and arabext `"٫"` in ug, ur and ur-IN. Another numbering system takes
-    the explicit value of the nearest locale of the CLDR chain, root
-    included: root's arabext `"٫"` (`en-u-nu-arabext` gives
-    `"۱٫۰۲٫۰۳"`), `"."` for arab and arabext in `no` and its children
-    (`no-u-nu-arab` `"١.٠٢.٠٣"`), and `"："` (U+FF1A) for fullwide in
-    `sv` and its children (`sv-u-nu-fullwide` `"１：０２：０３"`); every other
-    explicit value is `":"`. Where the chain has none, it is the locale's
-    latn separator (`da-u-nu-deva` `"१.०२.०३"`).
+  - `[[DigitalFormat]]` is per numbering system, and the draft's constructor
+    never picks the entry of the resolved one; the plugin reads the entry of
+    `[[NumberingSystem]]`. Its `[[HourMinuteSeparator]]` and
+    `[[MinuteSecondSeparator]]` are both CLDR's `timeSeparator` for the language
+    identifier of `[[Locale]]` and `[[NumberingSystem]]`, entry 21 of
+    `numberSymbols`, as V8 shows (`da` `"1.02.03"`). `update-cldr-lists.py` adds
+    it as the last column of `number-symbols.txt` (from
+    `symbols-numberSystem-<nu>.timeSeparator` of `cldr-numbers-full`) and to the
+    explicit symbols of `explicit-number-systems.txt`, and it resolves along the
+    chain as the other symbols do (see "Numbering systems" under NumberFormat).
+    In CLDR 49 a locale's own numbering systems have `":"`, except latn `"."` in
+    da, da-GL, en-DK, en-FI, fi, id, ms-ID, su and sv-FI (CLDR 48.2 also had
+    si), and arabext `"٫"` in ug, ur and ur-IN. Another numbering system takes
+    the explicit value of the nearest locale of the CLDR chain, root included:
+    root's arabext `"٫"` (`en-u-nu-arabext` gives `"۱٫۰۲٫۰۳"`), `"."` for arab
+    and arabext in `no` and its children (`no-u-nu-arab` `"١.٠٢.٠٣"`), and `"："`
+    (U+FF1A) for fullwide in `sv` and its children (`sv-u-nu-fullwide`
+    `"１：０２：０３"`); every other explicit value is `":"`. Where the chain has none,
+    it is the locale's latn separator (`da-u-nu-deva` `"१.०२.०३"`).
   - `[[TwoDigitHours]]` is false for every locale. The step of
     GetDurationUnitOptions that turns hours into `"2-digit"` when it is
     true applies whatever the style, so a true value would pad the hours
@@ -3151,44 +3231,45 @@ NumberFormat's internal plural-rules objects use it.
     with null-prototype option records, and the list through
     `CreateListFormat` and `CreatePartsFromList` (see "Resistance to
     tampering"). The list is of type `unit`, so a Hebrew list of units
-    keeps CLDR's `"ו-"` (see "ListFormat").
+    takes CLDR's `unit` pattern (`", "` in CLDR 49, `"ו-"` in 48.2), not
+    the standard list's `"ו"` (see "ListFormat").
 - **Segmenter** (Phase 5).
   - **Segmenters.** `GraphemeClusterSegmenter::new()`, and
     `SentenceSegmenter::try_new` and `WordSegmenter::try_new_dictionary`
     with the language identifier of `[[Locale]]` as content locale (ICU4X
-    2.3 tailors only `el` sentences; passing the locale follows any later
+    2.4 tailors only `el` sentences; passing the locale follows any later
     data). The word segmenter is the dictionary one: CLDR's dictionary for
     Chinese and Japanese and ICU4X's dictionaries for Thai, Lao, Khmer and
     Burmese, as ICU4C uses. ICU4X's default word segmenter
-    (`try_new_auto`, with LSTM models for the Southeast Asian scripts) is
+    (`try_new_auto`, with LSTM models for the Southeast Asian scripts) was
     1.46 MB smaller but about 120 times slower on Thai (2.34 s against
-    19 ms for 414,000 code units of ordinary Thai text) and differs from
-    ICU4C for Lao and Burmese; correctness and speed come before size
-    (Guiding rule 2). The five dictionaries are 3,780,186 bytes of the
-    library's read-only data (2,007,110 for Chinese and Japanese,
-    1,773,076 for the other four). They were found by size: the library's
-    five largest constants match the sizes ICU4X's baked data states for
-    the dictionaries (2,007,134 and 1,773,172 bytes) within 24 bytes each.
-    The rest of the segmenters' share was not separated; in a probe binary
-    the three segmenters with their rules added 3.9 MB.
-  - **Known limitation: long unbroken runs.** ICU4X 2.3's word segmenter
-    takes time quadratic in the number of words of an unbroken run of
-    Chinese, Japanese or Thai text. It segments the run with the
-    dictionary once (`word.rs:961` for UTF-8), then after every break
-    rebuilds its vector of the breaks still pending
-    (`rule_segmenter_v1.rs:59` in `icu_segmenter` 2.3). So a crafted
-    200,000-code-unit run takes tens of seconds. Measured in the Debug
-    ASan build, through `containing`: `"我爱北京天安门".repeat(30000)` (210,000
-    code units) takes 21.9 s, and `"ก"` followed by 199,999 tone marks
-    U+0E48 (200,000 code units) takes 60 s. ICU4X 2.4 fixes it with a
-    cache that keeps the pending breaks by distance
-    (`rule_segmenter_v1.rs:21`, `:131`, `:158` in `icu_segmenter` 2.4).
-    The plugin gets the fix when it moves to ICU4X 2.4 (CLDR 49): Cargo
-    cannot mix ICU4X 2.3 and 2.4 crates (Cargo keeps one 2.x version of a
-    crate, the 2.3 and 2.4 crates require `icu_collections` and
-    `icu_locale_fallback` at their own minor version, and `icu` 2.3 itself
-    requires `icu_segmenter` 2.3). Grapheme and sentence segmentation, and
-    words in ordinary text, are not affected.
+    19 ms for 414,000 code units of ordinary Thai text) (ICU4X 2.3, not
+    re-measured), and it differs from ICU4C for Lao and Burmese;
+    correctness and speed come before size (Guiding rule 2). With ICU4X
+    2.4 the five dictionaries are 3,042,953 bytes of the library's
+    read-only data: 2,007,110 for Chinese and Japanese, and 1,035,843 for
+    the other four (Khmer 472,213, Burmese 263,849, Lao 168,034, Thai
+    131,747; with ICU4X 2.3 these four were 1,773,076). They are the
+    library's five largest constants, and each is the size of a
+    dictionary's byte array in ICU4X's baked data. The rest of the
+    segmenters' share was not separated; in a probe binary the three
+    segmenters with their rules added 3.9 MB (ICU4X 2.3, not re-measured).
+  - **Long unbroken runs.** ICU4X 2.4's word segmenter keeps the breaks
+    still pending in a cache by distance (`rule_segmenter_v1.rs:21`,
+    `:131`, `:158` in `icu_segmenter` 2.4), so an unbroken run of Chinese,
+    Japanese or Thai text takes linear time. ICU4X 2.3 rebuilt its vector
+    of pending breaks after every break (`rule_segmenter_v1.rs:59` in
+    `icu_segmenter` 2.3), which took time quadratic in the number of words
+    of the run; in the Debug ASan build, through `containing`,
+    `"我爱北京天安门".repeat(30000)` (210,000 code units) took 21.9 s and
+    `"ก"` followed by 199,999 tone marks U+0E48 (200,000 code units) took
+    60 s. With 2.4 each takes about 40 ms there. `segmenter.rs`'s
+    `long_han_run` and `long_thai_run` and `segmenter-text.js` pin both
+    runs. The lit test also checks that iterating the Segments object is
+    linear: the time per segment over the whole Han run, against that over
+    an eighth of it, stays under twice (about 1.0 normally, 3.7 and 4.2
+    under two quadratic iterators); an absolute bound could not tell the
+    two apart under a parallel test load.
   - **Boundaries.** ICU4X's iterators only go forward and borrow their
     input, and the rules need unbounded left context, so native code
     computes every boundary of a Segments object's string once (see
@@ -3196,29 +3277,36 @@ NumberFormat's internal plural-rules objects use it.
     length, and for word granularity whether each segment is word-like:
     4 bytes per segment, and one more per word segment, while the Segments
     object lives. FindBoundary is a binary search.
-  - **ICU4X 2.3 word bugs** are worked around in native code, all found
-    against Node. Each goes when an ICU4X upgrade fixes it (2.4 rewrote
-    the UTF-16 path):
-    - the UTF-16 word path truncates characters above U+FFFF in Chinese
-      and Japanese runs (`word.rs:988`, `:991`), so word segmentation
-      runs on UTF-8 (see "Strings"): `"日本語𠀀テスト"` is `日本語|𠀀|テスト`,
-      as in Node;
-    - **boundaries before ignored characters.** ICU4X puts word
-      boundaries before characters that UAX #29's rule WB4 ignores
-      (Word_Break Extend, Format or ZWJ): its Thai dictionary splits the
-      tone mark U+0E48 of `"ช่"` from its base, and a soft hyphen after
-      Thai (`"ก\u00AD"`) becomes a segment of its own. Native code repairs
-      them: after ICU4X's word segmentation, a boundary at index i (0 < i
-      < length) is dropped when the code point after it has Word_Break
-      Extend, Format or ZWJ and the code point before it is not CR, LF or
-      Word_Break Newline (WB3a keeps that one), and the segments on either
-      side become one, word-like if either was. This repairs only
-      boundaries before ignored characters; it is not the whole of WB4,
-      and it uses no grapheme or Line_Break data. U+0E33, which is
-      Grapheme_Cluster_Break SpacingMark but Word_Break Other, keeps its
-      boundary (`" ำ"` is two segments, as in Node), and so does a
-      character after a Grapheme_Cluster_Break Prepend character (U+0600,
-      a space and `x` are three segments);
+  - **ICU4X 2.4 word bugs** are worked around in native code, all found
+    against Node. Each goes when an ICU4X upgrade fixes it:
+    - the UTF-16 word path finds script runs by code unit
+      (`ComplexScriptIteratorUtf16`, `rule_segmenter_v1/script_iter.rs:104`
+      to `:124` in `icu_segmenter` 2.4). A surrogate is in no dictionary
+      script, so `Utf16::segment_complex_run` (`rule_segmenter_v1.rs:90`
+      to `:110`) gives a run of consecutive Chinese or Japanese characters
+      above U+FFFF no dictionary breaks: on that path `"𠀀𠀁𠀂 𪚥𪚥"` is
+      `𠀀𠀁𠀂| |𪚥𪚥`, where the UTF-8 path and Node give `𠀀|𠀁|𠀂| |𪚥|𪚥`. One
+      such character between BMP characters (`"日本語𠀀テスト"`,
+      `"我爱𠀀北京"`) segments the same on both paths. The UTF-8 iterators
+      decode characters first, so word segmentation runs on UTF-8 (see
+      "Strings"). ICU4X 2.4 fixed 2.3's different UTF-16 bug, which
+      truncated characters above U+FFFF (`word.rs:988`, `:991` in 2.3),
+      but this bug keeps the UTF-8 copy;
+    - **boundaries before ignored characters.** ICU4X puts word boundaries
+      before characters that UAX #29's rule WB4 ignores (Word_Break Extend,
+      Format or ZWJ): a soft hyphen after Thai (`"ก\u00AD"`) becomes a segment
+      of its own. (ICU4X 2.3's Thai dictionary also split the tone mark U+0E48
+      of `"ช่"` from its base; 2.4's does not.) Native code repairs them: after
+      ICU4X's word segmentation, a boundary at index i (0 < i < length) is
+      dropped when the code point after it has Word_Break Extend, Format or ZWJ
+      and the code point before it is not CR, LF or Word_Break Newline (WB3a
+      keeps that one), and the segments on either side become one, word-like if
+      either was. This repairs only boundaries before ignored characters; it is
+      not the whole of WB4, and it uses no grapheme or Line_Break data. U+0E33,
+      which is Grapheme_Cluster_Break SpacingMark but Word_Break Other, keeps
+      its boundary (`" ำ"` is two segments, as in Node), and so does a character
+      after a Grapheme_Cluster_Break Prepend character (U+0600, a space and `x`
+      are three segments);
     - **the word-type re-check.** A segment that ICU4X reports not
       word-like and that ends in a code point with Word_Break Extend,
       Format, ZWJ or Single_Quote is segmented again without all of its
@@ -3252,7 +3340,10 @@ NumberFormat's internal plural-rules objects use it.
     letters and U+00B7 follows UAX #29 (`"MB가"` is one word, where ICU4C
     splits it), `"_"` alone is word-like, and a period between a Latin
     letter and Thai splits (`"a.ำ"` is `a|.|ำ`, where ICU4C treats Thai
-    letters as ALetter and keeps one word).
+    letters as ALetter and keeps one word), and `"่ำ"` (a text that
+    starts with the tone mark U+0E48) is one word-like segment, where Node
+    splits it after the mark: ICU4X 2.4's Thai dictionary, on Unicode 18's
+    data, keeps it whole, and the plugin follows it.
 - **Locale information** (Phase 1, the `Intl.Locale` information methods and
   Add / Remove Likely Subtags) comes from these sources:
 
@@ -3261,7 +3352,7 @@ NumberFormat's internal plural-rules objects use it.
   | Add / Remove Likely Subtags | ICU4X `LocaleExpander::new_extended()`; minimizing favors the region, as UTS 35 does |
   | Calendars | CLDR `calendarPreferenceData`, with CLDR calendar names mapped to BCP 47 types (`gregorian` is `gregory`); a region with no line gets the `001` line; `calendar-preferences.txt` |
   | Hour cycles | CLDR `timeData`, by region or by language and region; `preferred` first, then `allowed`, without repeats; `h`, `hb` and `hB` give `h12`, `H` gives `h23`, `K` gives `h11`, `k` gives `h24`; a region with no line gets the `001` line, a language-region key with no line gets nothing; `hour-cycles.txt` |
-  | Time zones | CLDR `bcp47/timezone.xml`: a zone belongs to its `region` attribute, or else to the first two letters of its id; `utc`, `gmt`, `unk`, `utce*` and `utcw*` belong to no region; `time-zones-by-region.txt` |
+  | Time zones | CLDR `bcp47/timezone.xml`: a zone belongs to its `region` attribute, or else to the first two letters of its id; `utc`, `gmt`, `unk`, `utce*`, `utcw*` and CLDR 49's POSIX-style zones (`cst6cdt`, `est5edt`, `mst7mdt`, `pst8pdt`) belong to no region; any other zone without a region whose id is not five letters fails generation; `time-zones-by-region.txt` |
   | Week information | ICU4X `WeekInformation`, with its fallback to `001` |
   | Text direction | ICU4X `LocaleDirectionality::new_extended()` on the script |
   | Numbering systems | the numbering system of the found locale's decimal symbols data |
@@ -3321,6 +3412,7 @@ NumberFormat's internal plural-rules objects use it.
   | Phase 3 | 9,222,880 bytes | 5,054,136 bytes |
   | Phase 4 | 14,420,328 bytes | 10,170,232 bytes |
   | Phase 5 | 24,250,680 bytes | 19,939,248 bytes |
+  | ICU4X 2.4, CLDR 49 | 23,747,856 bytes | 19,435,440 bytes |
 
   Each build is of the phase's commit in a temporary worktree with its own
   build directory configured with `-DCMAKE_BUILD_TYPE=Release` and Clang
@@ -3351,7 +3443,10 @@ NumberFormat's internal plural-rules objects use it.
   bytecode. The Phase 5 row was measured the same way, together with a
   new build of the Phase 4 commit, which reproduced the Phase 4 row to
   the byte. Apart from the dictionaries, the share of each ICU4X data
-  struct has not been measured yet.
+  struct has not been measured yet. The ICU4X 2.4 row is the Ninja
+  Multi-Config Release build of "Sizes" under Packaging; most of its
+  0.5 MB drop is ICU4X 2.4's smaller Southeast Asian dictionaries (see
+  "Segmenter").
 - **Time zones.** ICU4X provides zone names and IANA identifiers but not the
   offset rules. The plugin bundles the tzdb in the Rust core, so offsets are
   the same on every platform and test262 results are reproducible: the
@@ -3377,7 +3472,7 @@ NumberFormat's internal plural-rules objects use it.
   - the offset is in seconds; the draft's GetNamedTimeZoneOffsetNanoseconds
     is that × 10^9.
 
-  ICU4X's own zone list (CLDR 48.2) decides which identifiers exist
+  ICU4X's own zone list (CLDR 49) decides which identifiers exist
   (`Intl.supportedValuesOf("timeZone")`), and a Rust test checks that each
   of its primary identifiers has tzdb data. jiff-tzdb's data is tzdb's
   main data without its `backzone` file, so before 1970 a zone that the
@@ -3386,6 +3481,15 @@ NumberFormat's internal plural-rules objects use it.
   build with `backzone` has Oslo's own. Node 24 gives the same as the
   plugin. ECMA-402 recommends a build with `backzone` but does not require
   one.
+
+  CLDR 49 made `cst6cdt`, `est5edt`, `mst7mdt` and `pst8pdt` zones of
+  their own in `bcp47/timezone.xml`, no longer deprecated aliases of
+  `uschi`, `usnyc`, `usden` and `uslax`, and gave them no region. The
+  plugin follows CLDR for the `-u-tz` keyword (`en-u-tz-est5edt` stays
+  as it is) and in `time-zones-by-region.txt`, where they belong to no
+  region. Time zone identifiers keep ECMA-402's behavior: `EST5EDT`
+  resolves through the IANA links to `America/New_York`, and
+  `Intl.supportedValuesOf("timeZone")` does not list the four names.
 
 ## Testing
 
@@ -3756,8 +3860,10 @@ components completely: the whole public surface, including `formatToParts`,
      9. **Defaults:** user locale German (Germany) and zone `W. Europe
         Standard Time` give `de-DE` and `Europe/Berlin`; a sort-order
         locale such as `de-DE_phoneb` gives `de-DE`; region Canada with
-        Pacific Time gives `America/Vancouver`, region United States
-        `America/Los_Angeles`; the `qps-ploc` pseudo-locale gives `en-US`
+        Pacific Time gave `America/Vancouver`, region United States
+        `America/Los_Angeles` (with CLDR 49, which gives Canada's Pacific
+        zone a Windows key of its own, the Canada row to check is Eastern
+        Time, `America/Toronto`); the `qps-ploc` pseudo-locale gives `en-US`
         (`IntlPluginUnitTests.exe --gtest_filter=DefaultsTest.*` prints
         what it detects).
      10. **`check-intl`** natively (cargo tests, lit, whose `exports.js`
@@ -3924,6 +4030,61 @@ components completely: the whole public surface, including `formatToParts`,
    and `%TypedArray%` `toLocaleString`, `staging/sm/String`) against
    the CoreFoundation fallbacks in both builds: 181 tests, 160 pass,
    0 failures, 21 skipped by the existing lists.
+8. **ICU4X 2.4 and CLDR 49.** The ICU4X crates moved from 2.3 to 2.4
+   (`icu_experimental` 0.6 to 0.7, `icu_pattern` 0.5.0 to 0.5.1, and the
+   shared crates ICU4X 2.4 pulls in; `rust-version` stays 1.88, which
+   every 2.4 crate declares), and the generated files from CLDR 48.2 to
+   CLDR 49 (`release-49`, npm 49.0.0). The code changes were
+   `icu_experimental` 0.7's renamed relative time and display name
+   markers, with the same output for the same data. The decisions, each
+   recorded where it applies under Data: the locale set follows ICU4X's
+   data (`[[AvailableLocales]]`); the generator handles CLDR 49's new
+   shapes by explicit rules (NumberFormat's compact currency, which also
+   records the selection order, and DateTimeFormat's Sources); the POSIX
+   zones follow CLDR for `-u-tz` and ECMA-402 for identifiers ("Time
+   zones"); deprecated currencies are not listed
+   (`Intl.supportedValuesOf`); and word segmentation keeps its UTF-8 copy,
+   because of a different ICU4X 2.4 bug, and accepts 2.4's Thai `"่ำ"`
+   (Segmenter). Data values that tests pinned were updated to CLDR 49's
+   after checking each against CLDR 49 itself, with the source named in
+   the test; the lit tests' changed values are CLDR 49 data, each named
+   in a comment, where Node 24 still has CLDR 48. The most visible is
+   the hour cycle of AR, CL, PY, UY and ZM, which CLDR 49 makes `h23`
+   (CLDR 48 preferred `h12`): `es-AR` `{hour: "numeric", minute:
+   "numeric"}` formats 14:05 as `"14:05"`, where Node gives `"2:05 p. m."`.
+
+   Verified on the Linux host: `check-intl` (163 lit passes and 2
+   unsupported, 201 Rust tests, 23 runner tests, 66 generator tests;
+   plugin-mode test262 2696 pass, 18 js-fail, 0 problems, with the
+   expectations file unchanged by `--intl-update-expectations`),
+   `check-hermes` (4375 passes, 0 unexpected) and `check-shermes` (69
+   passes, 0 unexpected); `cargo +1.88 build --locked`. On Android
+   (x86_64 emulator, API 36): the smoke test gives Phase 7's results and
+   plugin-mode test262 on the device the host's totals. Windows x64
+   (clang-cl) under Wine with Microsoft's runtime: plugin-mode test262
+   gives the host's totals. Sizes are under Packaging.
+
+   **Apple: verified on a Mac** (Xcode 27.1, arm64 host). The macOS host
+   `check-intl` passes (152 lit passes and 3 unsupported, the Linux-only
+   tests; 201 Rust tests; plugin-mode test262 2696 pass, 18 js-fail,
+   0 problems, the Linux totals). All eight slices and both xcframeworks
+   build, with Phase 7's eight xcframework identifiers. The plugin is
+   2.2% smaller in every slice, and `hermesvm` is byte-identical. The
+   iOS 27.1 simulator smoke test passes with the plugin, from the build
+   tree and from the xcframeworks' app layout, with the Linux results
+   line for line, and without it (`typeof Intl: undefined` and the
+   fallback results). `hermesintl` sizes, in bytes, both from Xcode 27.1:
+
+   | Slice | Phase 7 | ICU4X 2.4, CLDR 49 | Change |
+   |---|---:|---:|---:|
+   | macOS | 39,487,160 | 38,610,120 | -877,040 (-2.2%) |
+   | iOS | 19,559,632 | 19,134,184 | -425,448 (-2.2%) |
+   | iOS simulator | 39,357,480 | 38,501,704 | -855,776 (-2.2%) |
+   | Mac Catalyst | 39,357,336 | 38,503,224 | -854,112 (-2.2%) |
+   | tvOS | 19,559,104 | 19,133,960 | -425,144 (-2.2%) |
+   | tvOS simulator | 19,696,840 | 19,268,264 | -428,576 (-2.2%) |
+   | visionOS | 19,576,384 | 19,149,128 | -427,256 (-2.2%) |
+   | visionOS simulator | 19,711,624 | 19,284,344 | -427,280 (-2.2%) |
 
 ## Risks
 
@@ -3932,13 +4093,19 @@ components completely: the whole public surface, including `formatToParts`,
   be substantial if ICU4X's field-bag support does not stabilize. Phase 4
   did it in JS from CLDR's patterns (see "Date and time formatting"), so
   it no longer waits on ICU4X.
-- **Word segmentation of long unbroken runs is quadratic** in ICU4X 2.3:
-  a crafted 200,000-code-unit run of Chinese or Thai text takes 22 to 60 s
-  in the Debug ASan build. It is fixed by the move to ICU4X 2.4; see
-  "Data" → Segmenter.
 - **Unstable and experimental ICU4X APIs** (`icu_experimental`, unstable
   constructors) can change between releases. `Cargo.lock` pins them; upgrades
-  are deliberate.
+  are deliberate. `icu_experimental` 0.7 renamed the relative time and
+  display name markers and changed the relative time struct; the display
+  name markers are now `V0`, a data model ICU4X calls unstable.
+- **ICU4X word segmentation bugs.** Native code works around ICU4X 2.4's word
+  segmentation bugs (see "Data" → Segmenter), so an ICU4X upgrade must re-run
+  the segmenter tests against Node; each workaround goes when its bug is fixed.
+  The quadratic time on long unbroken runs of ICU4X 2.3 is gone in 2.4, and
+  tests pin it.
+- **CLDR shape changes.** `update-cldr-lists.py` stops on any CLDR element
+  or alias it does not know, so each CLDR release can need generator work
+  before its data can be used, as CLDR 49 did (see "Data").
 - **The binary contract on Apple.** Checked on macOS (arm64) in Phase 0,
   Task 13:
   - `hermesvm.framework` (Release, macosx, arm64, `HERMES_BUILD_INTL=OFF`)

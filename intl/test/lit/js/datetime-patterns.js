@@ -577,7 +577,7 @@ print(
 print(rec(DateTimeStyleFormat(undefined, 'short', B_DATA.styles.h12)));
 // CHECK-NEXT: {"hour":"numeric","minute":"2-digit","pattern":"{hour}:{minute} {dayPeriod}","dayPeriodWidth":"short","hourLetter":"h"}
 // A time style replaced by best fit for the other hour cycle (decision 7)
-// is still a style record and keeps the B: no CLDR 48.2 locale has a
+// is still a style record and keeps the B: no CLDR 49 locale has a
 // 24-hour time style and 12-hour patterns with B, so a fixture makes one.
 var B_STYLE = dateTimeLocaleData(
   (function () {

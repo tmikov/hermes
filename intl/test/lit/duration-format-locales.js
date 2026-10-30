@@ -45,5 +45,6 @@ function digital(locale) {
 }
 print(digital('fa'));
 // CHECK-NEXT: ۱ روز،\u200f ۲:۰۳:۰۴٫۰۰۵
+// my's short unit list is "{0}၊ {1}" in CLDR 49 (CLDR 48's "{0}နှင့် {1}").
 print(digital('id'), '|', digital('bn'), '|', digital('my'));
-// CHECK-NEXT: 1 hr, 2.03.04,005 | ১ দিন, ২:০৩:০৪.০০৫ | ၁ ရက်နှင့် ၂:၀၃:၀၄.၀၀၅
+// CHECK-NEXT: 1 hr, 2.03.04,005 | ১ দিন, ২:০৩:০৪.০০৫ | ၁ ရက်၊ ၂:၀၃:၀၄.၀၀၅

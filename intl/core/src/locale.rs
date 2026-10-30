@@ -784,7 +784,8 @@ mod tests {
     #[test]
     fn canonicalizes_value_aliases() {
         for (tag, want) in [
-            // Deprecated time zones with a preferred value (CLDR 48.2).
+            // Deprecated time zones with a preferred value (CLDR 49
+            // bcp47/timezone.xml).
             ("en-u-tz-aukns", "en-u-tz-auhba"),
             ("en-u-tz-camtr", "en-u-tz-cator"),
             ("en-u-tz-caffs", "en-u-tz-cawnp"),
@@ -793,8 +794,11 @@ mod tests {
             // Well-formed IANA aliases of a zone; uppercase input.
             ("en-u-tz-EIRE", "en-u-tz-iedub"),
             ("en-u-tz-gmt0", "en-u-tz-gmt"),
-            // An alias of a deprecated zone goes on to its preferred value.
-            ("en-u-tz-est5edt", "en-u-tz-usnyc"),
+            // CLDR 49's bcp47/timezone.xml makes est5edt a zone of its own
+            // (no longer a deprecated alias of usnyc), so it stays
+            // (decision 5).
+            ("en-u-tz-est5edt", "en-u-tz-est5edt"),
+            ("en-u-tz-pst8pdt", "en-u-tz-pst8pdt"),
             ("en-u-ms-imperial", "en-u-ms-uksystem"),
             ("en-u-ks-primary", "en-u-ks-level1"),
             ("en-u-ca-ethiopic-amete-alem", "en-u-ca-ethioaa"),
